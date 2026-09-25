@@ -224,6 +224,22 @@ internal class RetryLadder(
     fun reset() { attempt = 0 }
 }
 
+/**
+ * When the app comes back to the foreground, should the page be told to warm?
+ *
+ * The page keeps a SIP registration warm so a tap costs only the INVITE
+ * (~0.2 s). A phone drops that idle socket while the app sleeps, and the page
+ * hears of it only when something wakes it — its own visibilitychange is not
+ * reliably that in a WebView a pixel wide. The app knows it is back, so it
+ * says so: only when the page is ready to hear it, and never during a call,
+ * whose registration a warm would replace. The same rule as the React Native
+ * launcher's AppState listener.
+ */
+internal object Warm {
+    fun onForeground(ready: Boolean, startedCall: Boolean, connected: Boolean, connecting: Boolean): Boolean =
+        ready && !startedCall && !connected && !connecting
+}
+
 /** What an action handler answers. The agent speaks about exactly this, so tell the truth. */
 data class ActionResult(
     val status: Status,

@@ -17,7 +17,7 @@ Integration guide: https://www.graine.ai/docs/in-app/android
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    implementation("ai.graine:inapp-android:0.1.0")
+    implementation("ai.graine:inapp-android:0.1.1")
 }
 ```
 

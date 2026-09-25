@@ -436,10 +436,16 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
 
     private val foregroundWatcher: (Boolean) -> Unit = { fg ->
         graine.main.removeCallbacks(backgroundConfirm)
-        // Confirmed after two seconds: a permission dialog or the app switcher
-        // briefly stops the activity, and ending on that would hang up the
-        // call that asked for the microphone.
-        if (!fg && graine.config.endOnBackground && (connected || connecting)) graine.main.postDelayed(backgroundConfirm, 2_000)
+        if (fg) {
+            // Back, and idle: the warm registration very likely died while the app
+            // slept. Warm now rather than at the tap (see Warm).
+            if (Warm.onForeground(ready, startedCall, connected, connecting)) post(Protocol.out(Protocol.Out.WARM))
+        } else if (graine.config.endOnBackground && (connected || connecting)) {
+            // Confirmed after two seconds: a permission dialog or the app switcher
+            // briefly stops the activity, and ending on that would hang up the
+            // call that asked for the microphone.
+            graine.main.postDelayed(backgroundConfirm, 2_000)
+        }
     }
 
     /** The page calls `window.ReactNativeWebView.postMessage(json)`. Runs on a binder thread. */

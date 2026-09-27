@@ -1368,7 +1368,7 @@ data class ThemeIcons(
 data class ThemeGlass(val blur: Double, val surfaceOpacity: Double)
 
 /** Everything a renderer needs for one scheme, as flat numbers and "#RRGGBB" strings. */
-data class ThemeTokens(
+data class ThemeTokens @JvmOverloads constructor(
     val v: Int,
     val preset: String,
     /** "light" or "dark". */
@@ -1384,6 +1384,13 @@ data class ThemeTokens(
     val glass: ThemeGlass?,
     /** "filled", "outline" or "minimal". */
     val bubbles: String,
+    /**
+     * "none" or "window": with "window" the chat window, the caption card and
+     * every component card open as desktop windows — a title bar with traffic
+     * lights and a monospaced title (contract/DESIGN.md → Window chrome).
+     * "none", a plain surface, when the server says nothing (an older one).
+     */
+    val chrome: String = "none",
 ) {
     val isDark: Boolean get() = scheme == "dark"
 
@@ -1422,6 +1429,7 @@ data class ThemeTokens(
             .put("launcher", icons.launcher?.let { JSONObject().put("id", it.id).put("path", it.path).put("stroke", it.stroke) } ?: JSONObject.NULL))
         .put("glass", glass?.let { JSONObject().put("blur", Design.n(it.blur)).put("surfaceOpacity", Design.n(it.surfaceOpacity)) } ?: JSONObject.NULL)
         .put("bubbles", bubbles)
+        .put("chrome", chrome)
 }
 
 /**
@@ -1446,6 +1454,8 @@ data class DesignConfig @JvmOverloads constructor(
     val launcherIcon: String? = null,
     val launcherShape: String? = null,
     val iconStyle: String? = null,
+    /** "none" or "window" when the brand turned the knob; the tokens' [ThemeTokens.chrome] is what is drawn. */
+    val chrome: String? = null,
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("preset", preset)
@@ -1463,6 +1473,7 @@ data class DesignConfig @JvmOverloads constructor(
         launcherIcon?.let { put("launcherIcon", it) }
         launcherShape?.let { put("launcherShape", it) }
         iconStyle?.let { put("iconStyle", it) }
+        chrome?.let { put("chrome", it) }
     }
 }
 
@@ -1532,6 +1543,8 @@ object Design {
     val BUBBLES = listOf("filled", "outline", "minimal")
     val EASINGS = listOf("standard", "emphasized", "spring", "linear", "none")
     val ICON_STYLES = listOf("outline", "filled", "duotone", "sharp")
+    /** How a surface that holds content is framed: plain, or as a desktop window. */
+    val CHROMES = listOf("none", "window")
 
     private val HEX6 = Regex("^#?([0-9a-fA-F]{6})$")
     private val HEX3 = Regex("^#?([0-9a-fA-F]{3})$")
@@ -1679,6 +1692,7 @@ object Design {
             launcherIcon = s("launcherIcon"),
             launcherShape = s("launcherShape"),
             iconStyle = s("iconStyle"),
+            chrome = s("chrome"),
         )
     }
 
@@ -1781,6 +1795,8 @@ object Design {
                 ThemeGlass(num(g, "blur", 20.0, 0.0, 200.0), num(g, "surfaceOpacity", 0.72, 0.0, 1.0))
             },
             bubbles = word(o, "bubbles", BUBBLES, d.bubbles),
+            // Absent (an older server) or a word this build does not know: a plain surface.
+            chrome = word(o, "chrome", CHROMES, d.chrome),
         )
     }
 
@@ -1811,7 +1827,7 @@ object Design {
         ),
         font = CLASSIC_FONT, shape = CLASSIC_SHAPE, spacing = CLASSIC_SPACING,
         elevation = ThemeElevation(ThemeShadow(2.0, 8.0, 0.0, 0.08, "#000000"), CLASSIC_FLOATING, null),
-        motion = CLASSIC_MOTION, icons = CLASSIC_ICONS, glass = null, bubbles = "filled",
+        motion = CLASSIC_MOTION, icons = CLASSIC_ICONS, glass = null, bubbles = "filled", chrome = "none",
     )
 
     /** Graine Classic in dark, as the server resolves it. */
@@ -1826,6 +1842,6 @@ object Design {
         ),
         font = CLASSIC_FONT, shape = CLASSIC_SHAPE, spacing = CLASSIC_SPACING,
         elevation = ThemeElevation(ThemeShadow(2.0, 8.0, 0.0, 0.16, "#000000"), CLASSIC_FLOATING, null),
-        motion = CLASSIC_MOTION, icons = CLASSIC_ICONS, glass = null, bubbles = "filled",
+        motion = CLASSIC_MOTION, icons = CLASSIC_ICONS, glass = null, bubbles = "filled", chrome = "none",
     )
 }

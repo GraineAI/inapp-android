@@ -48,10 +48,20 @@ public class JavaInteropTest {
         assertEquals("dark", tokens.getScheme());
         assertEquals("#7C3AED", tokens.getColors().getAccent());
         assertTrue(tokens.isDark());
+        assertEquals("a design that says nothing about chrome is a plain surface", "none", tokens.getChrome());
         assertEquals(null, ResolvedDesign.parse("not a design"));
         assertEquals("https://www.graine.ai/api/embed/glyph?id=waveform&c=FFFFFF&s=96&w=2&v=2",
                 Design.glyphUrl("https://www.graine.ai", "waveform", "#FFFFFF", 96.0));
         assertEquals(28.0, Design.launcherCorner("circle", Design.LAUNCHER_SIZE, Design.CLASSIC_LIGHT.getShape().getRadius()), 0.0);
+    }
+
+    @Test public void tokensAJavaAppBuiltBeforeWindowChromeStillBuildAsAPlainSurface() {
+        // The constructor as 0.3.0 had it, without `chrome`: it still compiles, and draws no window.
+        ThemeTokens c = Design.CLASSIC_LIGHT;
+        ThemeTokens t = new ThemeTokens(c.getV(), c.getPreset(), c.getScheme(), c.getColors(), c.getFont(), c.getShape(),
+                c.getSpacing(), c.getElevation(), c.getMotion(), c.getIcons(), c.getGlass(), c.getBubbles());
+        assertEquals("none", t.getChrome());
+        assertEquals(c, t);
     }
 
     @Test public void theCallsPhaseIsReadFromJava() {

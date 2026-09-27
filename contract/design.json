@@ -102,7 +102,8 @@
             }
           },
           "glass": null,
-          "bubbles": "filled"
+          "bubbles": "filled",
+          "chrome": "none"
         },
         "dark": {
           "v": 1,
@@ -197,7 +198,8 @@
             }
           },
           "glass": null,
-          "bubbles": "filled"
+          "bubbles": "filled",
+          "chrome": "none"
         }
       },
       "picks": {
@@ -308,7 +310,8 @@
             }
           },
           "glass": null,
-          "bubbles": "minimal"
+          "bubbles": "minimal",
+          "chrome": "none"
         },
         "dark": {
           "v": 1,
@@ -403,7 +406,8 @@
             }
           },
           "glass": null,
-          "bubbles": "minimal"
+          "bubbles": "minimal",
+          "chrome": "none"
         }
       },
       "picks": {
@@ -514,7 +518,8 @@
             }
           },
           "glass": null,
-          "bubbles": "filled"
+          "bubbles": "filled",
+          "chrome": "none"
         },
         "dark": {
           "v": 1,
@@ -609,7 +614,8 @@
             }
           },
           "glass": null,
-          "bubbles": "filled"
+          "bubbles": "filled",
+          "chrome": "none"
         }
       },
       "picks": {
@@ -733,7 +739,8 @@
             }
           },
           "glass": null,
-          "bubbles": "filled"
+          "bubbles": "filled",
+          "chrome": "none"
         },
         "dark": {
           "v": 1,
@@ -828,7 +835,8 @@
             }
           },
           "glass": null,
-          "bubbles": "filled"
+          "bubbles": "filled",
+          "chrome": "none"
         }
       },
       "picks": {
@@ -939,7 +947,8 @@
             }
           },
           "glass": null,
-          "bubbles": "filled"
+          "bubbles": "filled",
+          "chrome": "none"
         },
         "dark": {
           "v": 1,
@@ -1034,7 +1043,8 @@
             }
           },
           "glass": null,
-          "bubbles": "filled"
+          "bubbles": "filled",
+          "chrome": "none"
         }
       },
       "picks": {
@@ -1164,7 +1174,8 @@
             }
           },
           "glass": null,
-          "bubbles": "filled"
+          "bubbles": "filled",
+          "chrome": "none"
         },
         "dark": {
           "v": 1,
@@ -1259,7 +1270,8 @@
             }
           },
           "glass": null,
-          "bubbles": "filled"
+          "bubbles": "filled",
+          "chrome": "none"
         }
       },
       "picks": {
@@ -1370,7 +1382,8 @@
             }
           },
           "glass": null,
-          "bubbles": "filled"
+          "bubbles": "filled",
+          "chrome": "none"
         },
         "dark": {
           "v": 1,
@@ -1465,7 +1478,8 @@
             }
           },
           "glass": null,
-          "bubbles": "filled"
+          "bubbles": "filled",
+          "chrome": "none"
         }
       },
       "picks": {
@@ -1592,7 +1606,8 @@
             "blur": 20,
             "surfaceOpacity": 0.72
           },
-          "bubbles": "filled"
+          "bubbles": "filled",
+          "chrome": "none"
         },
         "dark": {
           "v": 1,
@@ -1690,7 +1705,8 @@
             "blur": 20,
             "surfaceOpacity": 0.72
           },
-          "bubbles": "filled"
+          "bubbles": "filled",
+          "chrome": "none"
         }
       },
       "picks": {
@@ -1801,7 +1817,8 @@
             }
           },
           "glass": null,
-          "bubbles": "filled"
+          "bubbles": "filled",
+          "chrome": "none"
         },
         "dark": {
           "v": 1,
@@ -1896,7 +1913,8 @@
             }
           },
           "glass": null,
-          "bubbles": "filled"
+          "bubbles": "filled",
+          "chrome": "none"
         }
       },
       "picks": {
@@ -1922,6 +1940,227 @@
           "weight": 700,
           "name": "Graine-Nunito-700",
           "url": "https://www.graine.ai/api/embed/font?f=Nunito&w=700&v=1"
+        }
+      ]
+    },
+    {
+      "config": {
+        "preset": "desktop-buddy"
+      },
+      "design": {
+        "config": {
+          "preset": "desktop-buddy"
+        },
+        "light": {
+          "v": 1,
+          "preset": "desktop-buddy",
+          "scheme": "light",
+          "colors": {
+            "background": "#FBFBFB",
+            "surface": "#FFFFFF",
+            "surfaceRaised": "#F5F5F5",
+            "text": "#0A0A0A",
+            "textMuted": "#626262",
+            "border": "#E7E7E7",
+            "accent": "#0F7FFF",
+            "onAccent": "#FFFFFF",
+            "success": "#1F9D55",
+            "warning": "#FF7800",
+            "danger": "#ED1B26",
+            "userBubble": "#0F7FFF",
+            "userBubbleText": "#FFFFFF",
+            "agentBubble": "#F0F0F0",
+            "agentBubbleText": "#0A0A0A",
+            "scrim": "#000000",
+            "accentSoft": "#E2F0FF"
+          },
+          "font": {
+            "body": "Inter",
+            "heading": "Inter",
+            "scale": {
+              "caption": 12,
+              "body": 15,
+              "title": 18,
+              "display": 28
+            },
+            "weights": {
+              "body": 400,
+              "strong": 600,
+              "title": 600
+            },
+            "letterSpacing": {
+              "body": 0,
+              "title": -0.01
+            },
+            "lineHeight": {
+              "body": 1.5,
+              "title": 1.25
+            }
+          },
+          "shape": {
+            "radius": {
+              "sm": 8,
+              "md": 12,
+              "lg": 16,
+              "xl": 24
+            },
+            "borderWidth": 1,
+            "launcher": "circle"
+          },
+          "spacing": {
+            "unit": 4,
+            "cardPadding": 16,
+            "gap": 10
+          },
+          "elevation": {
+            "card": {
+              "y": 10,
+              "blur": 24,
+              "spread": 0,
+              "opacity": 0.12,
+              "color": "#000000"
+            },
+            "floating": {
+              "y": 14,
+              "blur": 32,
+              "spread": 0,
+              "opacity": 0.16,
+              "color": "#000000"
+            },
+            "hardOffset": null
+          },
+          "motion": {
+            "durationMs": 320,
+            "easing": "spring",
+            "bounce": 0.25
+          },
+          "icons": {
+            "style": "outline",
+            "stroke": 2,
+            "launcher": {
+              "id": "buddy",
+              "path": "M12 3c4.97 0 8 3.03 8 8.5S16.97 21 12 21 4 17.97 4 11.5 7.03 3 12 3z M9.25 10.25v1.75 M14.75 10.25v1.75 M9.5 15.1c1.4 1.15 3.6 1.15 5 0",
+              "stroke": true
+            }
+          },
+          "glass": null,
+          "bubbles": "filled",
+          "chrome": "window"
+        },
+        "dark": {
+          "v": 1,
+          "preset": "desktop-buddy",
+          "scheme": "dark",
+          "colors": {
+            "background": "#0B0B0C",
+            "surface": "#161618",
+            "surfaceRaised": "#1F1F22",
+            "text": "#F5F5F5",
+            "textMuted": "#A1A1A6",
+            "border": "#2C2C30",
+            "accent": "#3D8BFF",
+            "onAccent": "#FFFFFF",
+            "success": "#34C759",
+            "warning": "#FF9F0A",
+            "danger": "#FF453A",
+            "userBubble": "#3D8BFF",
+            "userBubbleText": "#FFFFFF",
+            "agentBubble": "#1F1F22",
+            "agentBubbleText": "#F5F5F5",
+            "scrim": "#000000",
+            "accentSoft": "#1F304B"
+          },
+          "font": {
+            "body": "Inter",
+            "heading": "Inter",
+            "scale": {
+              "caption": 12,
+              "body": 15,
+              "title": 18,
+              "display": 28
+            },
+            "weights": {
+              "body": 400,
+              "strong": 600,
+              "title": 600
+            },
+            "letterSpacing": {
+              "body": 0,
+              "title": -0.01
+            },
+            "lineHeight": {
+              "body": 1.5,
+              "title": 1.25
+            }
+          },
+          "shape": {
+            "radius": {
+              "sm": 8,
+              "md": 12,
+              "lg": 16,
+              "xl": 24
+            },
+            "borderWidth": 1,
+            "launcher": "circle"
+          },
+          "spacing": {
+            "unit": 4,
+            "cardPadding": 16,
+            "gap": 10
+          },
+          "elevation": {
+            "card": {
+              "y": 10,
+              "blur": 24,
+              "spread": 0,
+              "opacity": 0.24,
+              "color": "#000000"
+            },
+            "floating": {
+              "y": 14,
+              "blur": 32,
+              "spread": 0,
+              "opacity": 0.16,
+              "color": "#000000"
+            },
+            "hardOffset": null
+          },
+          "motion": {
+            "durationMs": 320,
+            "easing": "spring",
+            "bounce": 0.25
+          },
+          "icons": {
+            "style": "outline",
+            "stroke": 2,
+            "launcher": {
+              "id": "buddy",
+              "path": "M12 3c4.97 0 8 3.03 8 8.5S16.97 21 12 21 4 17.97 4 11.5 7.03 3 12 3z M9.25 10.25v1.75 M14.75 10.25v1.75 M9.5 15.1c1.4 1.15 3.6 1.15 5 0",
+              "stroke": true
+            }
+          },
+          "glass": null,
+          "bubbles": "filled",
+          "chrome": "window"
+        }
+      },
+      "picks": {
+        "deviceLight": "light",
+        "deviceDark": "dark",
+        "deviceUnknown": "light"
+      },
+      "fontFaces": [
+        {
+          "family": "Inter",
+          "weight": 400,
+          "name": "Graine-Inter-400",
+          "url": "https://www.graine.ai/api/embed/font?f=Inter&w=400&v=1"
+        },
+        {
+          "family": "Inter",
+          "weight": 600,
+          "name": "Graine-Inter-600",
+          "url": "https://www.graine.ai/api/embed/font?f=Inter&w=600&v=1"
         }
       ]
     },
@@ -2029,7 +2268,8 @@
             }
           },
           "glass": null,
-          "bubbles": "filled"
+          "bubbles": "filled",
+          "chrome": "none"
         },
         "dark": {
           "v": 1,
@@ -2127,7 +2367,8 @@
             }
           },
           "glass": null,
-          "bubbles": "filled"
+          "bubbles": "filled",
+          "chrome": "none"
         }
       },
       "picks": {
@@ -2251,7 +2492,8 @@
             }
           },
           "glass": null,
-          "bubbles": "minimal"
+          "bubbles": "minimal",
+          "chrome": "none"
         },
         "dark": {
           "v": 1,
@@ -2346,7 +2588,8 @@
             }
           },
           "glass": null,
-          "bubbles": "minimal"
+          "bubbles": "minimal",
+          "chrome": "none"
         }
       },
       "picks": {
@@ -2476,7 +2719,8 @@
             }
           },
           "glass": null,
-          "bubbles": "filled"
+          "bubbles": "filled",
+          "chrome": "none"
         },
         "dark": {
           "v": 1,
@@ -2571,7 +2815,8 @@
             }
           },
           "glass": null,
-          "bubbles": "filled"
+          "bubbles": "filled",
+          "chrome": "none"
         }
       },
       "picks": {
@@ -2707,7 +2952,8 @@
             }
           },
           "glass": null,
-          "bubbles": "outline"
+          "bubbles": "outline",
+          "chrome": "none"
         },
         "dark": {
           "v": 1,
@@ -2802,7 +3048,8 @@
             }
           },
           "glass": null,
-          "bubbles": "outline"
+          "bubbles": "outline",
+          "chrome": "none"
         }
       },
       "picks": {
@@ -2932,7 +3179,8 @@
             }
           },
           "glass": null,
-          "bubbles": "filled"
+          "bubbles": "filled",
+          "chrome": "none"
         },
         "dark": {
           "v": 1,
@@ -3027,7 +3275,8 @@
             }
           },
           "glass": null,
-          "bubbles": "filled"
+          "bubbles": "filled",
+          "chrome": "none"
         }
       },
       "picks": {
@@ -3157,7 +3406,8 @@
             }
           },
           "glass": null,
-          "bubbles": "filled"
+          "bubbles": "filled",
+          "chrome": "none"
         },
         "dark": {
           "v": 1,
@@ -3252,7 +3502,8 @@
             }
           },
           "glass": null,
-          "bubbles": "filled"
+          "bubbles": "filled",
+          "chrome": "none"
         }
       },
       "picks": {
@@ -3289,7 +3540,8 @@
         "bubbles": "outline",
         "launcherIcon": "logo",
         "launcherShape": "pill",
-        "iconStyle": "filled"
+        "iconStyle": "filled",
+        "chrome": "window"
       },
       "design": {
         "config": {
@@ -3305,7 +3557,8 @@
           "bubbles": "outline",
           "launcherIcon": "logo",
           "launcherShape": "pill",
-          "iconStyle": "filled"
+          "iconStyle": "filled",
+          "chrome": "window"
         },
         "light": {
           "v": 1,
@@ -3390,7 +3643,8 @@
             "blur": 20,
             "surfaceOpacity": 0.72
           },
-          "bubbles": "outline"
+          "bubbles": "outline",
+          "chrome": "window"
         },
         "dark": {
           "v": 1,
@@ -3475,7 +3729,8 @@
             "blur": 20,
             "surfaceOpacity": 0.72
           },
-          "bubbles": "outline"
+          "bubbles": "outline",
+          "chrome": "window"
         }
       },
       "picks": {
@@ -3594,7 +3849,8 @@
             }
           },
           "glass": null,
-          "bubbles": "minimal"
+          "bubbles": "minimal",
+          "chrome": "none"
         },
         "dark": {
           "v": 1,
@@ -3677,7 +3933,8 @@
             }
           },
           "glass": null,
-          "bubbles": "minimal"
+          "bubbles": "minimal",
+          "chrome": "none"
         }
       },
       "picks": {
@@ -3807,7 +4064,8 @@
           }
         },
         "glass": null,
-        "bubbles": "filled"
+        "bubbles": "filled",
+        "chrome": "none"
       },
       "dark": {
         "v": 1,
@@ -3902,7 +4160,8 @@
           }
         },
         "glass": null,
-        "bubbles": "filled"
+        "bubbles": "filled",
+        "chrome": "none"
       }
     }
   },

@@ -17,7 +17,7 @@ Integration guide: https://www.graine.ai/docs/in-app/android
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    implementation("ai.graine:inapp-android:0.3.0")
+    implementation("ai.graine:inapp-android:0.4.0")
 }
 ```
 
@@ -70,7 +70,8 @@ The dashboard decides: the design the brand chose in the Garage (a philosophy
 and a few knobs) reaches the SDK as light and dark tokens, and the bar, its
 caption, the components, the loader and `GraineLauncherView` draw them —
 colours, corners, outlines, shadows or hard offsets, glass, motion, the icon
-style, and the typeface. The voice bar is the Garage's phone preview, element
+style, the typeface, and window chrome (the caption, the components and the
+chat opening as desktop windows). The voice bar is the Garage's phone preview, element
 by element. Nothing to configure, and nothing in the app names a font: the SDK
 fetches the design's faces from Graine itself, keeps them on disk, and draws in
 them once they arrive (the system font until then).

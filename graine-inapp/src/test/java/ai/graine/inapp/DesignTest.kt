@@ -76,6 +76,7 @@ class DesignTest {
         // Not a claim about any one philosophy: proof the file exercised each shape the parser must survive.
         assertTrue(all.map { it.shape.launcher }.toSet().containsAll(listOf("circle", "pill", "squircle")))
         assertTrue(all.map { it.bubbles }.toSet().containsAll(listOf("filled", "outline", "minimal")))
+        assertTrue("plain surfaces and windows", all.map { it.chrome }.toSet().containsAll(listOf("none", "window")))
         assertTrue("glass", all.any { it.glass != null })
         assertTrue("a hard offset", all.any { it.elevation.hardOffset != null })
         assertTrue("no card shadow", all.any { it.elevation.card == null })
@@ -100,10 +101,14 @@ class DesignTest {
         assertNull("the brand's logo, not a glyph", hard.icons.launcher)
         assertEquals("outline", hard.bubbles)
         assertEquals(0, hard.motion.durationMs)
+        assertEquals("every knob turned opens in windows", "window", hard.chrome)
+        assertEquals("window", parse(hardCase).config.chrome)
 
         val soft = parse(softCase).light
         assertEquals("squircle", soft.shape.launcher)
         assertEquals("minimal", soft.bubbles)
+        assertEquals("none", soft.chrome)
+        assertNull("a knob not turned", parse(softCase).config.chrome)
         assertEquals(ThemeMotion(320, "spring", 0.3), soft.motion)
         val glyph = softCase.getJSONObject("light").getJSONObject("icons").getJSONObject("launcher")
         assertEquals(LauncherGlyph(glyph.getString("id"), glyph.getString("path"), glyph.getBoolean("stroke")), soft.icons.launcher)
@@ -198,6 +203,7 @@ class DesignTest {
         light.getJSONObject("elevation").put("hardOffset", "yes")
         light.put("glass", "frosted")
         light.put("bubbles", 3)
+        light.put("chrome", "skeuomorphic")
         light.remove("icons")
         val t = parse(d).light
         val classic = Design.CLASSIC_LIGHT
@@ -213,9 +219,11 @@ class DesignTest {
         assertNull("a hard offset that is not one is the default: none", t.elevation.hardOffset)
         assertNull(t.glass)
         assertEquals("filled", t.bubbles)
+        assertEquals("a chrome this build does not know is a plain surface", "none", t.chrome)
         assertEquals(classic.icons, t.icons)
         // What was fine is untouched.
         assertEquals("#FFE600", parse(d).dark.colors.accent)
+        assertEquals("window", parse(d).dark.chrome)
     }
 
     @Test fun graineClassicsDefaultsAreWhatTheServerResolves() {

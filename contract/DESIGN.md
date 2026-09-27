@@ -62,6 +62,7 @@ iOS points, Android dp, Flutter logical pixels).
 | `icons.launcher` | `{ id, path, stroke }` — a 24×24 SVG path — or `null`: show the brand's logo |
 | `glass` | `{ blur, surfaceOpacity }` or `null`. When set, surfaces are translucent: `surface` at `surfaceOpacity`, background blurred by `blur` where the platform can (iOS has no public blur radius: its thinnest system material) |
 | `bubbles` | `filled`, `outline`, `minimal` — see Chat window |
+| `chrome` | `none` or `window` — see Window chrome. Absent (an older server): `none` |
 
 ## Element by element
 
@@ -144,6 +145,37 @@ agent). Bubbles at most 84% wide, `spacing.gap` apart, corners
 Composer, 58 high on `background`: field 40 high, `surfaceRaised`, outline
 `border`, corners `radius.xl`, placeholder "Message…" in `textMuted`; send button
 40 round, `accent`, icon `send` in `onAccent`.
+
+**Window chrome** — `chrome: "window"`, the playful-desktop look (Desktop
+Buddy's, and a knob on any design). The chat window, the caption card and every
+component card open as desktop windows:
+
+- **Title bar** across the top of the surface: `surfaceRaised`, a bottom outline
+  `borderWidth` in `border`, and the surface's own top corners. 32 high on the
+  chat window and components, 24 on the caption card.
+- **Traffic lights** at the left, 12 in from the edge: three dots, 10 across (8
+  on the caption), 6 apart — `#FF5F57`, `#FEBC2E`, `#28C840`. Always these three:
+  they are the window's controls, not the brand's colours.
+- **Title**, centred in the bar on one line: the platform's monospace at
+  `font.scale.caption`, `textMuted`, lower case. The chat window shows the
+  heading (after a 6-point `success` dot when online), the caption card
+  "captions", a component card its own title.
+- **The chat window's title bar replaces its header**: no launcher mark; the
+  collapse chevron sits at the bar's right end, 12 in. Offline, the bar shows
+  the heading alone (no "Connecting…").
+- **A component card's own title moves into the bar** and is not drawn again
+  in the body; rows inside the card keep theirs. Its body is `surface` (not
+  `surfaceRaised`), so the `surfaceRaised` bar reads as a title bar — the
+  white-window, grey-bar look. A component with no title
+  shows the lights alone. The "coming" loader card and the answered row are
+  unchanged.
+- **Details every SDK draws the same way:** the title is in the regular
+  weight, centred on the whole bar and kept clear of the lights; 6 between the
+  online dot and the heading; the bar is solid `surfaceRaised` even when the
+  design is glass.
+- Everything else is unchanged — surfaces, corners, shadows, the voice bar, the
+  launcher. Where the platform draws an inner highlight, a primary button may
+  carry a glossy top edge (white at 55%, 1 point); optional.
 
 ## Icons
 

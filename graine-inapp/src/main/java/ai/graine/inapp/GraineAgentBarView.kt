@@ -42,7 +42,10 @@ import org.json.JSONObject
  * `danger` on a call and a quiet close otherwise. The SDK's own icons are
  * drawn in the design's icon style, the words in the design's typeface, which
  * the SDK fetches itself. Above the bar, the line being said sits on a card
- * of its own, and it rises in over the design's duration.
+ * of its own, and it rises in over the design's duration. Under a design's
+ * window chrome that card, the chat and the components open as desktop
+ * windows: traffic lights and a monospaced title (contract/DESIGN.md →
+ * Window chrome).
  *
  * It says the network's name out loud — "Weak connection", "No connection",
  * "Reconnecting…" — because a customer whose agent goes quiet on a train
@@ -177,12 +180,23 @@ class GraineAgentBarView @JvmOverloads constructor(
         maxLines = VoiceBar.CAPTION_LINES
         ellipsize = TextUtils.TruncateAt.END
     }
+    /** The caption card's title bar, when the design opens it as a window. */
+    private val captionBar = WindowTitleBar(context).apply {
+        visibility = GONE
+        // "captions" names the card; what TalkBack reads is the line on it.
+        importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+    }
+    private val captionBody = LinearLayout(context).apply {
+        orientation = VERTICAL
+        addView(captionYou, Ui.matchWidth().apply { bottomMargin = Ui.dp(context, 2) })
+        addView(captionText, Ui.matchWidth())
+    }
     private val caption = LinearLayout(context).apply {
         orientation = VERTICAL
         visibility = GONE
         Ui.holdsTouches(this)
-        addView(captionYou, Ui.matchWidth().apply { bottomMargin = Ui.dp(context, 2) })
-        addView(captionText, Ui.matchWidth())
+        addView(captionBar, Ui.matchWidth())
+        addView(captionBody, Ui.matchWidth())
     }
     private val chatSlot = FrameLayout(context).apply { visibility = GONE }
     private val avatar = FrameLayout(context)
@@ -381,9 +395,18 @@ class GraineAgentBarView @JvmOverloads constructor(
         Ui.gap(statusRow, px(VoiceBar.STATUS_GAP))
         meter.configure(l.accent, t.motion)
 
-        // The caption: surface, outline, radius.lg, the card shadow or the hard offset, 12 by 8 inside.
+        // The caption: surface, outline, radius.lg, the card shadow or the hard offset, 12 by 8 inside —
+        // and with window chrome, a 24 dp "captions" title bar across its top, the 12 by 8 under it.
         val ph = px(VoiceBar.CAPTION_PAD_H); val pv = px(VoiceBar.CAPTION_PAD_V)
-        Themed.surface(caption, t, l.surface, Themed.px(context, l.captionRadiusDp).toFloat(), line, l.border, t.elevation.card, ph, pv, ph, pv)
+        val captionCorner = Themed.px(context, l.captionRadiusDp).toFloat()
+        val window = WindowChrome.titleBar(t, WindowChrome.Surface.CAPTION)
+        if (window == null) {
+            Themed.surface(caption, t, l.surface, captionCorner, line, l.border, t.elevation.card, ph, pv, ph, pv)
+            captionBar.visibility = GONE
+            captionBody.setPadding(0, 0, 0, 0)
+        } else {
+            captionBar.frame(caption, captionBody, window, t, l.surface, captionCorner, line, l.border, t.elevation.card, ph, pv, ph, pv)
+        }
         captionYou.setTextColor(l.accent)
         type(captionYou, t.font.weights.strong, VoiceBar.YOU_SP, null)
         captionYou.letterSpacing = VoiceBar.YOU_TRACKING_EM.toFloat()

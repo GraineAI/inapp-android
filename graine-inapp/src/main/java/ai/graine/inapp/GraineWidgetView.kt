@@ -53,8 +53,10 @@ import org.json.JSONObject
  * predates designs, the appearance (accent, radius, light/dark/auto) — and
  * the loader. A component's own style (its preset, radius, accent, a pinned
  * platform) still wins over the design; the design supplies every value the
- * component does not set. The properties below override one thing each.
- * Main thread only.
+ * component does not set. Under a design's window chrome a card opens as a
+ * desktop window: its title in a title bar over a `surface` body
+ * (contract/DESIGN.md → Window chrome). The properties below override one
+ * thing each. Main thread only.
  */
 class GraineWidgetView @JvmOverloads constructor(
     context: Context,
@@ -461,10 +463,35 @@ class GraineWidgetView @JvmOverloads constructor(
         return scrim(panel, s)
     }
 
+    /** The card a component on its way sits in. Never a window: the window is the component's, and it has not arrived. */
     private fun pendingCard(s: Skin): View = FrameLayout(context).apply {
         s.card(this, dp(s.radius).toFloat(), s.cardPad, s.cardPad, s.cardPad, s.cardPad)
         Ui.holdsTouches(this)
         addView(componentLoader(s, null, stacked = false), FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+    }
+
+    /**
+     * A component's card opened as a window (contract/DESIGN.md → Window
+     * chrome): the card's surface — its body `surface`, not `surfaceRaised`,
+     * so the bar reads as a title bar — a 32 dp title bar across its top
+     * holding the component's own title, and — returned — the column under it
+     * that holds the rest, padded as the card itself is without chrome.
+     */
+    private fun windowed(card: LinearLayout, spec: WindowChrome.TitleBar, s: Skin, left: Int, top: Int, right: Int, bottom: Int): LinearLayout {
+        // A title bar exists only for a design's tokens.
+        val tokens = s.tokens ?: return card
+        val o = theme
+        // The white window: the host's own card surface if it set one, else the design's `surface`.
+        val fill = Appearance.argb(o?.surface) ?: Themed.color(WindowChrome.cardFill(tokens))
+        // The bar stays the design's solid surfaceRaised; the host's outline and muted colours reach it as the rest of the card.
+        fun own(hex: String?, design: String) = hex?.takeIf { Appearance.argb(it) != null } ?: design
+        val drawn = if (o == null) spec else spec.copy(outline = own(o.border, spec.outline), titleColor = own(o.muted, spec.titleColor))
+        val bar = WindowTitleBar(context)
+        val body = Ui.vertical(context)
+        card.addView(bar, Ui.matchWidth())
+        card.addView(body, Ui.matchWidth())
+        bar.frame(card, body, drawn, tokens, fill, dp(s.radius).toFloat(), s.line, s.border, tokens.elevation.card, left, top, right, bottom)
+        return body
     }
 
     // ── the three surfaces ─────────────────────────────────────────────────
@@ -535,19 +562,25 @@ class GraineWidgetView @JvmOverloads constructor(
     }
 
     private fun cardSurface(w: GraineWidget, c: WidgetContent, body: View, s: Skin): View {
+        val top = if (s.tokens != null) s.cardPad else dp(12)
         val card = Ui.vertical(context).apply {
-            s.card(this, dp(s.radius).toFloat(), s.cardPad, if (s.tokens != null) s.cardPad else dp(12), s.cardPad, dp(4), legacyElevation = 6)
             // Touches on the card are the card's: a drag started here moves the bar it sits on.
             Ui.holdsTouches(this)
         }
-        if (c.title.isNotEmpty()) card.addView(s.label(c.title, 14.5f, s.text, 800, role = Themed.Role.TITLE).apply { setPadding(0, 0, 0, dp(2)) })
-        if (c.prompt.isNotEmpty()) card.addView(s.label(c.prompt, 12.5f, s.muted, 400).apply {
+        // With window chrome the card opens as a window: its own title moves into the title bar and is not
+        // drawn again below; everything else — the prompt, the rows and their titles, Dismiss — is unchanged.
+        val window = WindowChrome.titleBar(s.tokens, WindowChrome.Surface.COMPONENT, c.title)
+        val column = if (window != null) windowed(card, window, s, s.cardPad, top, s.cardPad, dp(4))
+        else card.also { s.card(it, dp(s.radius).toFloat(), s.cardPad, top, s.cardPad, dp(4), legacyElevation = 6) }
+        val title = WindowChrome.bodyTitle(window, c.title)
+        if (title.isNotEmpty()) column.addView(s.label(title, 14.5f, s.text, 800, role = Themed.Role.TITLE).apply { setPadding(0, 0, 0, dp(2)) })
+        if (c.prompt.isNotEmpty()) column.addView(s.label(c.prompt, 12.5f, s.muted, 400).apply {
             if (s.tokens == null) Ui.lineHeight(this, 17f)
             setPadding(0, 0, 0, dp(8))
         })
-        else card.addView(View(context), LayoutParams(0, dp(6)))
-        card.addView(body, Ui.matchWidth())
-        card.addView(s.label("Dismiss", 12.5f, s.muted, 600).apply {
+        else column.addView(View(context), LayoutParams(0, dp(6)))
+        column.addView(body, Ui.matchWidth())
+        column.addView(s.label("Dismiss", 12.5f, s.muted, 600).apply {
             gravity = Gravity.CENTER_VERTICAL
             minHeight = dp(44)
             contentDescription = "Dismiss"

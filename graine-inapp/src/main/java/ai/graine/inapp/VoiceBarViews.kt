@@ -5,8 +5,11 @@ import android.graphics.Canvas
 import android.graphics.Outline
 import android.graphics.Paint
 import android.graphics.RectF
+import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.LayerDrawable
 import android.os.SystemClock
 import android.text.InputType
 import android.text.TextUtils
@@ -24,8 +27,9 @@ import android.widget.TextView
 
 /*
  * The voice bar's pieces that are more than a TextView: the meter, the round
- * buttons, the brand's mark, and the chat window. Each draws exactly what
- * [VoiceBar] says; none decides anything of its own.
+ * buttons, the brand's mark, a window's title bar, and the chat window. Each
+ * draws exactly what [VoiceBar] or [WindowChrome] says; none decides anything
+ * of its own.
  */
 
 /**
@@ -171,6 +175,124 @@ internal object Mark {
     }
 }
 
+/**
+ * A WINDOW'S TITLE BAR — contract/DESIGN.md → Window chrome, drawn exactly as
+ * [WindowChrome.titleBar] says: across the top of the surface in
+ * `surfaceRaised`, a bottom outline, the surface's own top corners; the three
+ * traffic lights 12 in from the left; the title centred in the whole bar on
+ * one line, in the platform's monospace. What sits at the bar's right end —
+ * the chat window's collapse chevron — is [trailing].
+ *
+ * It sits inside the surface's outline. [frame] draws the surface and moves
+ * the padding it would have had under the bar, so what the surface holds sits
+ * exactly where it sits without chrome.
+ */
+internal class WindowTitleBar(context: Context) : FrameLayout(context) {
+    private val lights = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        // What makes it a window, not controls anyone can press.
+        importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+    }
+    private val dot = View(context).apply { importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
+    private val title = TextView(context).apply {
+        maxLines = 1
+        ellipsize = TextUtils.TruncateAt.END
+        includeFontPadding = false
+    }
+    private val titleRow = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER
+        addView(dot)
+        addView(title, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+    }
+    /** The surface's top corners inside its outline, px. */
+    private var cornerPx = 0f
+
+    init {
+        addView(lights, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.LEFT or Gravity.CENTER_VERTICAL))
+        addView(titleRow, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_VERTICAL))
+        // Clipped to the surface's top corners, fill and outline and all, so the bar never shows past the surface's curve.
+        outlineProvider = object : ViewOutlineProvider() {
+            override fun getOutline(view: View, outline: Outline) {
+                // Taller than the bar by both corners: its top corners are the surface's exactly, however short the bar.
+                outline.setRoundRect(0, 0, view.width, view.height + Math.ceil(2.0 * cornerPx).toInt(), cornerPx)
+            }
+        }
+        clipToOutline = true
+    }
+
+    private fun px(dp: Double) = Themed.px(context, dp)
+
+    /** What sits at the bar's right end, [WindowChrome.INSET] in: the chat window's collapse chevron. */
+    fun trailing(v: View, sidePx: Int) {
+        addView(v, LayoutParams(sidePx, sidePx, Gravity.RIGHT or Gravity.CENTER_VERTICAL).apply { rightMargin = px(WindowChrome.INSET) })
+    }
+
+    /** Draw the bar `spec` describes, its top corners `topCornerPx` (the surface's, inside its outline). Cheap to call again. */
+    fun render(spec: WindowChrome.TitleBar, topCornerPx: Float) {
+        // The fill, and the bottom outline under it: as the surface's own outline is drawn, borderWidth in border.
+        val line = Themed.px(context, spec.outlineWidth)
+        val fill = Themed.color(spec.fill)
+        background = if (line <= 0) ColorDrawable(fill)
+        else LayerDrawable(arrayOf(ColorDrawable(Themed.color(spec.outline)), ColorDrawable(fill))).apply { setLayerInset(1, 0, 0, 0, line) }
+        // What the bar holds is centred between its top and its outline.
+        setPadding(0, 0, 0, line)
+        // Its height; a phone set to very large text grows it rather than cutting the title in half.
+        minimumHeight = px(spec.height)
+
+        // The traffic lights: `light` across, `lightGap` apart, `inset` in from the left.
+        val side = px(spec.light)
+        if (lights.childCount != spec.lights.size) {
+            lights.removeAllViews()
+            repeat(spec.lights.size) { lights.addView(View(context)) }
+        }
+        spec.lights.forEachIndexed { i, hex ->
+            val light = lights.getChildAt(i)
+            light.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Themed.color(hex)) }
+            light.layoutParams = LinearLayout.LayoutParams(side, side)
+        }
+        Ui.gap(lights, px(spec.lightGap))
+        lights.layoutParams = LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.LEFT or Gravity.CENTER_VERTICAL)
+            .apply { leftMargin = px(spec.inset) }
+
+        // The title, kept as far from the right end as the lights reach from the left: centred in the whole bar.
+        val clear = px(spec.titleInset)
+        titleRow.layoutParams = LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_VERTICAL)
+            .apply { leftMargin = clear; rightMargin = clear }
+        val dotSide = px(WindowChrome.ONLINE_DOT)
+        dot.layoutParams = LinearLayout.LayoutParams(dotSide, dotSide).apply { rightMargin = px(WindowChrome.ONLINE_GAP) }
+        dot.visibility = if (spec.onlineDot != null) VISIBLE else GONE
+        spec.onlineDot?.let { c -> dot.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Themed.color(c)) } }
+        title.text = spec.title
+        title.visibility = if (spec.title.isEmpty()) GONE else VISIBLE
+        title.setTextColor(Themed.color(spec.titleColor))
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, spec.titleSp.toFloat())
+        // The platform's monospace, at its regular weight: not the design's family, and never its bold.
+        title.typeface = if (spec.titleFamily == WindowChrome.MONOSPACE) Typeface.MONOSPACE else Typeface.create(spec.titleFamily, Typeface.NORMAL)
+        title.paint.isFakeBoldText = false
+
+        if (cornerPx != topCornerPx) { cornerPx = topCornerPx; invalidateOutline() }
+    }
+
+    /**
+     * Frame `surface` as this window: its fill, outline, corners and depth as
+     * [Themed.surface] draws them; this bar across its top, inside the
+     * outline; and the padding the surface would have had (`left`, `top`,
+     * `right`, `bottom`, px) moved onto `body` under the bar.
+     */
+    fun frame(
+        surface: View, body: View, spec: WindowChrome.TitleBar, t: ThemeTokens, fill: Int, radiusPx: Float,
+        linePx: Int, stroke: Int, shadow: ThemeShadow?, left: Int, top: Int, right: Int, bottom: Int,
+    ) {
+        Themed.surface(surface, t, fill, radiusPx, linePx, stroke, shadow, linePx, linePx, linePx, 0)
+        render(spec, maxOf(0f, radiusPx - linePx))
+        visibility = VISIBLE
+        // Beside the bar and under it, what the surface holds starts where it would without one.
+        body.setPadding(maxOf(0, left - linePx), top, maxOf(0, right - linePx), bottom)
+    }
+}
+
 /** A text conversation the bar can open beside the call. See [GraineAgentBarView.chat]. */
 internal interface ChatSource {
     /** The conversation, oldest first. */
@@ -189,12 +311,20 @@ internal data class ChatLine(val role: Role, val text: String, val live: Boolean
  * the heading in the heading face, "Online" after a `success` dot, and a
  * chevron back to the call; the messages in the design's bubble style; a 58 dp
  * composer with a `surfaceRaised` field and an `accent` send button.
+ *
+ * With window chrome (contract/DESIGN.md → Window chrome) a 32 dp title bar
+ * replaces the header: no launcher mark, the heading centred in monospace
+ * after the `success` dot while online (alone while connecting), the chevron
+ * 12 in from the bar's right end.
  */
 internal class ChatWindowView(context: Context, private val graine: GraineInApp) : LinearLayout(context) {
     var onCollapse: (() -> Unit)? = null
     var onSend: ((String) -> Unit)? = null
 
     private val inner = LinearLayout(context).apply { orientation = VERTICAL }
+    /** The header's place when the design opens the chat as a window. */
+    private val titleBar = WindowTitleBar(context).apply { visibility = GONE }
+    private val barChevron = ImageView(context).apply { contentDescription = "Collapse"; isClickable = true; isFocusable = true }
     private val header = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
     private val mark = FrameLayout(context)
     private val title = TextView(context).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
@@ -224,6 +354,8 @@ internal class ChatWindowView(context: Context, private val graine: GraineInApp)
     init {
         orientation = VERTICAL
         chevron.setOnClickListener { onCollapse?.invoke() }
+        barChevron.setOnClickListener { onCollapse?.invoke() }
+        titleBar.trailing(barChevron, Ui.dp(context, VoiceBar.ICON.toFloat()))
         sendButton.setOnClickListener { submit() }
         field.setOnEditorActionListener { _, action, _ -> if (action == EditorInfo.IME_ACTION_SEND) { submit(); true } else false }
         val statusRow = LinearLayout(context).apply {
@@ -240,6 +372,7 @@ internal class ChatWindowView(context: Context, private val graine: GraineInApp)
         scroll.addView(list, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         composer.addView(field, LayoutParams(0, Ui.dp(context, VoiceBar.FIELD.toFloat()), 1f))
         composer.addView(sendButton)
+        inner.addView(titleBar, Ui.matchWidth())
         inner.addView(header, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(context, VoiceBar.CHAT_HEADER.toFloat())))
         inner.addView(divider, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1))
         inner.addView(scroll, Ui.matchWidth())
@@ -293,32 +426,43 @@ internal class ChatWindowView(context: Context, private val graine: GraineInApp)
         }
         inner.clipToOutline = true
 
-        // Header.
-        header.setBackgroundColor(Themed.surface(t))
-        header.setPadding(px(VoiceBar.CHAT_HEADER_PAD), 0, px(VoiceBar.CHAT_HEADER_PAD), 0)
-        Ui.gap(header, px(VoiceBar.GAP))
-        divider.setBackgroundColor(border)
-        divider.layoutParams = (divider.layoutParams as LayoutParams).apply { height = maxOf(1, bw) }
-        // The launcher's own shape, a pill drawn as a circle.
-        val markShape = if (t.shape.launcher == "pill") "circle" else t.shape.launcher
-        Mark.fill(mark, t, VoiceBar.CHAT_MARK, VoiceBar.CHAT_MARK_GLYPH,
-            if (markShape == "circle") null else Design.launcherCorner(markShape, VoiceBar.CHAT_MARK, r),
-            accent, onAccent, hostImage, logoUrl, heading.trim().firstOrNull()?.uppercase() ?: "A", logoFills = false)
-        val titleSp = minOf(t.font.scale.title, VoiceBar.CHAT_TITLE_MAX_SP)
-        title.text = heading
-        title.setTextColor(text)
-        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, titleSp.toFloat())
-        Themed.face(title, t.font.heading, t.font.weights.title, graine)
-        title.letterSpacing = t.font.letterSpacing.title.toFloat()
-        Ui.lineHeight(title, (titleSp * t.font.lineHeight.title).toFloat())
-        dot.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Themed.color(c.success)) }
-        dot.visibility = if (isOnline) VISIBLE else GONE
-        online.text = if (isOnline) "Online" else "Connecting…"
-        online.setTextColor(muted)
-        online.setTextSize(TypedValue.COMPLEX_UNIT_SP, t.font.scale.caption.toFloat())
-        Themed.face(online, t.font.body, t.font.weights.body, graine)
-        online.letterSpacing = t.font.letterSpacing.body.toFloat()
-        chevron.setImageDrawable(IconDrawable(SdkIcons.CHEVRON, t.icons.style, t.icons.stroke, muted, px(VoiceBar.ICON), flipped = true))
+        // Header — or, with window chrome, the title bar in its place, with the chevron at its right end.
+        val chevronIcon = IconDrawable(SdkIcons.CHEVRON, t.icons.style, t.icons.stroke, muted, px(VoiceBar.ICON), flipped = true)
+        val window = WindowChrome.titleBar(t, WindowChrome.Surface.CHAT, heading, isOnline)
+        titleBar.visibility = if (window != null) VISIBLE else GONE
+        header.visibility = if (window != null) GONE else VISIBLE
+        // The title bar draws its own bottom outline.
+        divider.visibility = header.visibility
+        if (window != null) {
+            titleBar.render(window, innerRadius)
+            barChevron.setImageDrawable(chevronIcon)
+        } else {
+            header.setBackgroundColor(Themed.surface(t))
+            header.setPadding(px(VoiceBar.CHAT_HEADER_PAD), 0, px(VoiceBar.CHAT_HEADER_PAD), 0)
+            Ui.gap(header, px(VoiceBar.GAP))
+            divider.setBackgroundColor(border)
+            divider.layoutParams = (divider.layoutParams as LayoutParams).apply { height = maxOf(1, bw) }
+            // The launcher's own shape, a pill drawn as a circle.
+            val markShape = if (t.shape.launcher == "pill") "circle" else t.shape.launcher
+            Mark.fill(mark, t, VoiceBar.CHAT_MARK, VoiceBar.CHAT_MARK_GLYPH,
+                if (markShape == "circle") null else Design.launcherCorner(markShape, VoiceBar.CHAT_MARK, r),
+                accent, onAccent, hostImage, logoUrl, heading.trim().firstOrNull()?.uppercase() ?: "A", logoFills = false)
+            val titleSp = minOf(t.font.scale.title, VoiceBar.CHAT_TITLE_MAX_SP)
+            title.text = heading
+            title.setTextColor(text)
+            title.setTextSize(TypedValue.COMPLEX_UNIT_SP, titleSp.toFloat())
+            Themed.face(title, t.font.heading, t.font.weights.title, graine)
+            title.letterSpacing = t.font.letterSpacing.title.toFloat()
+            Ui.lineHeight(title, (titleSp * t.font.lineHeight.title).toFloat())
+            dot.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Themed.color(c.success)) }
+            dot.visibility = if (isOnline) VISIBLE else GONE
+            online.text = if (isOnline) "Online" else "Connecting…"
+            online.setTextColor(muted)
+            online.setTextSize(TypedValue.COMPLEX_UNIT_SP, t.font.scale.caption.toFloat())
+            Themed.face(online, t.font.body, t.font.weights.body, graine)
+            online.letterSpacing = t.font.letterSpacing.body.toFloat()
+            chevron.setImageDrawable(chevronIcon)
+        }
 
         // Messages.
         scroll.maxHeightPx = Ui.dp(context, if (typing) VoiceBar.CHAT_LIST_MAX_TYPING else VoiceBar.CHAT_LIST_MAX)

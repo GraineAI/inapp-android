@@ -2,6 +2,10 @@ package ai.graine.inapp
 
 import android.app.Activity
 import android.app.Application
+import android.content.ComponentCallbacks
+import android.content.Context
+import android.content.res.Configuration
+import android.graphics.Typeface
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -46,6 +50,13 @@ data class GraineConfig @JvmOverloads constructor(
      * twenty seconds is already long. See [FrictionConfig].
      */
     val friction: FrictionConfig? = null,
+    /**
+     * The fonts this app bundles, by the family names the dashboard offers —
+     * `mapOf("Inter" to Typeface.createFromAsset(assets, "fonts/Inter.ttf"))`.
+     * A design whose font is mapped here draws in it; any other family draws
+     * in the system font, silently. The SDK ships no fonts and downloads none.
+     */
+    val fonts: Map<String, Typeface> = emptyMap(),
 ) {
     data class Timing @JvmOverloads constructor(
         val stallMs: Long = 15_000,
@@ -66,6 +77,12 @@ data class SessionConfig(
     val declaredActions: Set<String>,
     /** The dashboard's friction rules for this agent, as served. Applied under [GraineConfig.friction]. */
     val friction: JSONObject? = null,
+    /**
+     * The design the brand chose, resolved by the server into light and dark
+     * tokens. Null from a server that predates designs: [appearance] then
+     * draws everything, as it always did.
+     */
+    val design: ResolvedDesign? = null,
 ) {
     /** The dashboard's Call audio setting. */
     val preferredTransport: Transport
@@ -367,6 +384,51 @@ class GraineInApp private constructor(
         }
     }
 
+    // ── the design: how the agent looks ─────────────────────────────────────
+
+    @Volatile private var designPreview: ResolvedDesign? = null
+    private val designWatchers = CopyOnWriteArraySet<() -> Unit>()
+
+    /**
+     * The design being drawn: a preview when one is set, else the session's.
+     * Null when the server sent none — the views then draw from the
+     * appearance, exactly as before designs existed.
+     */
+    val design: ResolvedDesign? get() = designPreview ?: session?.design
+
+    /**
+     * The tokens to draw in `context` right now: the brand's fixed light or
+     * dark, else whichever the phone is in (the context's own, so an activity
+     * that forces night mode gets dark). `scheme` — "light", "dark" or "auto"
+     * — is the host's own choice and wins, as the views' `scheme` does. Null
+     * without a design. For an app drawing its own UI in the brand's design.
+     */
+    @JvmOverloads
+    fun themeTokens(context: Context? = null, scheme: String? = null): ThemeTokens? =
+        design?.pick(Ui.isDeviceDark(context ?: application), scheme)
+
+    /**
+     * Draw this design instead of the session's — a preview, a screenshot, a
+     * test of how a design looks before the brand saves it. Null goes back to
+     * the session's. Every SDK view redraws.
+     */
+    fun previewDesign(design: ResolvedDesign?) {
+        designPreview = design
+        announceDesign()
+    }
+
+    /** A design family's font, if the app mapped one in [GraineConfig.fonts]; null means the system font. */
+    internal fun typeface(family: String?): Typeface? = Design.fontFor(config.fonts, family)
+
+    /** Called on the main thread whenever what the views draw may have changed: a preview, the phone going dark. */
+    internal fun onDesignChange(watch: () -> Unit): () -> Unit {
+        designWatchers.add(watch); return { designWatchers.remove(watch) }
+    }
+
+    private fun announceDesign() {
+        main.post { designWatchers.forEach { runCatching { it() } } }
+    }
+
     // ── the session ─────────────────────────────────────────────────────────
 
     /** Fetch the agent's configuration once; later callers share the answer. */
@@ -445,6 +507,7 @@ class GraineInApp private constructor(
                 pageVersion = data.optString("pageVersion").ifEmpty { null },
                 declaredActions = declared,
                 friction = data.opt("friction") as? JSONObject,
+                design = ResolvedDesign.parse(data.opt("design")),
             )
         } finally {
             conn.disconnect()
@@ -458,7 +521,18 @@ class GraineInApp private constructor(
         private set
     internal val foregroundWatchers = CopyOnWriteArraySet<(Boolean) -> Unit>()
 
+    private var nightMode = application.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+
     private fun watchLifecycle() {
+        // Light and dark are picked again when the phone switches, for views whose activity is not recreated.
+        application.registerComponentCallbacks(object : ComponentCallbacks {
+            override fun onConfigurationChanged(c: Configuration) {
+                val night = c.uiMode and Configuration.UI_MODE_NIGHT_MASK
+                if (night != nightMode) { nightMode = night; announceDesign() }
+            }
+            @Deprecated("Deprecated in Java")
+            override fun onLowMemory() {}
+        })
         application.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
             override fun onActivityStarted(a: Activity) {
                 started++

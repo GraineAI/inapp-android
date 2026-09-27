@@ -48,9 +48,13 @@ import org.json.JSONObject
  * (`component_dismissed`), and [reopen] puts it back without another fetch.
  *
  * Mount it anywhere; [GraineAgentBarView] mounts one above itself so a card
- * moves with the bar. Everything visual comes from the dashboard (accent,
- * radius, light/dark/auto, loader); the properties below override one thing
- * each. Main thread only.
+ * moves with the bar. Everything visual comes from the dashboard: the design
+ * the brand chose (contract/DESIGN.md → Components), or from a server that
+ * predates designs, the appearance (accent, radius, light/dark/auto) — and
+ * the loader. A component's own style (its preset, radius, accent, a pinned
+ * platform) still wins over the design; the design supplies every value the
+ * component does not set. The properties below override one thing each.
+ * Main thread only.
  */
 class GraineWidgetView @JvmOverloads constructor(
     context: Context,
@@ -102,6 +106,9 @@ class GraineWidgetView @JvmOverloads constructor(
 
     private var dialog: Dialog? = null
     private var dialogSurface: String? = null
+    private var unwatch: (() -> Unit)? = null
+    /** The component that last came in over the design's duration — a redraw of it does not come in again. */
+    private var enteredFor: String? = null
     private var bodyScroll: ScrollView? = null
     private var pager: HorizontalScrollView? = null
     private var restore: Triple<String, Int, Int>? = null
@@ -168,10 +175,17 @@ class GraineWidgetView @JvmOverloads constructor(
 
     override fun onSessionReady(session: SessionConfig) = render()
 
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration?) {
+        super.onConfigurationChanged(newConfig)
+        // Light and dark are picked again when the phone switches.
+        render()
+    }
+
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         val g = graine ?: return
         g.addListener(this)
+        unwatch = g.onDesignChange { render() }
         wasLive = g.voice.connected || g.voice.connecting
         // Drawn while nothing was listening — a panel that was closed — and still unanswered.
         flow.seed(g.pendingWidget)
@@ -180,6 +194,8 @@ class GraineWidgetView @JvmOverloads constructor(
 
     override fun onDetachedFromWindow() {
         graine?.removeListener(this)
+        unwatch?.invoke()
+        unwatch = null
         main.removeCallbacks(tick)
         closeDialog()
         super.onDetachedFromWindow()
@@ -215,31 +231,92 @@ class GraineWidgetView @JvmOverloads constructor(
 
     // ── drawing ────────────────────────────────────────────────────────────
 
-    /** Everything a render needs to know about colour and shape, resolved once. */
+    /**
+     * Everything a render needs to know about colour, shape and type, resolved
+     * once. The order for each value: the host's override, then the
+     * component's own style, then the design, then — from a server with no
+     * design — the appearance, which is exactly the look from before designs.
+     */
     private inner class Skin(look: WidgetLook?) {
         private val host = this@GraineWidgetView
         val appearance: JSONObject? = graine?.session?.appearance
         val dash = Appearance.resolve(appearance, Appearance.DEFAULT_ACCENT, "", origin = graine?.config?.baseUrl)
+        /** The design's tokens for this view's light or dark. Null: no design. */
+        val tokens: ThemeTokens? = graine?.themeTokens(context, host.scheme)
         val grammar: PlatformGrammar = Widgets.GRAMMAR.getValue(Widgets.resolvePlatform(look?.platform ?: "auto", "android", Build.MANUFACTURER))
-        /** Host override, then the component's own, then the dashboard's. */
-        val accentHex: String = host.accent ?: look?.accent ?: dash.accent
-        /** dp. Host override, then the component's own, then a pinned platform's, then the dashboard's. */
-        val radius: Int = host.radius ?: look?.radius ?: (if (look != null && look.platform != "auto") grammar.radius else Math.round(dash.radius).toInt())
+        /** A platform chosen on the component is the component's own style: its grammar wins over the design. */
+        private val pinned = look != null && look.platform != "auto"
+        /** Host override, then the component's own, then the design's, then the dashboard's. */
+        val accentHex: String = host.accent ?: look?.accent ?: tokens?.colors?.accent ?: dash.accent
+        /** The accent in force is the design's own, so its onAccent and accentSoft belong to it. */
+        private val designAccent = tokens != null && host.accent == null && look?.accent == null
+        /** dp. Host override, then the component's own, then a pinned platform's, then the design's, then the dashboard's. */
+        val radius: Int = host.radius ?: look?.radius ?: (if (pinned) grammar.radius
+            else tokens?.let { Math.round(it.shape.radius.lg).toInt() } ?: Math.round(dash.radius).toInt())
+        /** Nothing more specific than the design chose the corners. */
+        private val designCorners = tokens != null && host.radius == null && look?.radius == null && !pinned
         private val palette = Appearance.palette(host.scheme?.let { JSONObject().put("theme", it) } ?: appearance, Ui.isDeviceDark(context), accentHex)
         private val overrides = host.theme
-        val dark = palette.mode == "dark"
+        val dark = tokens?.isDark ?: (palette.mode == "dark")
         val accent: Int = Appearance.argb(accentHex) ?: Color.parseColor(Appearance.DEFAULT_ACCENT)
-        val surface: Int = Appearance.argb(overrides?.surface) ?: Appearance.argb(palette.surface)!!
-        val border: Int = Appearance.argb(overrides?.border) ?: Appearance.argb(palette.border)!!
-        val borderHex: String = overrides?.border ?: palette.border
-        val text: Int = Appearance.argb(overrides?.text) ?: Appearance.argb(palette.text)!!
-        val muted: Int = Appearance.argb(overrides?.muted) ?: Appearance.argb(palette.muted)!!
-        val onAccent: Int = Appearance.argb(overrides?.onAccent) ?: Appearance.argb(palette.onAccent)!!
+        /** Sheets, and a screen's header and footer. Translucent under glass. */
+        val surface: Int = Appearance.argb(overrides?.surface) ?: tokens?.let { Themed.surface(it) } ?: Appearance.argb(palette.surface)!!
+        /** Cards: raised off what they sit on. */
+        val raised: Int = Appearance.argb(overrides?.surface) ?: tokens?.let { Themed.color(it.colors.surfaceRaised) } ?: surface
+        /** A full-screen component's page. */
+        val page: Int = Appearance.argb(overrides?.surface) ?: tokens?.let { Themed.color(it.colors.background) } ?: surface
+        val border: Int = Appearance.argb(overrides?.border) ?: tokens?.let { Themed.color(it.colors.border) } ?: Appearance.argb(palette.border)!!
+        val borderHex: String = overrides?.border ?: tokens?.colors?.border ?: palette.border
+        val text: Int = Appearance.argb(overrides?.text) ?: tokens?.let { Themed.color(it.colors.text) } ?: Appearance.argb(palette.text)!!
+        val muted: Int = Appearance.argb(overrides?.muted) ?: tokens?.let { Themed.color(it.colors.textMuted) } ?: Appearance.argb(palette.muted)!!
+        val onAccent: Int = Appearance.argb(overrides?.onAccent) ?: tokens?.takeIf { designAccent }?.let { Themed.color(it.colors.onAccent) }
+            ?: Appearance.argb(palette.onAccent)!!
         val loader: LoaderLook = Loaders.resolve(appearance?.opt("loader"))
-        /** The loader's colour: its own, else the DASHBOARD's accent — as the RN GraineLoader draws it. */
-        val loaderColor: Int = Appearance.argb(loader.color) ?: Appearance.argb(dash.accent) ?: accent
+        /** The loader's colour: its own, else the DESIGN's accent, else the DASHBOARD's — as the RN GraineLoader draws it. */
+        val loaderColor: Int = Appearance.argb(loader.color) ?: Appearance.argb(tokens?.colors?.accent) ?: Appearance.argb(dash.accent) ?: accent
         fun tint(alpha: Double) = Appearance.tint(accentHex, alpha)
         fun borderTint(alpha: Double) = Appearance.tint(borderHex, alpha)
+
+        /** Chips and badges: the design's accentSoft when the accent is the design's, else the accent at `alpha`. */
+        fun soft(alpha: Double): Int = tokens?.takeIf { designAccent }?.let { Themed.color(it.colors.accentSoft) } ?: tint(alpha)
+        /** The width of every outline, px. */
+        val line: Int = tokens?.let { Themed.px(context, it.shape.borderWidth) } ?: dp(1)
+        /** A row, a tile or a skeleton inside a component, px. */
+        val inner: Float = (if (designCorners) Themed.px(context, tokens!!.shape.radius.md) else dp(maxOf(10, radius - 6))).toFloat()
+        /** A picture inside a row, px. */
+        val picture: Float = (if (designCorners) Themed.px(context, tokens!!.shape.radius.sm) else dp(maxOf(8, radius - 8))).toFloat()
+        /** A sheet's top corners, px. */
+        val sheet: Float = (if (designCorners) Themed.px(context, tokens!!.shape.radius.xl) else dp(maxOf(20, radius))).toFloat()
+        /** Primary buttons: the design's medium radius, unless a platform is pinned. `pill` asks for the grammar's pill where it has one. */
+        fun button(pill: Boolean): Float =
+            if (tokens != null && !pinned) Themed.px(context, tokens.shape.radius.md).toFloat()
+            else dp(if (pill && grammar.pillButtons) 999 else grammar.buttonRadius).toFloat()
+        /** Chips: the design's largest radius (a pill at Graine Classic's corners, square at none), unless a platform is pinned. */
+        val chip: Float = (if (tokens != null && !pinned) Themed.px(context, tokens.shape.radius.xl) else dp(999)).toFloat()
+        /** A fact's tag. */
+        val fact: Float = (if (tokens != null && !pinned) Themed.px(context, tokens.shape.radius.sm) else dp(grammar.chipRadius)).toFloat()
+        /** A slot's outline. */
+        val slot: Float = (if (tokens != null && !pinned) Themed.px(context, tokens.shape.radius.md) else dp(11)).toFloat()
+        val titleWeight: Int = if (tokens != null && !pinned) tokens.font.weights.title else grammar.titleWeight
+        /** Behind a sheet: the design's scrim at 40%. */
+        val scrim: Int = tokens?.let { Themed.alpha(Themed.color(it.colors.scrim), 0.4) } ?: 0x73000000
+        /** Inside a card, and between its items, px. */
+        val cardPad: Int = tokens?.let { Themed.px(context, it.spacing.cardPadding) } ?: dp(14)
+        fun gap(compact: Boolean): Int = tokens?.let { Themed.px(context, it.spacing.gap * (if (compact) 0.6 else 1.0)) } ?: dp(if (compact) 6 else 10)
+
+        /** A line of text: the element's own size and weight before designs; the design's role for it, or its scale, with one. */
+        fun label(s: CharSequence, sp: Float, color: Int, weight: Int = 400, lines: Int = 0, role: Themed.Role? = null): TextView =
+            Ui.text(context, s, sp, color, weight, lines).also { tv -> tokens?.let { Themed.type(tv, it, role, graine, sp, weight) } }
+
+        /** A card: raised, outlined, with the design's card shadow or hard offset. */
+        fun card(v: View, radiusPx: Float, l: Int, t: Int, r: Int, b: Int, legacyElevation: Int = 0) {
+            val tk = tokens
+            if (tk == null) {
+                v.background = Ui.rounded(raised, radiusPx, dp(1), border)
+                v.setPadding(l, t, r, b)
+                if (legacyElevation > 0) v.elevation = dp(legacyElevation).toFloat()
+            } else Themed.surface(v, tk, raised, radiusPx, line, border, tk.elevation.card, l, t, r, b)
+        }
     }
 
     private fun dp(v: Int) = Ui.dp(context, v)
@@ -273,9 +350,15 @@ class GraineWidgetView @JvmOverloads constructor(
             when (content.surface(look)) {
                 "screen" -> overlay = "screen" to screenSurface(content, body, s)
                 "sheet" -> overlay = "sheet" to sheetSurface(content, body, s)
-                else -> addView(cardSurface(w, content, body, s), Ui.matchWidth().apply { bottomMargin = dp(8) })
+                else -> {
+                    val card = cardSurface(w, content, body, s)
+                    addView(card, Ui.matchWidth().apply { bottomMargin = dp(8) })
+                    // A new component comes in over the design's duration; the same one redrawn does not.
+                    if (enteredFor != w.id) Themed.enter(card, s.tokens, dp(8).toFloat())
+                }
             }
         }
+        enteredFor = w?.id
         showOverlay(overlay, s)
         visibility = if (childCount > 0) VISIBLE else GONE
         restore?.let { (_, y, x) -> post { bodyScroll?.scrollTo(0, y); pager?.scrollTo(x, 0) } }
@@ -292,26 +375,25 @@ class GraineWidgetView @JvmOverloads constructor(
         if (title.isEmpty() && detail.isEmpty()) return null
         val awaiting = flow.awaitingReply
         val row = Ui.horizontal(context, dp(10)).apply {
-            background = Ui.rounded(s.surface, dp(s.radius).toFloat(), dp(1), s.border)
-            setPadding(dp(12), dp(10), dp(12), dp(10))
+            s.card(this, dp(s.radius).toFloat(), dp(12), dp(10), dp(12), dp(10))
             Ui.holdsTouches(this)
         }
-        val badge = FrameLayout(context).apply { background = Ui.rounded(s.tint(0.18), dp(13).toFloat()) }
+        val badge = FrameLayout(context).apply { background = Ui.rounded(s.soft(0.18), dp(13).toFloat()) }
         if (awaiting) {
             badge.addView(GraineLoaderView(context).apply { configure(s.loader, s.loaderColor, s.border, 14, s.dash.logoUrl) },
                 FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
         } else {
-            badge.addView(Ui.text(context, "✓", 14f, s.accent, 800).apply { gravity = Gravity.CENTER },
+            badge.addView(s.label("✓", 14f, s.accent, 800).apply { gravity = Gravity.CENTER },
                 FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
         }
         row.addView(badge, LayoutParams(dp(26), dp(26)))
         val words = Ui.vertical(context)
-        words.addView(Ui.text(context, title.ifEmpty { detail }, 13.5f, s.text, 700, lines = 1))
+        words.addView(s.label(title.ifEmpty { detail }, 13.5f, s.text, 700, lines = 1))
         val second = if (awaiting) s.loader.text.thinking else if (title.isNotEmpty() && detail.isNotEmpty()) detail else null
-        second?.let { words.addView(Ui.text(context, it, 11.5f, s.muted, 600, lines = 1)) }
+        second?.let { words.addView(s.label(it, 11.5f, s.muted, 600, lines = 1, role = Themed.Role.CAPTION)) }
         row.addView(words, Ui.fill())
         if (!awaiting) {
-            row.addView(Ui.text(context, "Clear", 12f, s.muted, 700).apply {
+            row.addView(s.label("Clear", 12f, s.muted, 700).apply {
                 gravity = Gravity.CENTER_VERTICAL
                 minHeight = dp(44)
                 setPadding(dp(4), 0, dp(4), 0)
@@ -334,7 +416,7 @@ class GraineWidgetView @JvmOverloads constructor(
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
         repeat(rows) {
             val r = Ui.horizontal(context, dp(10)).apply {
-                background = Ui.rounded(Color.TRANSPARENT, dp(maxOf(10, s.radius - 6)).toFloat(), dp(1), s.border)
+                background = Ui.rounded(Color.TRANSPARENT, s.inner, s.line, s.border)
                 setPadding(dp(10), dp(10), dp(10), dp(10))
             }
             r.addView(View(context).apply { background = Ui.rounded(s.borderTint(0.6), dp(8).toFloat()) }, LayoutParams(dp(72), dp(72)))
@@ -349,7 +431,7 @@ class GraineWidgetView @JvmOverloads constructor(
         }
     }
 
-    private fun closeButton(s: Skin): View = Ui.text(context, "×", 20f, s.text, 600).apply {
+    private fun closeButton(s: Skin): View = s.label("×", 20f, s.text, 600).apply {
         gravity = Gravity.CENTER
         background = Ui.rounded(s.borderTint(0.4), dp(22).toFloat())
         contentDescription = "Close and keep talking"
@@ -358,14 +440,14 @@ class GraineWidgetView @JvmOverloads constructor(
     }
 
     private fun pendingScreen(s: Skin): View {
-        val root = Ui.vertical(context).apply { setBackgroundColor(s.surface); setPadding(dp(18), dp(16), dp(18), 0) }
+        val root = Ui.vertical(context).apply { setBackgroundColor(s.page); setPadding(dp(18), dp(16), dp(18), 0) }
         // A way out, always: a component that never arrives must not trap anyone behind a full screen.
         root.addView(closeButton(s), LayoutParams(dp(44), dp(44)))
         val middle = FrameLayout(context).apply { setPadding(0, 0, 0, dp(if (s.loader.skeleton) 24 else 72)) }
         middle.addView(componentLoader(s, 34, stacked = true), FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
         root.addView(middle, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         if (s.loader.skeleton) root.addView(bones(s, 3), Ui.matchWidth().apply { bottomMargin = dp(24) })
-        return insetScreen(root, s.surface)
+        return insetScreen(root, s.page)
     }
 
     private fun pendingSheet(s: Skin): View {
@@ -376,12 +458,11 @@ class GraineWidgetView @JvmOverloads constructor(
             addView(componentLoader(s, 26, stacked = true), Ui.wrap())
         }, Ui.matchWidth())
         if (s.loader.skeleton) panel.addView(bones(s, 2), Ui.matchWidth())
-        return scrim(panel)
+        return scrim(panel, s)
     }
 
     private fun pendingCard(s: Skin): View = FrameLayout(context).apply {
-        background = Ui.rounded(s.surface, dp(s.radius).toFloat(), dp(1), s.border)
-        setPadding(dp(14), dp(14), dp(14), dp(14))
+        s.card(this, dp(s.radius).toFloat(), s.cardPad, s.cardPad, s.cardPad, s.cardPad)
         Ui.holdsTouches(this)
         addView(componentLoader(s, null, stacked = false), FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
     }
@@ -389,12 +470,15 @@ class GraineWidgetView @JvmOverloads constructor(
     // ── the three surfaces ─────────────────────────────────────────────────
 
     private fun screenSurface(c: WidgetContent, body: View, s: Skin): View {
-        val root = Ui.vertical(context).apply { setBackgroundColor(s.surface) }
-        val header = Ui.horizontal(context, dp(12)).apply { setPadding(dp(18), dp(16), dp(18), dp(12)) }
+        val root = Ui.vertical(context).apply { setBackgroundColor(s.page) }
+        val header = Ui.horizontal(context, dp(12)).apply {
+            setPadding(dp(18), dp(16), dp(18), dp(12))
+            if (s.tokens != null) setBackgroundColor(s.surface)
+        }
         header.addView(closeButton(s), LayoutParams(dp(44), dp(44)))
         val titles = Ui.vertical(context)
-        if (c.title.isNotEmpty()) titles.addView(Ui.text(context, c.title, 18f, s.text, 800, lines = 1))
-        if (c.prompt.isNotEmpty()) titles.addView(Ui.text(context, c.prompt, 12.5f, s.muted, 600, lines = 1).apply { setPadding(0, dp(1), 0, 0) })
+        if (c.title.isNotEmpty()) titles.addView(s.label(c.title, 18f, s.text, 800, lines = 1, role = Themed.Role.TITLE))
+        if (c.prompt.isNotEmpty()) titles.addView(s.label(c.prompt, 12.5f, s.muted, 600, lines = 1).apply { setPadding(0, dp(1), 0, 0) })
         header.addView(titles, Ui.fill())
         root.addView(header, Ui.matchWidth())
 
@@ -408,14 +492,14 @@ class GraineWidgetView @JvmOverloads constructor(
             setPadding(dp(18), dp(12), dp(18), dp(20))
             background = topHairline(s)
         }
-        footer.addView(Ui.text(context, "STILL LISTENING", 10.5f, s.muted, 800).apply { letterSpacing = 0.4f / 10.5f })
-        footer.addView(Ui.text(context, c.prompt.ifEmpty { "Tap one, or just say it." }, 13.5f, s.text, 400, lines = 1).apply { setPadding(0, dp(2), 0, 0) })
+        footer.addView(s.label("STILL LISTENING", 10.5f, s.muted, 800).apply { letterSpacing = 0.4f / 10.5f })
+        footer.addView(s.label(c.prompt.ifEmpty { "Tap one, or just say it." }, 13.5f, s.text, 400, lines = 1).apply { setPadding(0, dp(2), 0, 0) })
         root.addView(footer, Ui.matchWidth())
-        return insetScreen(root, s.surface)
+        return insetScreen(root, s.page)
     }
 
     private fun sheetPanel(s: Skin, gapPx: Int): LinearLayout = Ui.vertical(context, gapPx).apply {
-        val r = dp(maxOf(20, s.radius)).toFloat()
+        val r = s.sheet
         background = android.graphics.drawable.GradientDrawable().apply {
             setColor(s.surface)
             cornerRadii = floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
@@ -431,14 +515,14 @@ class GraineWidgetView @JvmOverloads constructor(
 
     private fun sheetSurface(c: WidgetContent, body: View, s: Skin): View {
         val panel = sheetPanel(s, dp(14))
-        if (c.title.isNotEmpty()) panel.addView(Ui.text(context, c.title, 18f, s.text, 800))
-        if (c.prompt.isNotEmpty()) panel.addView(Ui.text(context, c.prompt, 13f, s.muted, 400).apply { Ui.lineHeight(this, 18f) })
+        if (c.title.isNotEmpty()) panel.addView(s.label(c.title, 18f, s.text, 800, role = Themed.Role.TITLE))
+        if (c.prompt.isNotEmpty()) panel.addView(s.label(c.prompt, 13f, s.muted, 400).apply { Ui.lineHeight(this, 18f * (s.tokens?.font?.scale?.body?.div(15)?.toFloat() ?: 1f)) })
         val scroll = CappedScrollView(context, dp(420))
         scroll.addView(FrameLayout(context).apply { setPadding(0, 0, 0, dp(4)); addView(body, Ui.matchWidth()) })
         bodyScroll = scroll
         panel.addView(scroll, Ui.matchWidth())
         // Not answering is an answer: without a way out that is not a choice, the exits are a wrong pick or hanging up.
-        panel.addView(Ui.text(context, "None of these", 13.5f, s.text, 700).apply {
+        panel.addView(s.label("None of these", 13.5f, s.text, 700).apply {
             gravity = Gravity.CENTER_VERTICAL
             minHeight = dp(44)
             setPadding(dp(16), 0, dp(16), 0)
@@ -447,22 +531,23 @@ class GraineWidgetView @JvmOverloads constructor(
             isClickable = true
             setOnClickListener { dismiss() }
         }, Ui.wrap())
-        return scrim(panel)
+        return scrim(panel, s)
     }
 
     private fun cardSurface(w: GraineWidget, c: WidgetContent, body: View, s: Skin): View {
         val card = Ui.vertical(context).apply {
-            background = Ui.rounded(s.surface, dp(s.radius).toFloat(), dp(1), s.border)
-            setPadding(dp(14), dp(12), dp(14), dp(4))
-            elevation = dp(6).toFloat()
+            s.card(this, dp(s.radius).toFloat(), s.cardPad, if (s.tokens != null) s.cardPad else dp(12), s.cardPad, dp(4), legacyElevation = 6)
             // Touches on the card are the card's: a drag started here moves the bar it sits on.
             Ui.holdsTouches(this)
         }
-        if (c.title.isNotEmpty()) card.addView(Ui.text(context, c.title, 14.5f, s.text, 800).apply { setPadding(0, 0, 0, dp(2)) })
-        if (c.prompt.isNotEmpty()) card.addView(Ui.text(context, c.prompt, 12.5f, s.muted, 400).apply { Ui.lineHeight(this, 17f); setPadding(0, 0, 0, dp(8)) })
+        if (c.title.isNotEmpty()) card.addView(s.label(c.title, 14.5f, s.text, 800, role = Themed.Role.TITLE).apply { setPadding(0, 0, 0, dp(2)) })
+        if (c.prompt.isNotEmpty()) card.addView(s.label(c.prompt, 12.5f, s.muted, 400).apply {
+            if (s.tokens == null) Ui.lineHeight(this, 17f)
+            setPadding(0, 0, 0, dp(8))
+        })
         else card.addView(View(context), LayoutParams(0, dp(6)))
         card.addView(body, Ui.matchWidth())
-        card.addView(Ui.text(context, "Dismiss", 12.5f, s.muted, 600).apply {
+        card.addView(s.label("Dismiss", 12.5f, s.muted, 600).apply {
             gravity = Gravity.CENTER_VERTICAL
             minHeight = dp(44)
             contentDescription = "Dismiss"
@@ -474,11 +559,11 @@ class GraineWidgetView @JvmOverloads constructor(
 
     private fun topHairline(s: Skin) = android.graphics.drawable.LayerDrawable(arrayOf(
         ColorDrawable(s.border), ColorDrawable(s.surface),
-    )).apply { setLayerInset(1, 0, dp(1), 0, 0) }
+    )).apply { setLayerInset(1, 0, s.line, 0, 0) }
 
     /** The dimmed app behind a sheet; tapping it closes the sheet, the way every sheet does. */
-    private fun scrim(panel: View): View {
-        val root = FrameLayout(context).apply { setBackgroundColor(0x73000000) }
+    private fun scrim(panel: View, s: Skin): View {
+        val root = FrameLayout(context).apply { setBackgroundColor(s.scrim) }
         root.addView(View(context).apply {
             contentDescription = "Close"
             isClickable = true
@@ -517,31 +602,35 @@ class GraineWidgetView @JvmOverloads constructor(
         c.isCalendar -> calendar(c, s)
         c.isProducts -> products(c, look, s)
         c.isChips -> FlowRow(context, dp(8), dp(8)).apply {
-            for (chip in c.chips) addView(Ui.text(context, chip.label, 13.5f, s.onAccent, 700).apply {
+            // Chips: the accent before designs; the design's soft accent, in its text colour, with one.
+            val designed = s.tokens != null
+            for (chip in c.chips) addView(s.label(chip.label, 13.5f, if (designed) s.text else s.onAccent, 700).apply {
                 gravity = Gravity.CENTER_VERTICAL
                 minHeight = dp(44)
                 setPadding(dp(16), 0, dp(16), 0)
-                background = Ui.rounded(s.accent, dp(999).toFloat())
+                background = if (designed) Ui.rounded(s.soft(0.15), s.chip) else Ui.rounded(s.accent, dp(999).toFloat())
                 contentDescription = chip.label
                 isClickable = true
                 setOnClickListener { answer(c.pickChip(chip)) }
             })
         }
         // A kind this build does not draw: the sentence the agent gave us for exactly this case.
-        else -> Ui.text(context, w.fallbackText.ifEmpty { "The assistant has something to show you." }, 14f, s.text).apply { Ui.lineHeight(this, 20f) }
+        else -> s.label(w.fallbackText.ifEmpty { "The assistant has something to show you." }, 14f, s.text, role = Themed.Role.BODY).apply {
+            if (s.tokens == null) Ui.lineHeight(this, 20f)
+        }
     }
 
     private fun calendar(c: WidgetContent, s: Skin): View = Ui.vertical(context, dp(12)).apply {
-        if (c.note.isNotEmpty()) addView(Ui.text(context, c.note, 12.5f, s.muted).apply { Ui.lineHeight(this, 18f) })
+        if (c.note.isNotEmpty()) addView(s.label(c.note, 12.5f, s.muted, role = Themed.Role.CAPTION).apply { if (s.tokens == null) Ui.lineHeight(this, 18f) })
         for (day in c.days) {
             val block = Ui.vertical(context, dp(7))
-            block.addView(Ui.text(context, day.label, 13f, s.text, 700))
+            block.addView(s.label(day.label, 13f, s.text, 700))
             block.addView(FlowRow(context, dp(8), dp(8)).apply {
-                for (slot in day.slots) addView(Ui.text(context, slot, 13.5f, s.text, 600).apply {
+                for (slot in day.slots) addView(s.label(slot, 13.5f, s.text, 600).apply {
                     gravity = Gravity.CENTER_VERTICAL
                     minHeight = dp(44)
                     setPadding(dp(14), 0, dp(14), 0)
-                    background = Ui.rounded(Color.TRANSPARENT, dp(11).toFloat(), dp(1), s.border)
+                    background = Ui.rounded(Color.TRANSPARENT, s.slot, s.line, s.border)
                     contentDescription = "${day.label} at $slot"
                     isClickable = true
                     setOnClickListener { answer(c.pickSlot(day, slot)) }
@@ -553,7 +642,7 @@ class GraineWidgetView @JvmOverloads constructor(
 
     private fun products(c: WidgetContent, look: WidgetLook, s: Skin): View {
         val many = c.many(look)
-        val gap = dp(if (look.density == "compact") 6 else 10)
+        val gap = s.gap(look.density == "compact")
         fun draw(i: Int, variant: String): View {
             val r = c.rows[i]
             return row(r, variant, look, s, if (many) r.id in ticked else null) {
@@ -592,10 +681,10 @@ class GraineWidgetView @JvmOverloads constructor(
         val label = if (ready) "${c.selectLabel} ${chosen.size}" else "Pick ${2 - chosen.size} more to $verb"
         return Ui.vertical(context).apply {
             addView(list, Ui.matchWidth())
-            addView(Ui.text(context, label, 14.5f, if (ready) s.onAccent else s.muted, 700).apply {
+            addView(s.label(label, 14.5f, if (ready) s.onAccent else s.muted, 700).apply {
                 gravity = Gravity.CENTER
                 minHeight = dp(48)
-                background = Ui.rounded(if (ready) s.accent else s.borderTint(0.5), dp(if (s.grammar.pillButtons) 999 else s.grammar.buttonRadius).toFloat())
+                background = Ui.rounded(if (ready) s.accent else s.borderTint(0.5), s.button(pill = true))
                 contentDescription = label
                 isEnabled = ready
                 isClickable = ready
@@ -674,19 +763,19 @@ class GraineWidgetView @JvmOverloads constructor(
      */
     private fun row(r: WidgetContent.Row, variant: String, look: WidgetLook, s: Skin, picked: Boolean?, onPick: () -> Unit): View {
         val many = picked != null
-        val corner = dp(maxOf(10, s.radius - 6)).toFloat()
+        val corner = s.inner
         val tight = look.density == "compact"
         val pad = dp((if (variant == "list") (if (tight) 6 else 9) else (if (tight) 7 else 10)) + s.grammar.padBoost)
-        val gap = dp(if (tight) 6 else 10)
+        val gap = s.gap(tight)
         val rowIsButton = many || look.button == "row"
         val outline = look.button == "outline"
         val a11y = "${r.selectLabel}: ${r.title}"
 
         fun badge(): View? = if (r.subtitle.isEmpty()) null else LinearLayout(context).apply {
-            addView(Ui.text(context, r.subtitle, 10.5f, s.accent, 800).apply {
+            addView(s.label(r.subtitle, 10.5f, s.accent, 800).apply {
                 isAllCaps = true
                 letterSpacing = 0.4f / 10.5f
-                background = Ui.rounded(s.tint(0.15), dp(999).toFloat())
+                background = Ui.rounded(s.soft(0.15), s.chip)
                 setPadding(dp(8), dp(3), dp(8), dp(3))
             }, Ui.wrap())
         }
@@ -695,8 +784,8 @@ class GraineWidgetView @JvmOverloads constructor(
             orientation = HORIZONTAL
             gravity = Gravity.TOP
             Ui.gap(this, dp(8))
-            addView(Ui.text(context, r.title, if (big) 16.5f else if (variant == "list") 13.5f else 14.5f, s.text, s.grammar.titleWeight, lines = 2), Ui.fill())
-            if (r.price.isNotEmpty()) addView(Ui.text(context, r.price, if (big) 17f else if (variant == "list") 13.5f else 14.5f, s.text, 800).apply {
+            addView(s.label(r.title, if (big) 16.5f else if (variant == "list") 13.5f else 14.5f, s.text, s.titleWeight, lines = 2), Ui.fill())
+            if (r.price.isNotEmpty()) addView(s.label(r.price, if (big) 17f else if (variant == "list") 13.5f else 14.5f, s.text, 800).apply {
                 fontFeatureSettings = "tnum"
             }, Ui.wrap())
         }
@@ -705,26 +794,26 @@ class GraineWidgetView @JvmOverloads constructor(
         fun facts(): View? = if (!look.facts || r.facts.isEmpty()) null else FlowRow(context, dp(6), dp(6)).apply {
             setPadding(0, dp(2), 0, 0)
             val small = variant == "list"
-            for (f in if (small) r.facts.take(2) else r.facts) addView(Ui.text(context, f, if (small) 10.5f else 11.5f, s.muted, 600).apply {
-                background = if (s.grammar.chipOutlined) Ui.rounded(Color.TRANSPARENT, dp(s.grammar.chipRadius).toFloat(), dp(1), s.border)
-                else Ui.rounded(s.borderTint(0.35), dp(s.grammar.chipRadius).toFloat())
+            for (f in if (small) r.facts.take(2) else r.facts) addView(s.label(f, if (small) 10.5f else 11.5f, s.muted, 600).apply {
+                background = if (s.grammar.chipOutlined) Ui.rounded(Color.TRANSPARENT, s.fact, s.line, s.border)
+                else Ui.rounded(s.borderTint(0.35), s.fact)
                 setPadding(dp(if (small) 6 else 8), dp(if (small) 2 else 4), dp(if (small) 6 else 8), dp(if (small) 2 else 4))
             })
         }
 
         fun tick(): View = FrameLayout(context).apply {
-            background = if (picked == true) Ui.rounded(s.accent, dp(11).toFloat()) else Ui.rounded(Color.TRANSPARENT, dp(11).toFloat(), dp(1.5f), s.border)
-            if (picked == true) addView(Ui.text(context, "✓", 12f, s.onAccent, 800).apply { gravity = Gravity.CENTER },
+            background = if (picked == true) Ui.rounded(s.accent, dp(11).toFloat()) else Ui.rounded(Color.TRANSPARENT, dp(11).toFloat(), if (s.tokens != null) s.line else dp(1.5f), s.border)
+            if (picked == true) addView(s.label("✓", 12f, s.onAccent, 800).apply { gravity = Gravity.CENTER },
                 FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
         }
 
-        fun button(wide: Boolean): View = Ui.text(context, if (r.unavailable) "Unavailable" else r.selectLabel, if (wide) 14f else 12.5f,
+        fun button(wide: Boolean): View = s.label(if (r.unavailable) "Unavailable" else r.selectLabel, if (wide) 14f else 12.5f,
             if (r.unavailable) s.muted else if (outline) s.accent else s.onAccent, 700).apply {
             gravity = Gravity.CENTER
             minHeight = dp(44)
             setPadding(dp(if (wide) 12 else 14), 0, dp(if (wide) 12 else 14), 0)
-            val radius = dp(if (wide) s.grammar.buttonRadius else if (s.grammar.pillButtons) 999 else s.grammar.buttonRadius).toFloat()
-            background = if (r.unavailable || outline) Ui.rounded(Color.TRANSPARENT, radius, dp(1.5f), if (r.unavailable) s.border else s.accent)
+            val radius = s.button(pill = !wide)
+            background = if (r.unavailable || outline) Ui.rounded(Color.TRANSPARENT, radius, if (s.tokens != null) maxOf(s.line, dp(1)) else dp(1.5f), if (r.unavailable) s.border else s.accent)
             else Ui.rounded(s.accent, radius)
             contentDescription = a11y
             isEnabled = !r.unavailable
@@ -733,10 +822,10 @@ class GraineWidgetView @JvmOverloads constructor(
         }
 
         fun image(w: Int, h: Int): View? = if (r.image.isEmpty()) null
-        else roundedImage(context, r.image, dp(maxOf(8, s.radius - 8)).toFloat(), s.border).also { it.layoutParams = LayoutParams(w, h) }
+        else roundedImage(context, r.image, s.picture, s.border).also { it.layoutParams = LayoutParams(w, h) }
 
         fun frame(v: LinearLayout, bordered: Boolean): View {
-            if (bordered) v.background = Ui.rounded(Color.TRANSPARENT, corner, dp(if (picked == true) 2 else 1), if (picked == true) s.accent else s.border)
+            if (bordered) v.background = Ui.rounded(Color.TRANSPARENT, corner, if (s.tokens == null) dp(if (picked == true) 2 else 1) else if (picked == true) s.line * 2 else s.line, if (picked == true) s.accent else s.border)
             if (r.unavailable) v.alpha = 0.55f
             if (rowIsButton) {
                 v.contentDescription = a11y
@@ -767,7 +856,7 @@ class GraineWidgetView @JvmOverloads constructor(
                 val line = Ui.horizontal(context, gap).apply {
                     setPadding(dp(2), pad, dp(2), pad)
                     minimumHeight = dp(44)
-                    background = Hairline(s.border, dp(1))
+                    background = Hairline(s.border, s.line)
                 }
                 val t = dp(mapOf("small" to 36, "medium" to 44, "large" to 56).getValue(look.imageSize))
                 image(t, t)?.let { line.addView(it) }
@@ -777,7 +866,7 @@ class GraineWidgetView @JvmOverloads constructor(
                 line.addView(words, Ui.fill())
                 when {
                     many -> line.addView(tick(), LayoutParams(dp(22), dp(22)))
-                    rowIsButton -> line.addView(Ui.text(context, "›", 22f, s.muted, 600).apply { setPadding(dp(4), 0, 0, 0) })
+                    rowIsButton -> line.addView(s.label("›", 22f, s.muted, 600).apply { setPadding(dp(4), 0, 0, 0) })
                     else -> line.addView(button(false))
                 }
                 val framed = frame(line, false)
@@ -830,6 +919,12 @@ class GraineWidgetView @JvmOverloads constructor(
             }
             dialog = d
             dialogSurface = surface
+        }
+        d.window?.let { w ->
+            // No motion in the design, or animations off on the phone: it is simply there.
+            if (s.tokens != null) w.setWindowAnimations(if (Themed.motionMs(context, s.tokens) > 0) android.R.style.Animation_InputMethod else 0)
+            // Glass: what is behind the sheet or screen blurred, where the phone can.
+            Themed.blurBehind(w, s.tokens?.glass)
         }
         d.setContentView(view, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         if (!d.isShowing) runCatching { d.show() }

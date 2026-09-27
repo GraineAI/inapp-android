@@ -1248,3 +1248,581 @@ object Appearance {
         return sb.toString()
     }
 }
+
+// ── design: the look the brand chose, as the session carries it ────────────
+
+/*
+ * THE SERVER RESOLVES, THIS SDK DRAWS.
+ *
+ * The brand chooses a design in the dashboard — a philosophy and a few knobs.
+ * The session carries it already resolved, as two complete sets of tokens,
+ * light and dark (contract/DESIGN.md). Nothing here knows what a philosophy
+ * is: it parses the tokens, picks the scheme, builds the glyph's address, and
+ * the views draw what they are told. A philosophy added next month reaches
+ * this build without a release.
+ *
+ * Nothing from the wire is trusted. Unknown keys are ignored; a value that is
+ * missing or the wrong shape takes Graine Classic's (the look every Graine
+ * surface had before designs, and the default for everything); a `design`
+ * that is not one at all is null, and the appearance then draws everything,
+ * exactly as it did before designs existed. Parsing never throws.
+ *
+ * Strings rather than enums, as for WidgetStyle: these are the wire's own
+ * words, and a host drawing its own UI compares against the same words the
+ * dashboard and every other SDK use.
+ */
+
+/** Every colour a surface is drawn in, as "#RRGGBB". What each one paints is in contract/DESIGN.md. */
+data class ThemeColors(
+    val background: String,
+    val surface: String,
+    val surfaceRaised: String,
+    val text: String,
+    val textMuted: String,
+    val border: String,
+    val accent: String,
+    val onAccent: String,
+    /** The accent at low strength: chips, selected rows, the focus halo. */
+    val accentSoft: String,
+    val success: String,
+    val warning: String,
+    val danger: String,
+    val userBubble: String,
+    val userBubbleText: String,
+    val agentBubble: String,
+    val agentBubbleText: String,
+    val scrim: String,
+)
+
+/** Type sizes, in sp. */
+data class FontScale(val caption: Double, val body: Double, val title: Double, val display: Double)
+
+/** CSS weights, 100–900. */
+data class FontWeights(val body: Int, val strong: Int, val title: Int)
+
+/** One number for body text and one for titles: letter spacing in em, or line height as a multiplier. */
+data class FontPair(val body: Double, val title: Double)
+
+data class ThemeFont(
+    /** "system" means the platform's own UI font; anything else is a family the app may bundle. */
+    val body: String,
+    val heading: String,
+    val scale: FontScale,
+    val weights: FontWeights,
+    val letterSpacing: FontPair,
+    val lineHeight: FontPair,
+)
+
+/** Corner radii, dp. */
+data class ThemeRadius(val sm: Double, val md: Double, val lg: Double, val xl: Double)
+
+data class ThemeShape(
+    val radius: ThemeRadius,
+    /** The width of every outline, dp. */
+    val borderWidth: Double,
+    /** "circle", "squircle", "rounded-square", "square" or "pill". */
+    val launcher: String,
+)
+
+/** dp. */
+data class ThemeSpacing(val unit: Double, val cardPadding: Double, val gap: Double)
+
+/** A soft shadow. `opacity` (0–1) applies to `color`. */
+data class ThemeShadow(val y: Double, val blur: Double, val spread: Double, val opacity: Double, val color: String)
+
+/** A solid offset shadow, drawn in `colors.text`. dp. */
+data class ThemeOffset(val x: Double, val y: Double)
+
+data class ThemeElevation(
+    /** Null: no shadow. */
+    val card: ThemeShadow?,
+    val floating: ThemeShadow?,
+    /** Null unless the design draws depth as a hard offset instead of a shadow. */
+    val hardOffset: ThemeOffset?,
+)
+
+data class ThemeMotion(
+    /** 0 means no transition at all. The phone's own "remove animations" wins over any number here. */
+    val durationMs: Int,
+    /** "standard", "emphasized", "spring", "linear" or "none". */
+    val easing: String,
+    /** 0–1, for "spring". */
+    val bounce: Double,
+)
+
+/** A launcher glyph: 24×24 SVG path data, stroked or filled. Apps show it as an image ([Design.glyphUrl]). */
+data class LauncherGlyph(val id: String, val path: String, val stroke: Boolean)
+
+data class ThemeIcons(
+    /** "outline", "filled", "duotone" or "sharp". */
+    val style: String,
+    val stroke: Double,
+    /** Null: the launcher shows the brand's logo. */
+    val launcher: LauncherGlyph?,
+)
+
+/** Translucent surfaces: `surface` at `surfaceOpacity`, what is behind blurred by `blur` where the platform can. */
+data class ThemeGlass(val blur: Double, val surfaceOpacity: Double)
+
+/** Everything a renderer needs for one scheme, as flat numbers and "#RRGGBB" strings. */
+data class ThemeTokens(
+    val v: Int,
+    val preset: String,
+    /** "light" or "dark". */
+    val scheme: String,
+    val colors: ThemeColors,
+    val font: ThemeFont,
+    val shape: ThemeShape,
+    val spacing: ThemeSpacing,
+    val elevation: ThemeElevation,
+    val motion: ThemeMotion,
+    val icons: ThemeIcons,
+    /** Null: opaque surfaces. */
+    val glass: ThemeGlass?,
+    /** "filled", "outline" or "minimal". */
+    val bubbles: String,
+) {
+    val isDark: Boolean get() = scheme == "dark"
+
+    /** The tokens as the session spelled them — for a log line, or a host that forwards them. */
+    fun toJson(): JSONObject = JSONObject()
+        .put("v", v).put("preset", preset).put("scheme", scheme)
+        .put("colors", JSONObject().apply {
+            val c = colors
+            listOf(
+                "background" to c.background, "surface" to c.surface, "surfaceRaised" to c.surfaceRaised,
+                "text" to c.text, "textMuted" to c.textMuted, "border" to c.border, "accent" to c.accent,
+                "onAccent" to c.onAccent, "accentSoft" to c.accentSoft, "success" to c.success,
+                "warning" to c.warning, "danger" to c.danger, "userBubble" to c.userBubble,
+                "userBubbleText" to c.userBubbleText, "agentBubble" to c.agentBubble,
+                "agentBubbleText" to c.agentBubbleText, "scrim" to c.scrim,
+            ).forEach { (k, x) -> put(k, x) }
+        })
+        .put("font", JSONObject()
+            .put("body", font.body).put("heading", font.heading)
+            .put("scale", JSONObject().put("caption", Design.n(font.scale.caption)).put("body", Design.n(font.scale.body))
+                .put("title", Design.n(font.scale.title)).put("display", Design.n(font.scale.display)))
+            .put("weights", JSONObject().put("body", font.weights.body).put("strong", font.weights.strong).put("title", font.weights.title))
+            .put("letterSpacing", JSONObject().put("body", Design.n(font.letterSpacing.body)).put("title", Design.n(font.letterSpacing.title)))
+            .put("lineHeight", JSONObject().put("body", Design.n(font.lineHeight.body)).put("title", Design.n(font.lineHeight.title))))
+        .put("shape", JSONObject()
+            .put("radius", JSONObject().put("sm", Design.n(shape.radius.sm)).put("md", Design.n(shape.radius.md))
+                .put("lg", Design.n(shape.radius.lg)).put("xl", Design.n(shape.radius.xl)))
+            .put("borderWidth", Design.n(shape.borderWidth)).put("launcher", shape.launcher))
+        .put("spacing", JSONObject().put("unit", Design.n(spacing.unit)).put("cardPadding", Design.n(spacing.cardPadding)).put("gap", Design.n(spacing.gap)))
+        .put("elevation", JSONObject()
+            .put("card", Design.shadowJson(elevation.card))
+            .put("floating", Design.shadowJson(elevation.floating))
+            .put("hardOffset", elevation.hardOffset?.let { JSONObject().put("x", Design.n(it.x)).put("y", Design.n(it.y)) } ?: JSONObject.NULL))
+        .put("motion", JSONObject().put("durationMs", motion.durationMs).put("easing", motion.easing).put("bounce", Design.n(motion.bounce)))
+        .put("icons", JSONObject().put("style", icons.style).put("stroke", Design.n(icons.stroke))
+            .put("launcher", icons.launcher?.let { JSONObject().put("id", it.id).put("path", it.path).put("stroke", it.stroke) } ?: JSONObject.NULL))
+        .put("glass", glass?.let { JSONObject().put("blur", Design.n(it.blur)).put("surfaceOpacity", Design.n(it.surfaceOpacity)) } ?: JSONObject.NULL)
+        .put("bubbles", bubbles)
+}
+
+/**
+ * The knobs the brand turned, as the session carries them beside the tokens.
+ * Only [scheme] changes what this SDK draws (which token set); the rest are
+ * already inside the tokens and are kept for a host that wants to show them.
+ */
+data class DesignConfig @JvmOverloads constructor(
+    val preset: String = Design.DEFAULT_PRESET,
+    val accent: String? = null,
+    /** "light", "dark" or "auto". Absent means "auto". */
+    val scheme: String? = null,
+    val roundness: Double? = null,
+    val font: String? = null,
+    val headingFont: String? = null,
+    val density: String? = null,
+    val shadow: String? = null,
+    val motion: String? = null,
+    val neutral: String? = null,
+    val glass: Boolean? = null,
+    val bubbles: String? = null,
+    val launcherIcon: String? = null,
+    val launcherShape: String? = null,
+    val iconStyle: String? = null,
+) {
+    fun toJson(): JSONObject = JSONObject().apply {
+        put("preset", preset)
+        accent?.let { put("accent", it) }
+        scheme?.let { put("scheme", it) }
+        roundness?.let { put("roundness", Design.n(it)) }
+        font?.let { put("font", it) }
+        headingFont?.let { put("headingFont", it) }
+        density?.let { put("density", it) }
+        shadow?.let { put("shadow", it) }
+        motion?.let { put("motion", it) }
+        neutral?.let { put("neutral", it) }
+        glass?.let { put("glass", it) }
+        bubbles?.let { put("bubbles", it) }
+        launcherIcon?.let { put("launcherIcon", it) }
+        launcherShape?.let { put("launcherShape", it) }
+        iconStyle?.let { put("iconStyle", it) }
+    }
+}
+
+/** The session's `design`: the config and both token sets. */
+data class ResolvedDesign(val config: DesignConfig, val light: ThemeTokens, val dark: ThemeTokens) {
+    /**
+     * Which tokens to draw. The brand's fixed scheme when it chose one; under
+     * "auto" (or none) the phone's — light when the phone's is unknown.
+     * `override` ("light", "dark" or "auto") is a host's own choice, and wins.
+     * Pick again whenever the phone switches between light and dark.
+     */
+    @JvmOverloads
+    fun pick(deviceDark: Boolean?, override: String? = null): ThemeTokens {
+        val o = override?.trim()?.lowercase()?.takeIf { it == "light" || it == "dark" || it == "auto" }
+        return when (o ?: config.scheme?.trim()?.lowercase() ?: "auto") {
+            "light" -> light
+            "dark" -> dark
+            else -> if (deviceDark == true) dark else light
+        }
+    }
+
+    fun toJson(): JSONObject = JSONObject().put("config", config.toJson()).put("light", light.toJson()).put("dark", dark.toJson())
+
+    companion object {
+        /**
+         * The session's `design` (a JSONObject, or its JSON text) → a design,
+         * or null when it is absent or is not one. A scheme that is missing
+         * borrows the other; a value that is missing or malformed takes
+         * Graine Classic's. Never throws.
+         */
+        @JvmStatic
+        fun parse(raw: Any?): ResolvedDesign? = runCatching {
+            val o = when (raw) {
+                is JSONObject -> raw
+                is String -> raw.trim().takeIf { it.startsWith("{") }?.let { JSONObject(it) }
+                else -> null
+            } ?: return null
+            val light = Design.tokens(o.opt("light") as? JSONObject, "light")
+            val dark = Design.tokens(o.opt("dark") as? JSONObject, "dark")
+            if (light == null && dark == null) return null
+            ResolvedDesign(
+                config = Design.config(o.opt("config") as? JSONObject),
+                light = light ?: dark!!.copy(scheme = "light"),
+                dark = dark ?: light!!.copy(scheme = "dark"),
+            )
+        }.getOrNull()
+    }
+}
+
+/** The design's rules that are arithmetic: parsing, the launcher's shape, the glyph's address, motion. */
+object Design {
+    const val DEFAULT_PRESET = "graine-classic"
+
+    /**
+     * The glyph asset version — theme.ts's GLYPH_ASSET_VERSION. The image is
+     * cached for a year under its URL, so a changed drawing gets a new number.
+     */
+    const val GLYPH_ASSET_VERSION = 2
+
+    /** The launcher is this many dp high (and wide, unless it is a pill). */
+    const val LAUNCHER_SIZE = 56.0
+
+    /** Its glyph or logo, as a share of its height. */
+    const val LAUNCHER_GLYPH = 0.46
+
+    val LAUNCHER_SHAPES = listOf("circle", "squircle", "rounded-square", "square", "pill")
+    val BUBBLES = listOf("filled", "outline", "minimal")
+    val EASINGS = listOf("standard", "emphasized", "spring", "linear", "none")
+    val ICON_STYLES = listOf("outline", "filled", "duotone", "sharp")
+
+    private val HEX6 = Regex("^#?([0-9a-fA-F]{6})$")
+    private val HEX3 = Regex("^#?([0-9a-fA-F]{3})$")
+
+    /** "#RRGGBB" for anything that is a hex colour ("#abc", "AABBCC", …), else null — theme.ts's normaliseHex. */
+    @JvmStatic
+    fun normaliseHex(value: Any?): String? {
+        val s = Js.strOrEmpty(value).trim()
+        HEX6.find(s)?.let { return "#" + it.groupValues[1].uppercase() }
+        HEX3.find(s)?.let { m -> return "#" + m.groupValues[1].map { "$it$it" }.joinToString("").uppercase() }
+        return null
+    }
+
+    /**
+     * Where an app fetches a launcher glyph as a PNG — built exactly as
+     * theme.ts's glyphUrl(): the id lower-cased, the colour upper-case hex
+     * without "#", the size clamped to 16–512 PHYSICAL pixels (dp × density,
+     * so it is sharp on every screen), the stroke clamped to 0.5–4 in quarter
+     * steps, and the asset version.
+     */
+    @JvmStatic
+    @JvmOverloads
+    fun glyphUrl(origin: String?, id: String?, color: String?, sizePx: Double, stroke: Double = 2.0): String {
+        val gid = (id ?: "").trim().lowercase()
+        val hex = normaliseHex(color) ?: "#FFFFFF"
+        // `Number(x) || fallback`: zero and NaN are "not given".
+        val size = Js.round(maxOf(16.0, minOf(512.0, if (sizePx == 0.0 || sizePx.isNaN()) 96.0 else sizePx))).toInt()
+        val w = maxOf(0.5, minOf(4.0, if (stroke == 0.0 || stroke.isNaN()) 2.0 else stroke))
+        val base = (origin?.takeIf { it.isNotEmpty() } ?: Appearance.DEFAULT_ORIGIN).trimEnd('/')
+        return "$base/api/embed/glyph?id=${Appearance.encodeURIComponent(gid)}&c=${hex.substring(1)}&s=$size" +
+            "&w=${Js.number(Js.round(w * 4) / 4)}&v=$GLYPH_ASSET_VERSION"
+    }
+
+    /**
+     * The launcher's corner radius at a height (dp): `circle` and `pill` fully
+     * round, `squircle` 30% of the size (the continuous corner iOS draws, as a
+     * plain radius), `rounded-square` the design's large radius, `square` its
+     * small one — never more than half the height.
+     */
+    @JvmStatic
+    fun launcherCorner(shape: String?, height: Double, radius: ThemeRadius): Double = when (shape) {
+        "squircle" -> height * 0.30
+        "rounded-square" -> minOf(radius.lg, height / 2)
+        "square" -> minOf(radius.sm, height / 2)
+        else -> height / 2
+    }
+
+    /**
+     * How long a transition runs, ms: the design's duration, or 0 — none —
+     * when the design says none, when there is no design (the look before
+     * designs had no transitions), or when the phone has animations off
+     * (`animatorScale` is the system's animator duration scale; 0 is "Remove
+     * animations"). ViewPropertyAnimator applies the scale itself otherwise.
+     */
+    @JvmStatic
+    fun motionMs(motion: ThemeMotion?, animatorScale: Float): Long {
+        if (motion == null || !(animatorScale > 0f) || motion.durationMs <= 0 || motion.easing == "none") return 0
+        return motion.durationMs.toLong()
+    }
+
+    /**
+     * A shadow token as Android can draw it: an elevation in dp (the offset,
+     * Material's own reading of depth) and the alpha of the shadow colour.
+     * Android multiplies that alpha by the theme's spot-shadow alpha (0.19 by
+     * default), so the token's opacity is divided by it to land where the
+     * design meant. Null draws no shadow.
+     */
+    @JvmStatic
+    fun androidShadow(s: ThemeShadow?): Pair<Double, Double> {
+        if (s == null || s.opacity <= 0.0) return 0.0 to 0.0
+        return maxOf(0.0, s.y) to minOf(1.0, s.opacity / 0.19)
+    }
+
+    /** The family to ask the app for, or null for the platform's own font. */
+    @JvmStatic
+    fun fontFamily(name: String?): String? = name?.trim()?.takeIf { it.isNotEmpty() && !it.equals("system", ignoreCase = true) }
+
+    /** The app's font for a design family, matched without regard to case; null when the app has none. */
+    @JvmStatic
+    fun <T> fontFor(fonts: Map<String, T>, family: String?): T? {
+        val want = fontFamily(family) ?: return null
+        return fonts[want] ?: fonts.entries.firstOrNull { it.key.trim().equals(want, ignoreCase = true) }?.value
+    }
+
+    // ── parsing ────────────────────────────────────────────────────────────
+
+    /** A number as JSON writes it: no ".0" on an integer. */
+    internal fun n(d: Double): Any = if (d == Math.rint(d) && Math.abs(d) < 1e15) d.toLong() else d
+
+    internal fun shadowJson(s: ThemeShadow?): Any = s?.let {
+        JSONObject().put("y", n(it.y)).put("blur", n(it.blur)).put("spread", n(it.spread)).put("opacity", n(it.opacity)).put("color", it.color)
+    } ?: JSONObject.NULL
+
+    private fun num(o: JSONObject?, k: String, fallback: Double, min: Double, max: Double): Double =
+        Js.finite(o?.opt(k))?.coerceIn(min, max) ?: fallback
+
+    private fun hex(o: JSONObject?, k: String, fallback: String): String = normaliseHex((o?.opt(k) as? String)) ?: fallback
+
+    private fun word(o: JSONObject?, k: String, allowed: List<String>, fallback: String): String =
+        (o?.opt(k) as? String)?.trim()?.lowercase()?.takeIf { it in allowed } ?: fallback
+
+    private fun text(o: JSONObject?, k: String, fallback: String): String =
+        (o?.opt(k) as? String)?.trim()?.takeIf { it.isNotEmpty() } ?: fallback
+
+    private fun obj(o: JSONObject?, k: String): JSONObject? = o?.opt(k) as? JSONObject
+
+    /** Absent keeps the default; JSON null is "none"; an object is read over the default; anything else keeps it. */
+    private fun <T> nullable(o: JSONObject?, k: String, fallback: T?, read: (JSONObject) -> T?): T? {
+        if (o == null || !o.has(k)) return fallback
+        return when (val v = o.opt(k)) {
+            JSONObject.NULL -> null
+            is JSONObject -> read(v)
+            else -> fallback
+        }
+    }
+
+    private val NO_SHADOW = ThemeShadow(0.0, 0.0, 0.0, 0.0, "#000000")
+
+    private fun shadow(o: JSONObject, d: ThemeShadow?): ThemeShadow {
+        val b = d ?: NO_SHADOW
+        return ThemeShadow(
+            y = num(o, "y", b.y, -200.0, 200.0),
+            blur = num(o, "blur", b.blur, 0.0, 400.0),
+            spread = num(o, "spread", b.spread, -200.0, 200.0),
+            opacity = num(o, "opacity", b.opacity, 0.0, 1.0),
+            color = hex(o, "color", b.color),
+        )
+    }
+
+    internal fun config(o: JSONObject?): DesignConfig {
+        fun s(k: String) = (o?.opt(k) as? String)
+        return DesignConfig(
+            preset = text(o, "preset", DEFAULT_PRESET),
+            accent = s("accent"),
+            scheme = s("scheme"),
+            roundness = Js.finite(o?.opt("roundness")),
+            font = s("font"),
+            headingFont = s("headingFont"),
+            density = s("density"),
+            shadow = s("shadow"),
+            motion = s("motion"),
+            neutral = s("neutral"),
+            glass = o?.opt("glass") as? Boolean,
+            bubbles = s("bubbles"),
+            launcherIcon = s("launcherIcon"),
+            launcherShape = s("launcherShape"),
+            iconStyle = s("iconStyle"),
+        )
+    }
+
+    /** One scheme's tokens, or null when there is nothing there to read (no `colors` at all). */
+    internal fun tokens(o: JSONObject?, scheme: String): ThemeTokens? {
+        val c = obj(o, "colors") ?: return null
+        val d = if (scheme == "dark") CLASSIC_DARK else CLASSIC_LIGHT
+        val dc = d.colors
+        val font = obj(o, "font")
+        val scale = obj(font, "scale")
+        val weights = obj(font, "weights")
+        val spacingO = obj(font, "letterSpacing")
+        val lineO = obj(font, "lineHeight")
+        val shape = obj(o, "shape")
+        val radius = obj(shape, "radius")
+        val spacing = obj(o, "spacing")
+        val elevation = obj(o, "elevation")
+        val motion = obj(o, "motion")
+        val icons = obj(o, "icons")
+        fun weight(k: String, fallback: Int) = Js.finite(weights?.opt(k))?.let { Js.round(it).coerceIn(100.0, 900.0).toInt() } ?: fallback
+        return ThemeTokens(
+            v = Js.finite(o?.opt("v"))?.toInt() ?: 1,
+            preset = text(o, "preset", d.preset),
+            scheme = word(o, "scheme", listOf("light", "dark"), scheme),
+            colors = ThemeColors(
+                background = hex(c, "background", dc.background),
+                surface = hex(c, "surface", dc.surface),
+                surfaceRaised = hex(c, "surfaceRaised", dc.surfaceRaised),
+                text = hex(c, "text", dc.text),
+                textMuted = hex(c, "textMuted", dc.textMuted),
+                border = hex(c, "border", dc.border),
+                accent = hex(c, "accent", dc.accent),
+                onAccent = hex(c, "onAccent", dc.onAccent),
+                accentSoft = hex(c, "accentSoft", dc.accentSoft),
+                success = hex(c, "success", dc.success),
+                warning = hex(c, "warning", dc.warning),
+                danger = hex(c, "danger", dc.danger),
+                userBubble = hex(c, "userBubble", dc.userBubble),
+                userBubbleText = hex(c, "userBubbleText", dc.userBubbleText),
+                agentBubble = hex(c, "agentBubble", dc.agentBubble),
+                agentBubbleText = hex(c, "agentBubbleText", dc.agentBubbleText),
+                scrim = hex(c, "scrim", dc.scrim),
+            ),
+            font = ThemeFont(
+                body = text(font, "body", d.font.body),
+                heading = text(font, "heading", d.font.heading),
+                scale = FontScale(
+                    caption = num(scale, "caption", d.font.scale.caption, 6.0, 96.0),
+                    body = num(scale, "body", d.font.scale.body, 6.0, 96.0),
+                    title = num(scale, "title", d.font.scale.title, 6.0, 96.0),
+                    display = num(scale, "display", d.font.scale.display, 6.0, 128.0),
+                ),
+                weights = FontWeights(weight("body", d.font.weights.body), weight("strong", d.font.weights.strong), weight("title", d.font.weights.title)),
+                letterSpacing = FontPair(
+                    num(spacingO, "body", d.font.letterSpacing.body, -0.5, 1.0),
+                    num(spacingO, "title", d.font.letterSpacing.title, -0.5, 1.0),
+                ),
+                lineHeight = FontPair(
+                    num(lineO, "body", d.font.lineHeight.body, 0.5, 4.0),
+                    num(lineO, "title", d.font.lineHeight.title, 0.5, 4.0),
+                ),
+            ),
+            shape = ThemeShape(
+                radius = ThemeRadius(
+                    sm = num(radius, "sm", d.shape.radius.sm, 0.0, 999.0),
+                    md = num(radius, "md", d.shape.radius.md, 0.0, 999.0),
+                    lg = num(radius, "lg", d.shape.radius.lg, 0.0, 999.0),
+                    xl = num(radius, "xl", d.shape.radius.xl, 0.0, 999.0),
+                ),
+                borderWidth = num(shape, "borderWidth", d.shape.borderWidth, 0.0, 16.0),
+                launcher = word(shape, "launcher", LAUNCHER_SHAPES, d.shape.launcher),
+            ),
+            spacing = ThemeSpacing(
+                unit = num(spacing, "unit", d.spacing.unit, 0.0, 64.0),
+                cardPadding = num(spacing, "cardPadding", d.spacing.cardPadding, 0.0, 200.0),
+                gap = num(spacing, "gap", d.spacing.gap, 0.0, 200.0),
+            ),
+            elevation = ThemeElevation(
+                card = nullable(elevation, "card", d.elevation.card) { shadow(it, d.elevation.card) },
+                floating = nullable(elevation, "floating", d.elevation.floating) { shadow(it, d.elevation.floating) },
+                hardOffset = nullable(elevation, "hardOffset", d.elevation.hardOffset) {
+                    ThemeOffset(num(it, "x", 4.0, -64.0, 64.0), num(it, "y", 4.0, -64.0, 64.0))
+                },
+            ),
+            motion = ThemeMotion(
+                durationMs = Js.finite(motion?.opt("durationMs"))?.let { Js.round(it).coerceIn(0.0, 5000.0).toInt() } ?: d.motion.durationMs,
+                easing = word(motion, "easing", EASINGS, d.motion.easing),
+                bounce = num(motion, "bounce", d.motion.bounce, 0.0, 1.0),
+            ),
+            icons = ThemeIcons(
+                style = word(icons, "style", ICON_STYLES, d.icons.style),
+                stroke = num(icons, "stroke", d.icons.stroke, 0.5, 4.0),
+                launcher = nullable(icons, "launcher", d.icons.launcher) { g ->
+                    val id = (g.opt("id") as? String)?.trim()?.takeIf { it.isNotEmpty() }
+                    if (id == null) d.icons.launcher
+                    else LauncherGlyph(id, (g.opt("path") as? String) ?: "", (g.opt("stroke") as? Boolean) ?: true)
+                },
+            ),
+            glass = nullable(o, "glass", null) { g ->
+                ThemeGlass(num(g, "blur", 20.0, 0.0, 200.0), num(g, "surfaceOpacity", 0.72, 0.0, 1.0))
+            },
+            bubbles = word(o, "bubbles", BUBBLES, d.bubbles),
+        )
+    }
+
+    // ── Graine Classic: the default for every value the wire leaves out ─────
+
+    private val CLASSIC_FONT = ThemeFont(
+        body = "system", heading = "system",
+        scale = FontScale(12.0, 15.0, 17.0, 22.0),
+        weights = FontWeights(400, 600, 600),
+        letterSpacing = FontPair(0.0, -0.01),
+        lineHeight = FontPair(1.45, 1.25),
+    )
+    private val CLASSIC_SHAPE = ThemeShape(ThemeRadius(8.0, 12.0, 18.0, 24.0), 1.0, "circle")
+    private val CLASSIC_SPACING = ThemeSpacing(4.0, 14.0, 10.0)
+    private val CLASSIC_FLOATING = ThemeShadow(8.0, 24.0, 0.0, 0.16, "#000000")
+    private val CLASSIC_MOTION = ThemeMotion(200, "standard", 0.0)
+    private val CLASSIC_ICONS = ThemeIcons("outline", 2.0, LauncherGlyph("waveform", "M2 13a2 2 0 0 0 2 -2V7a2 2 0 0 1 4 0v13a2 2 0 0 0 4 0V4a2 2 0 0 1 4 0v13a2 2 0 0 0 4 0v-4a2 2 0 0 1 2 -2", true))
+
+    /** Graine Classic in light, as the server resolves it. */
+    @JvmField
+    val CLASSIC_LIGHT = ThemeTokens(
+        v = 1, preset = DEFAULT_PRESET, scheme = "light",
+        colors = ThemeColors(
+            background = "#F7F7F5", surface = "#FFFFFF", surfaceRaised = "#FFFFFF", text = "#101318", textMuted = "#5F6672",
+            border = "#E5E4E0", accent = "#318CE7", onAccent = "#FFFFFF", accentSoft = "#E6F1FC", success = "#16A34A",
+            warning = "#B45309", danger = "#DC2626", userBubble = "#318CE7", userBubbleText = "#FFFFFF",
+            agentBubble = "#F1F1EF", agentBubbleText = "#101318", scrim = "#000000",
+        ),
+        font = CLASSIC_FONT, shape = CLASSIC_SHAPE, spacing = CLASSIC_SPACING,
+        elevation = ThemeElevation(ThemeShadow(2.0, 8.0, 0.0, 0.08, "#000000"), CLASSIC_FLOATING, null),
+        motion = CLASSIC_MOTION, icons = CLASSIC_ICONS, glass = null, bubbles = "filled",
+    )
+
+    /** Graine Classic in dark, as the server resolves it. */
+    @JvmField
+    val CLASSIC_DARK = ThemeTokens(
+        v = 1, preset = DEFAULT_PRESET, scheme = "dark",
+        colors = ThemeColors(
+            background = "#0E0F11", surface = "#17181B", surfaceRaised = "#1F2024", text = "#F5F5F4", textMuted = "#A0A5AE",
+            border = "#2C2E33", accent = "#318CE7", onAccent = "#FFFFFF", accentSoft = "#1D3248", success = "#22C55E",
+            warning = "#F59E0B", danger = "#F87171", userBubble = "#318CE7", userBubbleText = "#FFFFFF",
+            agentBubble = "#23252A", agentBubbleText = "#F5F5F4", scrim = "#000000",
+        ),
+        font = CLASSIC_FONT, shape = CLASSIC_SHAPE, spacing = CLASSIC_SPACING,
+        elevation = ThemeElevation(ThemeShadow(2.0, 8.0, 0.0, 0.16, "#000000"), CLASSIC_FLOATING, null),
+        motion = CLASSIC_MOTION, icons = CLASSIC_ICONS, glass = null, bubbles = "filled",
+    )
+}

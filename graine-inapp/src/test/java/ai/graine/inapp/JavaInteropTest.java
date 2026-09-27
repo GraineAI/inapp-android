@@ -33,6 +33,27 @@ public class JavaInteropTest {
         assertEquals(1, screen.getFields().size());
     }
 
+    @Test public void aJavaAppMapsItsFontsWithoutSpellingOutTheRest() {
+        GraineConfig config = new GraineConfig("https://www.graine.ai", "pk_live_test",
+                Collections.<String, Object>emptyMap(), null, null, true, new GraineConfig.Timing(), false, null,
+                Collections.<String, android.graphics.Typeface>emptyMap());
+        assertTrue(config.getFonts().isEmpty());
+    }
+
+    @Test public void aDesignIsReadPickedAndItsGlyphAskedForFromJava() throws Exception {
+        String json = "{\"config\":{\"preset\":\"graine-classic\",\"scheme\":\"dark\"},"
+                + "\"light\":{\"colors\":{\"accent\":\"#7C3AED\"}},\"dark\":{\"colors\":{\"accent\":\"#7c3aed\"}}}";
+        ResolvedDesign design = ResolvedDesign.parse(json);
+        ThemeTokens tokens = design.pick(Boolean.FALSE);
+        assertEquals("dark", tokens.getScheme());
+        assertEquals("#7C3AED", tokens.getColors().getAccent());
+        assertTrue(tokens.isDark());
+        assertEquals(null, ResolvedDesign.parse("not a design"));
+        assertEquals("https://www.graine.ai/api/embed/glyph?id=waveform&c=FFFFFF&s=96&w=2&v=2",
+                Design.glyphUrl("https://www.graine.ai", "waveform", "#FFFFFF", 96.0));
+        assertEquals(28.0, Design.launcherCorner("circle", Design.LAUNCHER_SIZE, Design.CLASSIC_LIGHT.getShape().getRadius()), 0.0);
+    }
+
     @Test public void aListenerOverridesOnlyTheCallbackItWants() {
         final boolean[] ended = {false};
         GraineListener listener = new GraineListener() {

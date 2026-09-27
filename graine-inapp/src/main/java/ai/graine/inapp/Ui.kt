@@ -6,6 +6,7 @@ import android.content.ContextWrapper
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
@@ -39,8 +40,20 @@ internal object Ui {
     fun isDeviceDark(ctx: Context): Boolean =
         (ctx.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
 
-    /** A CSS weight (400–800) on a TextView: exact from Android 9, bold-or-not before. */
-    fun weight(tv: TextView, w: Int) {
+    /**
+     * A CSS weight (400–800) on a TextView: exact from Android 9, bold-or-not
+     * before. `family` is a font the app handed over for a design; without
+     * one it is the system font, and a family that cannot be weighted falls
+     * back to it rather than failing.
+     */
+    fun weight(tv: TextView, w: Int, family: Typeface? = null) {
+        if (family != null) {
+            runCatching {
+                tv.typeface = if (Build.VERSION.SDK_INT >= 28) Typeface.create(family, w.coerceIn(100, 1000), false)
+                else Typeface.create(family, if (w >= 600) Typeface.BOLD else Typeface.NORMAL)
+                return
+            }
+        }
         tv.typeface = if (Build.VERSION.SDK_INT >= 28) Typeface.create(Typeface.DEFAULT, w.coerceIn(100, 1000), false)
         else if (w >= 600) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
     }
@@ -103,6 +116,147 @@ internal object Ui {
         var c = ctx
         while (c is ContextWrapper) { if (c is Activity) return c; c = c.baseContext }
         return null
+    }
+}
+
+/**
+ * THE DESIGN'S TOKENS, AS A VIEW TAKES THEM.
+ *
+ * The bar, the launcher and the components all draw through here, so a
+ * shadow, a font role or a transition means the same thing on each. Only
+ * called with tokens in hand: without a design the views keep drawing from
+ * the appearance, exactly as before.
+ */
+internal object Themed {
+    /** The text roles contract/DESIGN.md names. */
+    enum class Role { TITLE, BODY, STRONG, CAPTION }
+
+    fun color(hex: String?, fallback: Int = Color.BLACK): Int = Appearance.argb(hex) ?: fallback
+
+    /** `color` at `alpha` (0–1). */
+    fun alpha(color: Int, alpha: Double): Int = (Math.round(alpha.coerceIn(0.0, 1.0) * 255).toInt() shl 24) or (color and 0xFFFFFF)
+
+    /** `surface` — translucent under glass. */
+    fun surface(t: ThemeTokens): Int {
+        val c = color(t.colors.surface, Color.WHITE)
+        return t.glass?.let { alpha(c, it.surfaceOpacity) } ?: c
+    }
+
+    /** What reads on an accent the design did not choose (a component's own, a host's): by luminance, as before designs. */
+    fun readableOnHex(accentHex: String): String = if (Appearance.luminance(accentHex) > 0.45) "#101318" else "#FFFFFF"
+
+    fun readableOn(accentHex: String): Int = color(readableOnHex(accentHex), Color.WHITE)
+
+    fun px(ctx: Context, dp: Double): Int = Ui.dp(ctx, dp.toFloat())
+
+    /**
+     * Text in one of the design's roles: family, size, weight, letter spacing,
+     * line height. No role keeps the element's own size (`sp`) and weight,
+     * scaled with the design's body size — Graine Classic's 15 leaves it
+     * untouched — in the body family.
+     */
+    fun type(tv: TextView, t: ThemeTokens, role: Role?, graine: GraineInApp?, sp: Float = 15f, weight: Int = 400) {
+        val f = t.font
+        val heading = role == Role.TITLE
+        val size = when (role) {
+            Role.TITLE -> f.scale.title
+            Role.BODY, Role.STRONG -> f.scale.body
+            Role.CAPTION -> f.scale.caption
+            null -> sp * (f.scale.body / 15.0)
+        }
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, size.toFloat())
+        val w = when (role) {
+            Role.TITLE -> f.weights.title
+            Role.STRONG -> f.weights.strong
+            Role.BODY, Role.CAPTION -> f.weights.body
+            null -> weight
+        }
+        Ui.weight(tv, w, graine?.typeface(if (heading) f.heading else f.body))
+        tv.letterSpacing = (if (heading) f.letterSpacing.title else f.letterSpacing.body).toFloat()
+        if (role == Role.TITLE || role == Role.BODY) Ui.lineHeight(tv, (size * (if (heading) f.lineHeight.title else f.lineHeight.body)).toFloat())
+    }
+
+    /**
+     * A soft shadow as Android draws one — elevation, and the shadow colour
+     * where the platform lets it be set (Android 9+). Null: none. A
+     * translucent fill casts none either; that is the platform's rule and the
+     * right one for glass.
+     */
+    fun shadow(v: View, s: ThemeShadow?) {
+        val (elevation, alpha) = Design.androidShadow(s)
+        v.elevation = px(v.context, elevation).toFloat()
+        if (Build.VERSION.SDK_INT >= 28 && s != null) {
+            val c = alpha(color(s.color), alpha)
+            v.outlineSpotShadowColor = c
+            v.outlineAmbientShadowColor = c
+        }
+    }
+
+    /**
+     * A surface — fill, outline, corners — and its depth: the soft shadow, or
+     * the design's hard offset, a solid copy of the shape in `colors.text`
+     * behind it. The offset needs room inside the view, so the padding is set
+     * here, grown on the side the copy shows.
+     */
+    fun surface(
+        v: View, t: ThemeTokens, fill: Int, radiusPx: Float, strokePx: Int, strokeColor: Int, shadow: ThemeShadow?,
+        left: Int, top: Int, right: Int, bottom: Int,
+    ) {
+        val front = Ui.rounded(fill, radiusPx, strokePx, strokeColor)
+        val o = t.elevation.hardOffset
+        if (o == null) {
+            v.background = front
+            shadow(v, shadow)
+            v.setPadding(left, top, right, bottom)
+            return
+        }
+        val x = px(v.context, Math.abs(o.x)); val y = px(v.context, Math.abs(o.y))
+        val east = o.x >= 0; val south = o.y >= 0
+        v.background = android.graphics.drawable.LayerDrawable(arrayOf(Ui.rounded(color(t.colors.text), radiusPx), front)).apply {
+            setLayerInset(0, if (east) x else 0, if (south) y else 0, if (east) 0 else x, if (south) 0 else y)
+            setLayerInset(1, if (east) 0 else x, if (south) 0 else y, if (east) x else 0, if (south) y else 0)
+        }
+        v.elevation = 0f
+        v.setPadding(left + (if (east) 0 else x), top + (if (south) 0 else y), right + (if (east) x else 0), bottom + (if (south) y else 0))
+    }
+
+    /**
+     * Glass on a window the SDK owns: what is behind it blurred, on Android
+     * 12+ where the compositor can (and the phone has not turned blur off).
+     * Before that, and inside a window the app owns (the bar), glass is
+     * translucency alone — a view cannot blur what lies under it, and
+     * RenderEffect would blur the view's own content instead.
+     */
+    fun blurBehind(w: android.view.Window, glass: ThemeGlass?) {
+        if (Build.VERSION.SDK_INT < 31) return
+        val radius = glass?.blur?.takeIf { it > 0 }?.let { px(w.context, it) } ?: 0
+        if (radius > 0) w.addFlags(android.view.WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+        else w.clearFlags(android.view.WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+        w.attributes = w.attributes.apply { blurBehindRadius = radius }
+    }
+
+    /** The phone's animator duration scale: 0 when the customer turned animations off. */
+    fun animatorScale(ctx: Context): Float =
+        runCatching { android.provider.Settings.Global.getFloat(ctx.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f) }
+            .getOrDefault(1f)
+
+    /** How long a transition runs here, ms; 0 is none (see [Design.motionMs]). */
+    fun motionMs(ctx: Context, t: ThemeTokens?): Long = Design.motionMs(t?.motion, animatorScale(ctx))
+
+    fun interpolator(m: ThemeMotion): android.animation.TimeInterpolator = when (m.easing) {
+        "emphasized" -> android.view.animation.PathInterpolator(0.05f, 0.7f, 0.1f, 1f)
+        "spring" -> android.view.animation.OvershootInterpolator((0.5 + m.bounce * 4).toFloat())
+        "linear" -> android.view.animation.LinearInterpolator()
+        else -> android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f)
+    }
+
+    /** Fade a view in to `toAlpha`, rising `risePx`, over the design's duration. Nothing at all when that is none. */
+    fun enter(v: View, t: ThemeTokens?, risePx: Float = 0f, toAlpha: Float = 1f) {
+        val ms = motionMs(v.context, t)
+        if (ms <= 0 || t == null) return
+        v.alpha = 0f
+        v.translationY = risePx
+        v.animate().alpha(toAlpha).translationY(0f).setDuration(ms).setInterpolator(interpolator(t.motion)).start()
     }
 }
 

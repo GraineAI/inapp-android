@@ -35,9 +35,11 @@ import org.json.JSONObject
  * components the agent draws ([widgetView]) — so a card the agent shows sits
  * on the bar and moves with it.
  *
- *  - The DASHBOARD decides how it looks (Embed & Widgets → Appearance: accent,
- *    heading, logo, light/dark/auto, corner radius); [accent], [name],
- *    [avatarUrl], [scheme] and [radius] override one thing each.
+ *  - The DASHBOARD decides how it looks: the design the brand chose (colours,
+ *    corners, outline, shadow, type, glass — contract/DESIGN.md → Voice bar),
+ *    or, from a server that predates designs, Embed & Widgets → Appearance
+ *    (accent, heading, logo, light/dark/auto, corner radius). [accent],
+ *    [name], [avatarUrl], [scheme] and [radius] override one thing each.
  *  - The CUSTOMER decides where it sits: drag it up or down (a tap still
  *    taps). Restore a saved spot with [placementOffset]; hear about a new one
  *    in [onPlacementChange] and persist it — the SDK has no storage of its own.
@@ -114,6 +116,10 @@ class GraineAgentBarView @JvmOverloads constructor(
     private var micDenied = false
     private var look = Look.resolve(this)
     private var avatarUrlShown = ""
+    private var unwatch: (() -> Unit)? = null
+    private var captionShown = false
+    /** The design's glyph for the avatar, when there is no face to show. */
+    private val avatarMark = MarkLoader { drawAvatar(look, force = true) }
 
     private val caption = TextView(context).apply {
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
@@ -150,6 +156,9 @@ class GraineAgentBarView @JvmOverloads constructor(
         Ui.holdsTouches(this)
     }
 
+    /** The call button's glyph colour before designs: the theme's, as it always was. */
+    private val callInk = (call.getChildAt(0) as TextView).textColors
+
     init {
         orientation = VERTICAL
         clipChildren = false
@@ -173,6 +182,7 @@ class GraineAgentBarView @JvmOverloads constructor(
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         graine.addListener(this)
+        unwatch = graine.onDesignChange { applyLook() }
         viewTreeObserver.addOnGlobalLayoutListener(layoutWatcher)
         setOnApplyWindowInsetsListener { v, insets -> post { updateKeyboard() }; v.onApplyWindowInsets(insets) }
         if (Build.VERSION.SDK_INT >= 30) setWindowInsetsAnimationCallback(ImeAnimation())
@@ -181,6 +191,8 @@ class GraineAgentBarView @JvmOverloads constructor(
 
     override fun onDetachedFromWindow() {
         graine.removeListener(this)
+        unwatch?.invoke()
+        unwatch = null
         viewTreeObserver.removeOnGlobalLayoutListener(layoutWatcher)
         setOnApplyWindowInsetsListener(null)
         if (Build.VERSION.SDK_INT >= 30) setWindowInsetsAnimationCallback(null)
@@ -194,38 +206,57 @@ class GraineAgentBarView @JvmOverloads constructor(
 
     // ── the dashboard is the source; the view follows it ─────────────────────
 
-    /** Everything visual, resolved once from the dashboard and the overrides. */
+    /**
+     * Everything visual, resolved once from the dashboard and the overrides.
+     * With a design, every colour, corner and size is the design's token;
+     * without one (an older server) it is exactly the look from before designs.
+     */
     private class Look(
         val accent: Int, val accentHex: String, val name: String, val avatarUrl: String?, val dark: Boolean,
         val radiusDp: Int, val loader: LoaderLook, val loaderColor: Int, val logoUrl: String?,
+        /** Null: no design — draw from the appearance. */
+        val tokens: ThemeTokens?,
+        /** What reads on [accent]: the design's own, unless a host override replaced the accent. */
+        val onAccentHex: String,
+        val barRadiusDp: Double, val captionRadiusDp: Double,
     ) {
-        // ui.tsx's two palettes, with the dashboard choosing between them.
-        val surface = if (dark) 0xFF17161A.toInt() else Color.WHITE
-        val border = if (dark) 0x17FFFFFF else 0x1A000000
-        val text = if (dark) 0xFFF2F3F5.toInt() else 0xFF16181C.toInt()
-        val sub = if (dark) 0xFF9AA0A6.toInt() else 0xFF61666D.toInt()
-        val chip = if (dark) 0x14FFFFFF else 0x0D000000
-        val danger = if (dark) 0xFFE5484D.toInt() else 0xFFD32F2F.toInt()
+        // ui.tsx's two palettes, with the dashboard choosing between them — or the design's tokens.
+        val surface = tokens?.let { Themed.surface(it) } ?: if (dark) 0xFF17161A.toInt() else Color.WHITE
+        val border = tokens?.let { Themed.color(it.colors.border) } ?: if (dark) 0x17FFFFFF else 0x1A000000
+        val text = tokens?.let { Themed.color(it.colors.text) } ?: if (dark) 0xFFF2F3F5.toInt() else 0xFF16181C.toInt()
+        val sub = tokens?.let { Themed.color(it.colors.textMuted) } ?: if (dark) 0xFF9AA0A6.toInt() else 0xFF61666D.toInt()
+        val chip = tokens?.let { Themed.color(it.colors.accentSoft) } ?: if (dark) 0x14FFFFFF else 0x0D000000
+        val danger = tokens?.let { Themed.color(it.colors.danger) } ?: if (dark) 0xFFE5484D.toInt() else 0xFFD32F2F.toInt()
+        val onAccent = Themed.color(onAccentHex, Color.WHITE)
+        /** The outline's width, dp. */
+        val borderWidth = tokens?.shape?.borderWidth ?: 1.0
 
         companion object {
             fun resolve(v: GraineAgentBarView): Look {
                 val g = GraineInApp.get()
                 val appearance: JSONObject? = g.session?.appearance
                 val dash = Appearance.resolve(appearance, Appearance.DEFAULT_ACCENT, "Assistant", origin = g.config.baseUrl)
-                val accentHex = v.accent?.takeIf { Appearance.argb(it) != null } ?: dash.accent
+                val t = g.themeTokens(v.context, v.scheme)
+                val accentHex = v.accent?.takeIf { Appearance.argb(it) != null } ?: t?.colors?.accent ?: dash.accent
                 val theme = v.scheme ?: Js.strOrEmpty(appearance?.opt("theme")).ifEmpty { "auto" }
                 val loader = Loaders.resolve(appearance?.opt("loader"))
                 val accent = Appearance.argb(accentHex) ?: Color.parseColor(Appearance.DEFAULT_ACCENT)
+                val radiusDp = v.radius ?: Math.round(dash.radius).toInt()
                 return Look(
                     accent = accent,
                     accentHex = accentHex,
                     name = v.name ?: dash.heading,
                     avatarUrl = v.avatarUrl ?: dash.logoUrl,
-                    dark = Appearance.isDark(theme, Ui.isDeviceDark(v.context)),
-                    radiusDp = v.radius ?: Math.round(dash.radius).toInt(),
+                    dark = t?.isDark ?: Appearance.isDark(theme, Ui.isDeviceDark(v.context)),
+                    radiusDp = radiusDp,
                     loader = loader,
-                    loaderColor = Appearance.argb(loader.color) ?: Appearance.argb(dash.accent) ?: accent,
+                    loaderColor = Appearance.argb(loader.color) ?: Appearance.argb(t?.colors?.accent) ?: Appearance.argb(dash.accent) ?: accent,
                     logoUrl = dash.logoUrl,
+                    tokens = t,
+                    onAccentHex = if (t != null && v.accent == null) t.colors.onAccent else Themed.readableOnHex(accentHex),
+                    // The bar's corners are the design's largest; a host's radius keeps the formula it had.
+                    barRadiusDp = if (t != null && v.radius == null) t.shape.radius.xl else minOf(26, radiusDp + 8).toDouble(),
+                    captionRadiusDp = if (t != null && v.radius == null) t.shape.radius.lg else radiusDp.toDouble(),
                 )
             }
         }
@@ -234,31 +265,70 @@ class GraineAgentBarView @JvmOverloads constructor(
     private fun applyLook() {
         look = Look.resolve(this)
         val l = look
-        bar.background = Ui.rounded(l.surface, dp(minOf(26, l.radiusDp + 8)).toFloat(), dp(1), l.border)
-        caption.background = Ui.rounded(l.surface, dp(l.radiusDp).toFloat(), dp(1), l.border)
+        val t = l.tokens
+        val line = Themed.px(context, l.borderWidth)
+        bar.background = Ui.rounded(l.surface, Themed.px(context, l.barRadiusDp).toFloat(), line, l.border)
+        caption.background = Ui.rounded(l.surface, Themed.px(context, l.captionRadiusDp).toFloat(), line, l.border)
         caption.setTextColor(l.text)
         nameView.text = l.name
         nameView.setTextColor(l.text)
         status.setTextColor(l.sub)
+        if (t != null) {
+            Themed.shadow(bar, t.elevation.floating)
+            Themed.type(caption, t, Themed.Role.STRONG, graine)
+            Themed.type(nameView, t, null, graine, 15f, t.font.weights.strong)
+            Themed.type(status, t, Themed.Role.CAPTION, graine)
+        } else {
+            // Back to the look from before designs — a preview can be cleared.
+            bar.elevation = dp(8).toFloat()
+            if (Build.VERSION.SDK_INT >= 28) { bar.outlineSpotShadowColor = Color.BLACK; bar.outlineAmbientShadowColor = Color.BLACK }
+            (call.getChildAt(0) as? TextView)?.setTextColor(callInk)
+            for ((tv, sp, w) in listOf(Triple(caption, 15f, 600), Triple(nameView, 15f, 800), Triple(status, 12.5f, 400))) {
+                tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp)
+                Ui.weight(tv, w)
+                tv.letterSpacing = 0f
+                tv.setLineSpacing(0f, 1f)
+            }
+        }
         drawAvatar(l)
         shownLoader = null
         refresh()
     }
 
-    private fun drawAvatar(l: Look) {
+    private fun drawAvatar(l: Look, force: Boolean = false) {
         val url = l.avatarUrl ?: ""
-        if (avatar.childCount > 0 && url == avatarUrlShown && url.isNotEmpty()) return
+        if (!force && avatar.childCount > 0 && url == avatarUrlShown && url.isNotEmpty()) return
         avatarUrlShown = url
         avatar.removeAllViews()
         if (url.isNotEmpty()) {
+            avatarMark.load(emptyList())
             avatar.addView(roundedImage(context, url, 0f, l.chip, oval = true), FrameLayout.LayoutParams(dp(38), dp(38)))
+            return
+        }
+        // No face: the design's glyph on the accent, as the launcher draws it; "✦" until it loads, or without one.
+        val t = l.tokens
+        val glyph = t?.icons?.launcher?.let { gl ->
+            Design.glyphUrl(graine.config.baseUrl, gl.id, l.onAccentHex, Ui.dp(context, 38 * Design.LAUNCHER_GLYPH.toFloat()).toDouble(), t.icons.stroke)
+        }
+        if (!force) avatarMark.load(listOfNotNull(glyph))
+        val bmp = avatarMark.bitmap
+        val disc = Ui.rounded(l.accent, dp(19).toFloat())
+        if (bmp != null) {
+            avatar.addView(android.widget.ImageView(context).apply {
+                setImageBitmap(bmp)
+                scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
+                val pad = Math.round(dp(38) * (1 - Design.LAUNCHER_GLYPH) / 2).toInt()
+                setPadding(pad, pad, pad, pad)
+                background = disc
+                importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, FrameLayout.LayoutParams(dp(38), dp(38)))
         } else {
             avatar.addView(TextView(context).apply {
                 text = "✦"
                 gravity = Gravity.CENTER
-                setTextColor(Color.WHITE)
+                setTextColor(if (t != null) l.onAccent else Color.WHITE)
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
-                background = Ui.rounded(l.accent, dp(19).toFloat())
+                background = disc
             }, FrameLayout.LayoutParams(dp(38), dp(38)))
         }
     }
@@ -319,14 +389,22 @@ class GraineAgentBarView @JvmOverloads constructor(
         mute.contentDescription = if (voice.muted) "Unmute" else "Mute"
         mute.background = Ui.rounded(if (voice.muted) l.danger else l.chip, dp(19).toFloat())
         val live = voice.connected || voice.connecting
-        (call.getChildAt(0) as? TextView)?.text = if (live) "✕" else "📞"
+        (call.getChildAt(0) as? TextView)?.let { glyph ->
+            glyph.text = if (live) "✕" else "📞"
+            // The end button is white on danger, the start button what reads on the accent.
+            if (l.tokens != null) glyph.setTextColor(if (live) Color.WHITE else l.onAccent)
+        }
         call.contentDescription = if (live) "End call" else "Start a call"
         call.background = Ui.rounded(if (live) l.danger else l.accent, dp(19).toFloat())
         if (voice.connectivity == Connectivity.FAILED) call.setOnClickListener { voice.retry() }
         else call.setOnClickListener { if (voice.connected || voice.connecting) voice.end() else voice.start() }
         caption.text = lastCaption
+        val showCaption = voice.connected && !lastCaption.isNullOrBlank()
+        caption.visibility = if (showCaption) VISIBLE else GONE
         caption.alpha = if (captionLive) 0.8f else 1f
-        caption.visibility = if (voice.connected && !lastCaption.isNullOrBlank()) VISIBLE else GONE
+        // It arrives over the design's duration; with no motion (or no design), it is simply there.
+        if (showCaption && !captionShown) Themed.enter(caption, l.tokens, dp(6).toFloat(), caption.alpha)
+        captionShown = showCaption
     }
 
     private fun roundButton(glyph: String, label: String, onClick: () -> Unit) = LinearLayout(context).apply {

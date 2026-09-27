@@ -17,7 +17,7 @@ Integration guide: https://www.graine.ai/docs/in-app/android
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    implementation("ai.graine:inapp-android:0.1.1")
+    implementation("ai.graine:inapp-android:0.2.0")
 }
 ```
 
@@ -56,6 +56,25 @@ root.addView(GraineAgentBarView(this),
 The engine then follows the customer from activity to activity; a call in
 progress carries on. Tell the agent what is on screen with `setScreen`, and
 see the guide for components, friction, Jetpack Compose and Java.
+
+## How it looks
+
+The dashboard decides: the design the brand chose (a philosophy and a few
+knobs) reaches the SDK as light and dark tokens, and the bar, the components,
+the loader and `GraineLauncherView` draw them — colours, corners, outlines,
+shadows, type, glass and motion. Nothing to configure. If the design names a
+font the app bundles, map it and it is used; otherwise the system font is:
+
+```kotlin
+GraineConfig(
+    baseUrl = "https://www.graine.ai",
+    publishableKey = "pk_live_…",
+    fonts = mapOf("Inter" to Typeface.createFromAsset(assets, "fonts/Inter.ttf")),
+)
+```
+
+An app drawing its own UI reads the same tokens with
+`GraineInApp.get().themeTokens(context)`.
 
 ## The sample app
 

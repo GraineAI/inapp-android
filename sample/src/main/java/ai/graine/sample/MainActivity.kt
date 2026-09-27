@@ -6,10 +6,12 @@ import ai.graine.inapp.FrictionSignal
 import ai.graine.inapp.GraineAgentBarView
 import ai.graine.inapp.GraineField
 import ai.graine.inapp.GraineInApp
+import ai.graine.inapp.GraineLauncherView
 import ai.graine.inapp.GraineListener
 import ai.graine.inapp.GraineLoaderView
 import ai.graine.inapp.Loaders
 import ai.graine.inapp.GraineScreen
+import ai.graine.inapp.ResolvedDesign
 import ai.graine.inapp.Role
 import ai.graine.inapp.SessionConfig
 import ai.graine.inapp.Transport
@@ -160,6 +162,7 @@ class MainActivity : Activity() {
         if (intent?.getBooleanExtra("autostart", false) == true) graine.voice.start()
         if (BuildConfig.DEBUG) {
             if (intent?.getBooleanExtra("maskCheck", false) == true) runMaskCheck()
+            if (intent?.hasExtra("demoDesign") == true) showDemoDesign(root, intent.getIntExtra("demoDesign", 0))
             showDemoWidget()
             if (intent?.hasExtra("demoLoaders") == true) content.addView(demoLoaders(muted), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(24) })
         }
@@ -210,6 +213,22 @@ class MainActivity : Activity() {
         // The rule as it was, verbatim from JavaScript: what this engine does with it.
         val verbatim = Regex("\\b[A-Z]{5}[0-9]{4}[A-Z]\\b").replace("PAN ABCDE1234Fहै", "[PAN]")
         Log.i("GraineSample", "maskCheck verbatim JS rule on this engine: $verbatim")
+    }
+
+    /**
+     * Debug builds only: draw one of the contract's designs instead of the
+     * session's, with the launcher, so two designs can be compared without
+     * saving either in the dashboard.
+     *   adb push sdk/contract/design.json /sdcard/Android/data/ai.graine.sample/files/
+     *   adb shell am start -n ai.graine.sample/.MainActivity --ei demoDesign 1 --es demoWidget product_list
+     */
+    private fun showDemoDesign(root: FrameLayout, index: Int) {
+        val cases = runCatching { JSONObject(java.io.File(getExternalFilesDir(null), "design.json").readText()).getJSONArray("cases") }
+            .getOrElse { Log.e("GraineSample", "demoDesign: push sdk/contract/design.json first ($it)"); return }
+        val design = ResolvedDesign.parse(cases.optJSONObject(index.coerceIn(0, cases.length() - 1))?.optJSONObject("design"))
+        graine.previewDesign(design)
+        root.addView(GraineLauncherView(this), FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { setMargins(0, dp(20), dp(20), 0) })
+        Log.i("GraineSample", "demo design $index: ${design?.config?.toJson()}")
     }
 
     /** Debug builds only: draw a hard-coded component, so the renderer can be seen without a call. */

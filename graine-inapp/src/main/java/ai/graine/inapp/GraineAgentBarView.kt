@@ -1,9 +1,13 @@
 package ai.graine.inapp
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.Outline
 import android.graphics.Rect
+import android.graphics.drawable.Drawable
 import android.os.Build
 import android.text.TextUtils
 import android.util.AttributeSet
@@ -11,6 +15,7 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewOutlineProvider
 import android.view.ViewTreeObserver
 import android.view.WindowInsets
 import android.view.WindowInsetsAnimation
@@ -20,37 +25,52 @@ import android.widget.TextView
 import org.json.JSONObject
 
 /**
- * THE DEFAULT AGENT BAR — a working UI, not a requirement.
+ * THE VOICE BAR — what the customer sees during a call, drawn by the SDK
+ * exactly as the dashboard's Garage draws it in its phone preview.
  *
  * A bar rather than a sheet: the agent can see the screen and tell the
  * customer what to tap, and a sheet would cover the very thing it is talking
  * about. Place it at the bottom of your layout, above your tab bar.
  *
- * It says the network's name out loud — "weak connection", "no connection",
- * "reconnecting…" — because a customer whose agent goes quiet on a train
- * reads "listening" and concludes the agent is broken. While the call is
- * coming up the status line IS the dashboard's loader, in the brand's words.
+ * The DASHBOARD decides how it looks — the design the brand chose, element by
+ * element as contract/DESIGN.md → Voice bar specifies, and nothing the app
+ * passes: a 60 dp bar in `surface` (translucent under glass) with its outline,
+ * `radius.xl` corners and the floating shadow or the hard offset; the accent
+ * avatar with the design's launcher glyph (or the logo, or the first letter);
+ * the heading and a status line whose four-bar meter moves at the design's
+ * pace; the microphone in `accent` (`danger` when muted); the end button in
+ * `danger` on a call and a quiet close otherwise. The SDK's own icons are
+ * drawn in the design's icon style, the words in the design's typeface, which
+ * the SDK fetches itself. Above the bar, the line being said sits on a card
+ * of its own, and it rises in over the design's duration.
  *
- * One unit, three layers, bottom up: the bar, the live caption, and the
- * components the agent draws ([widgetView]) — so a card the agent shows sits
- * on the bar and moves with it.
+ * It says the network's name out loud — "Weak connection", "No connection",
+ * "Reconnecting…" — because a customer whose agent goes quiet on a train
+ * reads "Listening" and concludes the agent is broken. While the call is
+ * coming up, and while the agent works out its answer, the status line IS the
+ * dashboard's loader, in the brand's words.
  *
- *  - The DASHBOARD decides how it looks: the design the brand chose (colours,
- *    corners, outline, shadow, type, glass — contract/DESIGN.md → Voice bar),
- *    or, from a server that predates designs, Embed & Widgets → Appearance
- *    (accent, heading, logo, light/dark/auto, corner radius). [accent],
- *    [name], [avatarUrl], [scheme] and [radius] override one thing each.
+ * One unit, bottom up: the bar, the live caption, and the components the
+ * agent draws ([widgetView]) — so a card the agent shows sits on the bar and
+ * moves with it.
+ *
+ *  - [accent], [name], [avatarUrl], [scheme] and [radius] override one thing
+ *    each; the design is the source for everything else. From a server that
+ *    predates designs, the bar is Graine Classic in the dashboard's accent,
+ *    corners and light/dark — the look every surface had before designs.
  *  - The CUSTOMER decides where it sits: drag it up or down (a tap still
  *    taps). Restore a saved spot with [placementOffset]; hear about a new one
  *    in [onPlacementChange] and persist it — the SDK has no storage of its own.
  *  - The KEYBOARD never covers it: it rises by the keyboard's height minus
  *    whatever the window already shrank ([KeyboardLift.liftFor]), so it is
  *    right under adjustResize, adjustPan and edge-to-edge alike.
+ *  - [onClose] hears the end button when there is no call to end (and after a
+ *    hang-up): hide the bar there, or go back to your launcher.
  *
  * Built from plain platform widgets: no AndroidX, no Compose, no Material, so
  * it drops into any app without a dependency conflict. Every piece is public
- * state on [GraineVoice]; an app with its own design system should draw its
- * own from those and ignore this class.
+ * state on [GraineVoice]; an app with its own design system can draw its own
+ * from those and ignore this class.
  */
 class GraineAgentBarView @JvmOverloads constructor(
     context: Context,
@@ -59,21 +79,28 @@ class GraineAgentBarView @JvmOverloads constructor(
 
     // ── overrides: the dashboard is the source, these are the exceptions ──
 
-    /** #RRGGBB for the avatar, the call button and components. Default: the dashboard's accent. */
+    /** #RRGGBB for the avatar, the microphone and the meter. Default: the design's accent. */
     var accent: String? = null
         set(v) { field = v; applyLook() }
     /** The name beside the status. Default: the dashboard's heading, else "Assistant". */
     var name: String? = null
         set(v) { field = v; applyLook() }
-    /** A face. Default: the dashboard's logo, else a glyph on the accent. */
+    /** A picture for the avatar, filling its circle. Default: the design's glyph, else the dashboard's logo, else the first letter. */
     var avatarUrl: String? = null
         set(v) { field = v; applyLook() }
-    /** "light", "dark" or "auto" (the device). Default: the dashboard's theme. */
+    /** "light", "dark" or "auto" (the device). Default: the design's scheme. */
     var scheme: String? = null
         set(v) { field = v; applyLook(); widgetView.scheme = v }
-    /** Corner rounding in dp for the caption (the bar stays a pill). Default: the dashboard's radius. */
+    /** Corner rounding in dp for the caption card (the bar takes it plus 8, at most 26). Default: the design's radius.lg and radius.xl. */
     var radius: Int? = null
         set(v) { field = v; applyLook() }
+
+    /**
+     * The end button was pressed with no call to end, or a call was just hung
+     * up (once its goodbye has left the speaker): close the bar — hide it, or
+     * show your launcher again. Unset, a close does nothing: the bar stays.
+     */
+    var onClose: (() -> Unit)? = null
 
     // ── where it sits ──────────────────────────────────────────────────────
 
@@ -107,76 +134,120 @@ class GraineAgentBarView @JvmOverloads constructor(
     /** The components the agent draws, mounted above the caption so they move with the bar. */
     val widgetView: GraineWidgetView = GraineWidgetView(context)
 
+    /**
+     * A text conversation to open beside the call, with the switch between
+     * them, when the dashboard offers both (contract/DESIGN.md → Chat window).
+     * This SDK carries calls, not chats, so nothing sets it yet: until a chat
+     * is attached the bar offers the call alone.
+     */
+    internal var chat: ChatSource? = null
+        set(v) { field = v; chosenSurface = null; refresh() }
+
+    /** The attached chat changed — a message arrived, it came online. */
+    internal fun chatChanged() = refresh()
+
     private val graine = GraineInApp.get()
     private val voice get() = graine.voice
 
-    private var agentSpeaking = false
     private var lastCaption: String? = null
+    private var captionRole = Role.AGENT
     private var captionLive = false
     private var micDenied = false
     private var look = Look.resolve(this)
-    private var avatarUrlShown = ""
     private var unwatch: (() -> Unit)? = null
     private var captionShown = false
-    /** The design's glyph for the avatar, when there is no face to show. */
-    private val avatarMark = MarkLoader { drawAvatar(look, force = true) }
+    private var chatShown = false
+    /** The loader moment the status line shows; null while it shows words. */
+    private var shownLoader: String? = null
+    /** The customer's last switch between the call and the chat; null follows the dashboard. */
+    private var chosenSurface: String? = null
+    private var chatWindow: ChatWindowView? = null
+    /** Icons drawn for this look, by name and colour: a caption arriving redraws the buttons, not the drawings. */
+    private val icons = HashMap<String, Drawable>()
+    /** The bar's corners and whether its face is opaque, for the outline this view casts its shadow in. */
+    private var barCornerPx = 0f
+    private var barOpaque = true
 
-    private val caption = TextView(context).apply {
-        setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-        maxLines = 3
+    private val captionYou = TextView(context).apply {
+        text = "YOU"
+        maxLines = 1
+        visibility = GONE
+    }
+    private val captionText = TextView(context).apply {
+        maxLines = VoiceBar.CAPTION_LINES
         ellipsize = TextUtils.TruncateAt.END
-        Ui.weight(this, 600)
-        setPadding(dp(14), dp(11), dp(14), dp(11))
+    }
+    private val caption = LinearLayout(context).apply {
+        orientation = VERTICAL
         visibility = GONE
         Ui.holdsTouches(this)
+        addView(captionYou, Ui.matchWidth().apply { bottomMargin = Ui.dp(context, 2) })
+        addView(captionText, Ui.matchWidth())
     }
+    private val chatSlot = FrameLayout(context).apply { visibility = GONE }
     private val avatar = FrameLayout(context)
     private val nameView = TextView(context).apply {
-        setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-        Ui.weight(this, 800)
         maxLines = 1
         ellipsize = TextUtils.TruncateAt.END
     }
-    private val status = TextView(context).apply {
-        setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
-        contentDescription = "Agent status"
+    private val statusText = TextView(context).apply {
         maxLines = 1
         ellipsize = TextUtils.TruncateAt.END
     }
-    /** The status line: words, or the loader while the call is coming up. */
+    private val meter = MeterView(context)
+    private val statusRow = LinearLayout(context).apply {
+        orientation = HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        addView(meter, Ui.wrap())
+        addView(statusText, Ui.wrap())
+    }
+    /** The status line: the meter and words, or the loader while waiting. */
     private val statusSlot = FrameLayout(context)
-    private var shownLoader: String? = null
-    private val mute = roundButton("🎙", "Mute") { voice.setMuted(!voice.muted); refresh() }
-    private val call = roundButton("📞", "Start a call") { if (voice.connected || voice.connecting) voice.end() else voice.start() }
+    private val words = LinearLayout(context).apply {
+        orientation = VERTICAL
+        addView(nameView, Ui.matchWidth())
+        addView(statusSlot, Ui.matchWidth().apply { topMargin = Ui.dp(context, 1) })
+    }
+    private val switchButton = RoundButton(context).apply { visibility = GONE; setOnClickListener { switchSurface() } }
+    private val micButton = RoundButton(context).apply { setOnClickListener { pressMic() } }
+    private val endButton = RoundButton(context).apply { setOnClickListener { pressEnd() } }
     private val bar = LinearLayout(context).apply {
         orientation = HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        setPadding(dp(8), dp(8), dp(8), dp(8))
-        elevation = dp(8).toFloat()
         Ui.holdsTouches(this)
     }
-
-    /** The call button's glyph colour before designs: the theme's, as it always was. */
-    private val callInk = (call.getChildAt(0) as TextView).textColors
 
     init {
         orientation = VERTICAL
         clipChildren = false
         clipToPadding = false
-        bar.addView(avatar, LayoutParams(dp(38), dp(38)))
-        val text = LinearLayout(context).apply {
-            orientation = VERTICAL
-            setPadding(dp(11), 0, dp(11), 0)
-            addView(nameView)
-            addView(statusSlot, Ui.matchWidth().apply { topMargin = dp(1) })
-        }
-        bar.addView(text, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
-        bar.addView(mute, LayoutParams(dp(38), dp(38)).apply { marginEnd = dp(8) })
-        bar.addView(call, LayoutParams(dp(38), dp(38)))
+        bar.addView(avatar, LayoutParams(px(VoiceBar.BUTTON), px(VoiceBar.BUTTON)))
+        bar.addView(words, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+        bar.addView(switchButton, Ui.wrap())
+        bar.addView(micButton, Ui.wrap())
+        bar.addView(endButton, Ui.wrap())
+        statusSlot.addView(statusRow)
         addView(widgetView, Ui.matchWidth())
-        addView(caption, Ui.matchWidth().apply { bottomMargin = dp(8) })
-        addView(bar, Ui.matchWidth())
+        addView(chatSlot, Ui.matchWidth().apply { bottomMargin = px(VoiceBar.STACK_GAP) })
+        addView(caption, Ui.matchWidth().apply { bottomMargin = px(VoiceBar.STACK_GAP) })
+        addView(bar, LayoutParams(LayoutParams.MATCH_PARENT, px(VoiceBar.HEIGHT)))
+        // The floating shadow is cast by THIS view, in the bar's outline. Cast by the bar, it was drawn
+        // inside this view and cut off at its bottom edge — the bar's own — as a grey box behind the corners.
+        outlineProvider = object : ViewOutlineProvider() {
+            override fun getOutline(view: View, outline: Outline) {
+                if (bar.width <= 0 || bar.height <= 0) { outline.setEmpty(); return }
+                outline.setRoundRect(bar.left, bar.top, bar.right, bar.bottom, barCornerPx)
+                // A translucent (glass) face casts no shadow, as the platform rules for any translucent fill.
+                outline.alpha = if (barOpaque) 1f else 0f
+            }
+        }
         applyLook()
+    }
+
+    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+        super.onLayout(changed, l, t, r, b)
+        // The bar moves down this view when a caption or a component appears above it: the shadow follows.
+        invalidateOutline()
     }
 
     override fun onAttachedToWindow() {
@@ -204,59 +275,72 @@ class GraineAgentBarView @JvmOverloads constructor(
         applyLook()
     }
 
+    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+        super.onWindowFocusChanged(hasWindowFocus)
+        // Back from Settings with the microphone granted: "Needs microphone" is no longer true, and the button may act again.
+        if (hasWindowFocus && micDenied && context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            micDenied = false
+            refresh()
+        }
+    }
+
     // ── the dashboard is the source; the view follows it ─────────────────────
 
-    /**
-     * Everything visual, resolved once from the dashboard and the overrides.
-     * With a design, every colour, corner and size is the design's token;
-     * without one (an older server) it is exactly the look from before designs.
-     */
+    /** Everything visual, resolved once from the design and the overrides. */
     private class Look(
-        val accent: Int, val accentHex: String, val name: String, val avatarUrl: String?, val dark: Boolean,
-        val radiusDp: Int, val loader: LoaderLook, val loaderColor: Int, val logoUrl: String?,
-        /** Null: no design — draw from the appearance. */
-        val tokens: ThemeTokens?,
+        /** The design's tokens for now — Graine Classic when the server sent none. */
+        val t: ThemeTokens,
+        val accent: Int,
         /** What reads on [accent]: the design's own, unless a host override replaced the accent. */
-        val onAccentHex: String,
-        val barRadiusDp: Double, val captionRadiusDp: Double,
+        val onAccent: Int,
+        /** The accent at chip strength: the switch and close buttons. */
+        val soft: Int,
+        val name: String,
+        /** A host's own avatar picture; it wins over the glyph. */
+        val hostImage: String?,
+        val logoUrl: String?,
+        val loader: LoaderLook,
+        val loaderColor: Int,
+        val barRadiusDp: Double,
+        val captionRadiusDp: Double,
+        val appearance: JSONObject?,
     ) {
-        // ui.tsx's two palettes, with the dashboard choosing between them — or the design's tokens.
-        val surface = tokens?.let { Themed.surface(it) } ?: if (dark) 0xFF17161A.toInt() else Color.WHITE
-        val border = tokens?.let { Themed.color(it.colors.border) } ?: if (dark) 0x17FFFFFF else 0x1A000000
-        val text = tokens?.let { Themed.color(it.colors.text) } ?: if (dark) 0xFFF2F3F5.toInt() else 0xFF16181C.toInt()
-        val sub = tokens?.let { Themed.color(it.colors.textMuted) } ?: if (dark) 0xFF9AA0A6.toInt() else 0xFF61666D.toInt()
-        val chip = tokens?.let { Themed.color(it.colors.accentSoft) } ?: if (dark) 0x14FFFFFF else 0x0D000000
-        val danger = tokens?.let { Themed.color(it.colors.danger) } ?: if (dark) 0xFFE5484D.toInt() else 0xFFD32F2F.toInt()
-        val onAccent = Themed.color(onAccentHex, Color.WHITE)
-        /** The outline's width, dp. */
-        val borderWidth = tokens?.shape?.borderWidth ?: 1.0
+        val surface = Themed.surface(t)
+        val border = Themed.color(t.colors.border)
+        val text = Themed.color(t.colors.text)
+        val muted = Themed.color(t.colors.textMuted)
+        val danger = Themed.color(t.colors.danger)
 
         companion object {
             fun resolve(v: GraineAgentBarView): Look {
                 val g = GraineInApp.get()
                 val appearance: JSONObject? = g.session?.appearance
                 val dash = Appearance.resolve(appearance, Appearance.DEFAULT_ACCENT, "Assistant", origin = g.config.baseUrl)
-                val t = g.themeTokens(v.context, v.scheme)
-                val accentHex = v.accent?.takeIf { Appearance.argb(it) != null } ?: t?.colors?.accent ?: dash.accent
-                val theme = v.scheme ?: Js.strOrEmpty(appearance?.opt("theme")).ifEmpty { "auto" }
+                val designed = g.themeTokens(v.context, v.scheme)
+                // No design — a server that predates designs, or the moment before the session arrives: Graine
+                // Classic in the dashboard's light or dark, accent and corners, the look before designs.
+                val t = designed ?: if (Appearance.isDark(v.scheme ?: Js.strOrEmpty(appearance?.opt("theme")).ifEmpty { "auto" }, Ui.isDeviceDark(v.context)))
+                    Design.CLASSIC_DARK else Design.CLASSIC_LIGHT
+                val accentHex = v.accent?.takeIf { Appearance.argb(it) != null } ?: designed?.colors?.accent ?: dash.accent
+                val own = Design.normaliseHex(accentHex) == Design.normaliseHex(t.colors.accent)
                 val loader = Loaders.resolve(appearance?.opt("loader"))
+                // The dashboard's corner rounding scales Classic's radii, as the server scales them for such an embed.
+                val corners = if (designed == null) dash.radius / 18.0 else 1.0
                 val accent = Appearance.argb(accentHex) ?: Color.parseColor(Appearance.DEFAULT_ACCENT)
-                val radiusDp = v.radius ?: Math.round(dash.radius).toInt()
                 return Look(
+                    t = t,
                     accent = accent,
-                    accentHex = accentHex,
+                    onAccent = Themed.color(if (own) t.colors.onAccent else Themed.readableOnHex(accentHex), Color.WHITE),
+                    soft = Themed.color(VoiceBar.softFor(accentHex, t)),
                     name = v.name ?: dash.heading,
-                    avatarUrl = v.avatarUrl ?: dash.logoUrl,
-                    dark = t?.isDark ?: Appearance.isDark(theme, Ui.isDeviceDark(v.context)),
-                    radiusDp = radiusDp,
-                    loader = loader,
-                    loaderColor = Appearance.argb(loader.color) ?: Appearance.argb(t?.colors?.accent) ?: Appearance.argb(dash.accent) ?: accent,
+                    hostImage = v.avatarUrl?.takeIf { it.isNotBlank() },
                     logoUrl = dash.logoUrl,
-                    tokens = t,
-                    onAccentHex = if (t != null && v.accent == null) t.colors.onAccent else Themed.readableOnHex(accentHex),
-                    // The bar's corners are the design's largest; a host's radius keeps the formula it had.
-                    barRadiusDp = if (t != null && v.radius == null) t.shape.radius.xl else minOf(26, radiusDp + 8).toDouble(),
-                    captionRadiusDp = if (t != null && v.radius == null) t.shape.radius.lg else radiusDp.toDouble(),
+                    loader = loader,
+                    // The loader's own colour, else the design's accent — as the React Native loader draws it.
+                    loaderColor = Appearance.argb(loader.color) ?: Appearance.argb(designed?.colors?.accent ?: dash.accent) ?: accent,
+                    barRadiusDp = v.radius?.let { minOf(26, it + 8).toDouble() } ?: (t.shape.radius.xl * corners),
+                    captionRadiusDp = v.radius?.toDouble() ?: (t.shape.radius.lg * corners),
+                    appearance = appearance,
                 )
             }
         }
@@ -264,73 +348,66 @@ class GraineAgentBarView @JvmOverloads constructor(
 
     private fun applyLook() {
         look = Look.resolve(this)
+        icons.clear()
         val l = look
-        val t = l.tokens
-        val line = Themed.px(context, l.borderWidth)
-        bar.background = Ui.rounded(l.surface, Themed.px(context, l.barRadiusDp).toFloat(), line, l.border)
-        caption.background = Ui.rounded(l.surface, Themed.px(context, l.captionRadiusDp).toFloat(), line, l.border)
-        caption.setTextColor(l.text)
+        val t = l.t
+        val line = Themed.px(context, t.shape.borderWidth)
+
+        // The bar: 60 high, 9 either side, items 10 apart; surface, outline, radius.xl, and its depth.
+        val pad = px(VoiceBar.PADDING)
+        val corner = Themed.px(context, l.barRadiusDp).toFloat()
+        Themed.surface(bar, t, l.surface, corner, line, l.border, t.elevation.floating, pad, 0, pad, 0)
+        // Its soft shadow is cast by this view instead (see the outline provider): same depth, same colour.
+        barCornerPx = corner
+        barOpaque = Color.alpha(l.surface) == 255
+        elevation = bar.elevation
+        if (Build.VERSION.SDK_INT >= 28) {
+            outlineSpotShadowColor = bar.outlineSpotShadowColor
+            outlineAmbientShadowColor = bar.outlineAmbientShadowColor
+        }
+        bar.elevation = 0f
+        invalidateOutline()
+        // A hard offset is drawn inside the view, below the face: the view grows by it, the face stays 60.
+        val room = t.elevation.hardOffset?.let { Themed.px(context, Math.abs(it.y)) } ?: 0
+        bar.layoutParams = (bar.layoutParams as LayoutParams).apply { height = px(VoiceBar.HEIGHT) + room }
+        Ui.gap(bar, px(VoiceBar.GAP))
+
+        // The name: 14, the body family at weights.strong. The status: caption size, weights.body, textMuted.
         nameView.text = l.name
         nameView.setTextColor(l.text)
-        status.setTextColor(l.sub)
-        if (t != null) {
-            Themed.shadow(bar, t.elevation.floating)
-            Themed.type(caption, t, Themed.Role.STRONG, graine)
-            Themed.type(nameView, t, null, graine, 15f, t.font.weights.strong)
-            Themed.type(status, t, Themed.Role.CAPTION, graine)
-        } else {
-            // Back to the look from before designs — a preview can be cleared.
-            bar.elevation = dp(8).toFloat()
-            if (Build.VERSION.SDK_INT >= 28) { bar.outlineSpotShadowColor = Color.BLACK; bar.outlineAmbientShadowColor = Color.BLACK }
-            (call.getChildAt(0) as? TextView)?.setTextColor(callInk)
-            for ((tv, sp, w) in listOf(Triple(caption, 15f, 600), Triple(nameView, 15f, 800), Triple(status, 12.5f, 400))) {
-                tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp)
-                Ui.weight(tv, w)
-                tv.letterSpacing = 0f
-                tv.setLineSpacing(0f, 1f)
-            }
-        }
-        drawAvatar(l)
+        type(nameView, t.font.weights.strong, VoiceBar.NAME_SP, VoiceBar.NAME_LINE_SP)
+        statusText.setTextColor(l.muted)
+        type(statusText, t.font.weights.body, t.font.scale.caption, t.font.scale.caption * VoiceBar.STATUS_LINE)
+        Ui.gap(statusRow, px(VoiceBar.STATUS_GAP))
+        meter.configure(l.accent, t.motion)
+
+        // The caption: surface, outline, radius.lg, the card shadow or the hard offset, 12 by 8 inside.
+        val ph = px(VoiceBar.CAPTION_PAD_H); val pv = px(VoiceBar.CAPTION_PAD_V)
+        Themed.surface(caption, t, l.surface, Themed.px(context, l.captionRadiusDp).toFloat(), line, l.border, t.elevation.card, ph, pv, ph, pv)
+        captionYou.setTextColor(l.accent)
+        type(captionYou, t.font.weights.strong, VoiceBar.YOU_SP, null)
+        captionYou.letterSpacing = VoiceBar.YOU_TRACKING_EM.toFloat()
+        captionText.setTextColor(l.text)
+        type(captionText, t.font.weights.strong, VoiceBar.CAPTION_SP, VoiceBar.CAPTION_LINE_SP)
+
+        Mark.fill(avatar, t, VoiceBar.BUTTON, VoiceBar.AVATAR_GLYPH, null, l.accent, l.onAccent, l.hostImage, l.logoUrl,
+            l.name.trim().firstOrNull()?.uppercase() ?: "A", logoFills = true)
         shownLoader = null
         refresh()
     }
 
-    private fun drawAvatar(l: Look, force: Boolean = false) {
-        val url = l.avatarUrl ?: ""
-        if (!force && avatar.childCount > 0 && url == avatarUrlShown && url.isNotEmpty()) return
-        avatarUrlShown = url
-        avatar.removeAllViews()
-        if (url.isNotEmpty()) {
-            avatarMark.load(emptyList())
-            avatar.addView(roundedImage(context, url, 0f, l.chip, oval = true), FrameLayout.LayoutParams(dp(38), dp(38)))
-            return
-        }
-        // No face: the design's glyph on the accent, as the launcher draws it; "✦" until it loads, or without one.
-        val t = l.tokens
-        val glyph = t?.icons?.launcher?.let { gl ->
-            Design.glyphUrl(graine.config.baseUrl, gl.id, l.onAccentHex, Ui.dp(context, 38 * Design.LAUNCHER_GLYPH.toFloat()).toDouble(), t.icons.stroke)
-        }
-        if (!force) avatarMark.load(listOfNotNull(glyph))
-        val bmp = avatarMark.bitmap
-        val disc = Ui.rounded(l.accent, dp(19).toFloat())
-        if (bmp != null) {
-            avatar.addView(android.widget.ImageView(context).apply {
-                setImageBitmap(bmp)
-                scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
-                val pad = Math.round(dp(38) * (1 - Design.LAUNCHER_GLYPH) / 2).toInt()
-                setPadding(pad, pad, pad, pad)
-                background = disc
-                importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
-            }, FrameLayout.LayoutParams(dp(38), dp(38)))
-        } else {
-            avatar.addView(TextView(context).apply {
-                text = "✦"
-                gravity = Gravity.CENTER
-                setTextColor(if (t != null) l.onAccent else Color.WHITE)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
-                background = disc
-            }, FrameLayout.LayoutParams(dp(38), dp(38)))
-        }
+    /** Text in the design's body family at a weight and size, spaced as the design spaces body text. */
+    private fun type(tv: TextView, weight: Int, sp: Double, lineSp: Double?) {
+        val f = look.t.font
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp.toFloat())
+        Themed.face(tv, f.body, weight, graine)
+        tv.letterSpacing = f.letterSpacing.body.toFloat()
+        lineSp?.let { Ui.lineHeight(tv, it.toFloat()) }
+    }
+
+    /** An SDK icon in the design's style, at the bar's icon size. */
+    private fun icon(name: String, color: Int): Drawable = icons.getOrPut("$name|$color") {
+        IconDrawable(name, look.t.icons.style, look.t.icons.stroke, color, px(VoiceBar.ICON))
     }
 
     override fun onSessionReady(session: SessionConfig) = applyLook()
@@ -342,81 +419,149 @@ class GraineAgentBarView @JvmOverloads constructor(
     override fun onNetwork(online: Boolean) = refresh()
     override fun onReconnecting(active: Boolean) = refresh()
     override fun onConnectivity(state: Connectivity, attempt: Int, reason: String?) = refresh()
-    override fun onEnded() { lastCaption = null; agentSpeaking = false; refresh() }
+    override fun onTransport(transport: Transport, requested: Transport, reason: String?, message: String?) = refresh()
+    override fun onError(message: String) = refresh()
+    override fun onEnded() { lastCaption = null; captionLive = false; refresh() }
     override fun onMicDenied(reason: String) { micDenied = true; refresh() }
 
     override fun onCaption(role: Role, text: String, live: Boolean) {
-        agentSpeaking = role == Role.AGENT && live
-        if (text.isNotBlank()) { lastCaption = text; captionLive = live }
+        if (text.isNotBlank()) { lastCaption = text; captionRole = role; captionLive = live }
         refresh()
     }
 
+    /** The surfaces as they stand: the dashboard's, a chat attached or not, the customer's last switch. */
+    private fun surfaces(): VoiceBar.Surfaces? = chat?.let { VoiceBar.surfaces(look.appearance, chosenSurface) }
+
     private fun refresh() {
         val l = look
-        val waiting: String? = when {
-            voice.connectivity == Connectivity.FAILED || voice.online == false -> null
-            voice.reconnecting || voice.connectivity == Connectivity.RETRYING -> "reconnecting"
-            voice.connecting || !voice.ready -> "connecting"
-            else -> null
-        }
-        if (waiting != null) {
-            // While it is coming up the status line IS the loader the brand chose, in its words.
-            if (shownLoader != waiting) {
-                shownLoader = waiting
+        val t = l.t
+        val source = chat
+        val s = surfaces()
+        val inChat = source != null && s?.start == "chat"
+        val canSwitch = source != null && s?.canSwitch == true
+        val failed = voice.connectivity == Connectivity.FAILED
+
+        val status = VoiceBar.status(VoiceBar.StatusInput(
+            error = voice.error != null,
+            chat = inChat,
+            chatOnline = source?.online == true,
+            online = voice.online,
+            reconnecting = voice.reconnecting,
+            connectivity = voice.connectivity,
+            micDenied = micDenied,
+            ready = voice.ready,
+            connecting = voice.connecting,
+            muted = voice.muted,
+            connected = voice.connected,
+            thinking = voice.phase == CallPhase.THINKING,
+            speaking = voice.phase == CallPhase.SPEAKING,
+            quality = voice.quality,
+        ))
+        val moment = status.loader
+        if (moment != null) {
+            // Waiting: the status line IS the loader the brand chose, in its words for this moment.
+            if (shownLoader != moment) {
+                shownLoader = moment
                 statusSlot.removeAllViews()
-                statusSlot.addView(GraineLoaderView.withLabel(context, l.loader, l.loaderColor, l.border, l.sub,
-                    l.loader.text.forMoment(waiting), sizeDp = 15, logoUrl = l.logoUrl).apply { gravity = Gravity.CENTER_VERTICAL or Gravity.START })
+                statusSlot.addView(GraineLoaderView.withLabel(context, l.loader, l.loaderColor, l.border, l.muted,
+                    l.loader.text.forMoment(moment), sizeDp = VoiceBar.LOADER, logoUrl = l.logoUrl) { label ->
+                    type(label, t.font.weights.strong, maxOf(t.font.scale.caption, Math.round(VoiceBar.LOADER * 0.65).toDouble()), null)
+                    label.maxLines = 1
+                    label.ellipsize = TextUtils.TruncateAt.END
+                }.apply { gravity = Gravity.CENTER_VERTICAL or Gravity.START })
             }
         } else {
-            if (shownLoader != null || statusSlot.childCount == 0) {
+            if (shownLoader != null || statusRow.parent == null) {
                 shownLoader = null
                 statusSlot.removeAllViews()
-                statusSlot.addView(status)
+                statusSlot.addView(statusRow)
             }
-            status.text = when {
-                voice.connectivity == Connectivity.FAILED -> "couldn't load · tap to retry"
-                voice.online == false -> "no connection"
-                micDenied && !voice.connected -> "needs microphone"
-                voice.muted -> "muted"
-                voice.connected && voice.quality == ConnectionQuality.POOR -> "weak connection"
-                voice.connected && agentSpeaking -> "speaking"
-                voice.connected -> "listening"
-                else -> "tap to talk"
+            statusText.text = status.text
+            meter.visibility = if (status.meter) VISIBLE else GONE
+        }
+        // "Couldn’t load · tap to retry" means the words too, not only the microphone.
+        words.setOnClickListener(if (failed && !inChat) OnClickListener { voice.retry() } else null)
+        words.isClickable = failed && !inChat
+
+        // The way to the other surface, only when both are offered.
+        switchButton.visibility = if (canSwitch) VISIBLE else GONE
+        if (canSwitch) {
+            switchButton.draw(l.soft, icon(if (inChat) SdkIcons.CALL else SdkIcons.CHAT, l.text), if (inChat) "Switch to a call" else "Switch to chat")
+        }
+
+        // Off a call the microphone STARTS one; on a call it is the mute; after a failed load it retries.
+        micButton.visibility = if (inChat) GONE else VISIBLE
+        val muted = voice.muted
+        micButton.draw(
+            if (muted) l.danger else l.accent,
+            icon(if (muted) SdkIcons.MIC_OFF else SdkIcons.MIC, if (muted) Color.WHITE else l.onAccent),
+            when { failed -> "Try again"; !voice.connected -> "Start talking to ${l.name}"; muted -> "Unmute"; else -> "Mute" },
+            enabled = !VoiceBar.micBlocked(voice.error != null, micDenied, voice.connecting, voice.ready, voice.connectivity),
+        )
+
+        // Loud only while there is a call to end; otherwise it closes.
+        val live = voice.connected
+        endButton.draw(
+            if (live) l.danger else l.soft,
+            icon(if (live) SdkIcons.END else SdkIcons.CLOSE, if (live) Color.WHITE else l.muted),
+            if (live) "End call" else "Close",
+        )
+
+        // Above the bar: the chat window in the chat, else the line being said on a call.
+        if (source != null && inChat) {
+            val w = chatWindow ?: ChatWindowView(context, graine).also { cw ->
+                chatWindow = cw
+                cw.onSend = { text -> chat?.send(text) }
+                cw.onCollapse = { if (surfaces()?.canSwitch == true) setSurface("voice") else pressEnd() }
+                chatSlot.addView(cw, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
             }
+            w.render(t, l.accent, l.onAccent, l.name, l.hostImage, l.logoUrl, source.messages, source.online, typing = imeLiftPx > 0)
+            chatSlot.visibility = VISIBLE
+            if (!chatShown) Themed.enter(chatSlot, t, px(VoiceBar.RISE).toFloat())
+        } else {
+            chatSlot.visibility = GONE
         }
-        mute.visibility = if (voice.connected) VISIBLE else GONE
-        (mute.getChildAt(0) as? TextView)?.text = if (voice.muted) "🔇" else "🎙"
-        mute.contentDescription = if (voice.muted) "Unmute" else "Mute"
-        mute.background = Ui.rounded(if (voice.muted) l.danger else l.chip, dp(19).toFloat())
-        val live = voice.connected || voice.connecting
-        (call.getChildAt(0) as? TextView)?.let { glyph ->
-            glyph.text = if (live) "✕" else "📞"
-            // The end button is white on danger, the start button what reads on the accent.
-            if (l.tokens != null) glyph.setTextColor(if (live) Color.WHITE else l.onAccent)
-        }
-        call.contentDescription = if (live) "End call" else "Start a call"
-        call.background = Ui.rounded(if (live) l.danger else l.accent, dp(19).toFloat())
-        if (voice.connectivity == Connectivity.FAILED) call.setOnClickListener { voice.retry() }
-        else call.setOnClickListener { if (voice.connected || voice.connecting) voice.end() else voice.start() }
-        caption.text = lastCaption
-        val showCaption = voice.connected && !lastCaption.isNullOrBlank()
+        chatShown = inChat
+
+        val showCaption = !inChat && voice.connected && !lastCaption.isNullOrBlank()
+        captionText.text = lastCaption
+        // Still arriving: the words at 75%, the card itself solid.
+        captionText.alpha = if (captionLive) VoiceBar.LIVE_ALPHA else 1f
+        // WHO is saying it: captions carry both sides, and an unlabelled line reads as the agent talking to itself.
+        captionYou.visibility = if (captionRole == Role.CUSTOMER) VISIBLE else GONE
         caption.visibility = if (showCaption) VISIBLE else GONE
-        caption.alpha = if (captionLive) 0.8f else 1f
-        // It arrives over the design's duration; with no motion (or no design), it is simply there.
-        if (showCaption && !captionShown) Themed.enter(caption, l.tokens, dp(6).toFloat(), caption.alpha)
+        // It rises in over the design's duration; with no motion, it is simply there.
+        if (showCaption && !captionShown) Themed.enter(caption, t, px(VoiceBar.RISE).toFloat())
         captionShown = showCaption
     }
 
-    private fun roundButton(glyph: String, label: String, onClick: () -> Unit) = LinearLayout(context).apply {
-        gravity = Gravity.CENTER
-        contentDescription = label
-        isClickable = true
-        isFocusable = true
-        addView(TextView(context).apply { text = glyph; setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f); gravity = Gravity.CENTER })
-        setOnClickListener { onClick() }
+    private fun pressMic() {
+        if (voice.connectivity == Connectivity.FAILED) { voice.retry(); return }
+        if (voice.connected) voice.setMuted(!voice.muted) else voice.start()
+        refresh()
     }
 
-    private fun dp(v: Int): Int = Ui.dp(context, v)
+    /** Hang up, THEN close: the goodbye leaves the speaker first, and a page torn down sooner files the call as dropped. */
+    private fun pressEnd() {
+        val live = voice.connected || voice.connecting
+        if (live) voice.end()
+        val close = onClose ?: return
+        if (live) postDelayed({ close() }, VoiceBar.CLOSE_AFTER_END_MS) else close()
+    }
+
+    private fun setSurface(next: String) {
+        chosenSurface = next
+        refresh()
+    }
+
+    private fun switchSurface() {
+        val next = if (surfaces()?.start == "chat") "voice" else "chat"
+        // Into the chat, the call ends: two conversations with one agent is the agent answering twice.
+        if (next == "chat" && (voice.connected || voice.connecting)) voice.end()
+        setSurface(next)
+    }
+
+    private fun px(dp: Double): Int = Ui.dp(context, dp.toFloat())
 
     // ── dragging: the customer decides where it sits ───────────────────────
 
@@ -575,6 +720,8 @@ class GraineAgentBarView @JvmOverloads constructor(
         if (lift != imeLiftPx) {
             imeLiftPx = lift
             applyTranslation()
+            // The chat's messages give up height while the keyboard is up.
+            if (chatShown) refresh()
         }
     }
 

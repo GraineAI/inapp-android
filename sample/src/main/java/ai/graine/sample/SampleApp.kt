@@ -20,7 +20,7 @@ class SampleApp : Application() {
             baseUrl = "https://www.graine.ai",
             publishableKey = BuildKeys.PUBLISHABLE_KEY,
             variables = mapOf("brand" to "Graine sample"),
-            appVersion = "0.2.0",
+            appVersion = "0.3.0",
             // Every bridge message and the engine page's console, in logcat. Debug builds only.
             debug = BuildConfig.DEBUG,
             // Debug builds can force a transport for testing:

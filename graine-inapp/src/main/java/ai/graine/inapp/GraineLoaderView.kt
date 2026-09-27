@@ -174,10 +174,15 @@ class GraineLoaderView @JvmOverloads constructor(
     }
 
     internal companion object {
-        /** The loader and its words, in a row (the bar's status line) or stacked (a component on its way). */
+        /**
+         * The loader and its words, in a row (the bar's status line) or stacked
+         * (a component on its way). `styleLabel` sets the words in a design's
+         * type — the React Native loader's caption size, body face, strong weight.
+         */
         fun withLabel(
             ctx: Context, look: LoaderLook, color: Int, track: Int, labelColor: Int,
             label: String?, sizeDp: Int? = null, stacked: Boolean = false, logoUrl: String? = null,
+            styleLabel: ((android.widget.TextView) -> Unit)? = null,
         ): LinearLayout {
             val size = sizeDp ?: look.px
             val row = LinearLayout(ctx).apply {
@@ -190,6 +195,7 @@ class GraineLoaderView @JvmOverloads constructor(
             if (!label.isNullOrEmpty()) {
                 row.addView(Ui.text(ctx, label, maxOf(12f, Math.round(size * 0.65f).toFloat()), labelColor, 600).apply {
                     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+                    styleLabel?.invoke(this)
                 }, Ui.wrap())
             }
             return row

@@ -1350,7 +1350,10 @@ data class ThemeMotion(
     val bounce: Double,
 )
 
-/** A launcher glyph: 24×24 SVG path data, stroked or filled. Apps show it as an image ([Design.glyphUrl]). */
+/**
+ * A launcher glyph: 24×24 SVG path data, stroked or filled. The voice bar draws
+ * it from its path; the launcher shows it as an image ([Design.glyphUrl]).
+ */
 data class LauncherGlyph(val id: String, val path: String, val stroke: Boolean)
 
 data class ThemeIcons(

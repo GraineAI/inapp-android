@@ -60,7 +60,7 @@ iOS points, Android dp, Flutter logical pixels).
 | `motion.durationMs / easing / bounce` | Transitions; `durationMs: 0` means none. Always also honour the OS "reduce motion" setting |
 | `icons.style / stroke` | Icon treatment for the SDK's own icons |
 | `icons.launcher` | `{ id, path, stroke }` — a 24×24 SVG path — or `null`: show the brand's logo |
-| `glass` | `{ blur, surfaceOpacity }` or `null`. When set, surfaces are translucent: `surface` at `surfaceOpacity`, background blurred by `blur` where the platform can |
+| `glass` | `{ blur, surfaceOpacity }` or `null`. When set, surfaces are translucent: `surface` at `surfaceOpacity`, background blurred by `blur` where the platform can (iOS has no public blur radius: its thinnest system material) |
 | `bubbles` | `filled`, `outline`, `minimal` — see Chat window |
 
 ## Element by element
@@ -73,13 +73,64 @@ size (iOS `.continuous`, elsewhere a 30% radius); `rounded-square` = `radius.lg`
 `colors.text` copy offset by `{x, y}` and a `borderWidth` outline in
 `colors.text`.
 
-**Voice bar.** Fill `surface` (with `glass`: translucent + blur), outline
-`borderWidth` in `border`, corners `radius.xl`, shadow `elevation.floating`.
-Status line: `textMuted` at `font.scale.caption`. Microphone button: `accent` /
-`onAccent`, fully round. End button: `danger` / white.
+**Voice bar** — what the customer sees during a call, and what the dashboard's
+Garage draws in its phone preview. Every SDK draws it itself from these tokens;
+the app passes nothing about how it looks.
 
-**Chat window.** Page `background`; header `surface` with the title in
-`font.heading`, `font.scale.title`, `font.weights.title`. Bubbles, corners
+- **Frame.** 60 high, 9 padding left and right, items 10 apart, centred
+  vertically. Fill `surface` (with `glass`: translucent + blur), outline
+  `borderWidth` in `border`, corners `radius.xl`, shadow `elevation.floating` —
+  or, with `hardOffset`, a solid `colors.text` copy offset by `{x, y}`, never
+  blurred.
+- **Left to right:**
+  1. **Avatar** 38 × 38, fully round, `accent`. Inside: `icons.launcher` in
+     `onAccent` at 18; when that is null, the brand's logo filling the circle;
+     else the heading's first letter, 15, bold, `onAccent`.
+  2. **Name and status**, taking the rest. Name: the appearance heading, 14, the
+     body family at `weights.strong`, `text`, one line. Status under it:
+     `font.scale.caption`, the body family at `weights.body`, `textMuted`, one
+     line — preceded by the **meter** while listening or speaking.
+  3. **Switch** — only when the agent offers both call and chat and the SDK
+     can carry a chat (the iOS SDK carries calls only, so it draws none): 38
+     round, `accentSoft`, icon `chat` (on a call) or `call` (in the chat) in
+     `text`.
+  4. **Microphone** — calls only: 38 round, `accent`, icon `mic` in
+     `onAccent`. Muted: `danger`, icon `micOff` in white. At 40% opacity while it
+     cannot act (connecting, not ready, refused, error). Off a call it starts
+     one; on a call it mutes; after a failed load it retries.
+  5. **End** — 38 round. On a call: `danger`, icon `end` in white. Otherwise:
+     `accentSoft`, icon `close` in `textMuted`.
+- **Status words**, first match wins: error → "Unavailable"; in the chat →
+  "Online" / "Connecting…"; offline → "No connection"; reconnecting →
+  "Reconnecting…"; microphone refused → "Needs microphone"; load failed →
+  "Couldn’t load · tap to retry" (a curly apostrophe); not ready or placing → "Connecting…"; muted →
+  "Muted"; the agent working out its answer (the call's phase is `thinking`) →
+  "Thinking…"; the agent's line still arriving → "Speaking"; poor network →
+  "Weak connection"; on a call → "Listening"; otherwise → "Tap to talk". While
+  connecting, reconnecting or thinking, draw the loader (Appearance → Loading)
+  with that moment's words instead of the words above.
+- **Meter.** Four bars 2.5 wide, 2 apart, bottoms aligned, heights 55%, 100%,
+  70%, 40% of 12, fully round, `accent`. Each scales from its bottom between 35%
+  and 100% and back, each leg `max(420, motion.durationMs × 3.2)` ms, bar *i*
+  starting *i* × 90 ms late, forever. Still at full height when
+  `motion.durationMs` is 0 or the OS asks for reduced motion.
+- **Caption**, 8 above the bar, on a call with captions on: the latest line.
+  Fill `surface` (glass as above), outline, corners `radius.lg`, shadow
+  `elevation.card` (or `hardOffset`), padding 12 × 8. Text 13, the body family at
+  `weights.strong`, `text`, at most two lines, 75% opacity while still arriving.
+  The customer's own lines carry "YOU" above them, 10.5, `accent`, spaced 0.6.
+- **Arrivals.** The caption and the chat window rise into place: opacity 0 → 1
+  and 8 upward over `motion.durationMs` with the design's easing; no animation
+  when that is 0.
+
+**Chat window** — above the bar when the customer is in the chat. Page
+`background`, outline, corners `radius.xl`, shadow `elevation.floating` (or
+`hardOffset`). Header 50 high on `surface`, bottom outline: a 30 launcher mark
+(the launcher shape, a pill drawn as a circle), the heading in the heading family
+at `weights.title` and `min(font.scale.title, 16)`, and under it "Online" after a
+6-point `success` dot (or "Connecting…") in `textMuted` at caption size; a
+chevron pointing down in `textMuted` goes back to the call (or closes a chat-only
+agent). Bubbles at most 84% wide, `spacing.gap` apart, corners
 `radius.lg` (the corner nearest the speaker `radius.sm`), padding
 `spacing.cardPadding × 0.75` vertical, `spacing.cardPadding` horizontal:
 
@@ -90,8 +141,23 @@ Status line: `textMuted` at `font.scale.caption`. Microphone button: `accent` /
 - `minimal` — the agent's messages are plain text on the page, no bubble; the
   customer's sit on `accentSoft` in `text`.
 
-Composer: field `surfaceRaised`, outline `border`, corners `radius.xl`; send
-button `accent` / `onAccent`.
+Composer, 58 high on `background`: field 40 high, `surfaceRaised`, outline
+`border`, corners `radius.xl`, placeholder "Message…" in `textMuted`; send button
+40 round, `accent`, icon `send` in `onAccent`.
+
+## Icons
+
+The SDK's own icons — `mic`, `micOff`, `end`, `send`, `chat`, `call`, `chevron`,
+`close` — are 24 × 24 drawings in `design.json` → `icons`, the same paths the
+dashboard draws. Each has a closed `body` (may be filled) and `lines` (only ever
+stroked). Draw them in `icons.style` at `icons.stroke`:
+
+- `outline` — stroked, round caps and joins;
+- `sharp` — stroked, square caps, mitred joins;
+- `filled` — body filled, stroked at 0.75 × the stroke (at least 1);
+- `duotone` — body filled at 28% opacity, then stroked.
+
+`chevron` points up as drawn; the chat header turns it 180°.
 
 **Components** (cards, lists, galleries the agent draws). Card `surfaceRaised`,
 outline `borderWidth` in `border`, corners `radius.lg`, padding
@@ -107,12 +173,32 @@ design — the design supplies every value the component does not set.
 ## Fonts
 
 `"system"` is always safe. Any other value is a family name from the
-dashboard's curated list. On the web it is loaded from Google Fonts. In an app
-it is used only if the app already bundles that family; otherwise fall back to
-the system font silently — never crash, never show a warning to the customer.
-React Native must not pass an unregistered `fontFamily` (iOS reports it as an
-error in development), so the React Native SDK applies a family only when the
-app has declared it available.
+dashboard's curated list. On the web it is loaded from Google Fonts. **In an app
+the SDK loads it itself** — the brand picks a typeface and the phone draws it,
+with nothing in the app naming a font:
+
+1. **Which faces.** For each token set the SDK may draw (light and dark): the
+   body family at `weights.body` and `weights.strong`, the heading family at
+   `weights.title` and `weights.strong`. Skip `"system"`.
+2. **Which weight.** The nearest weight the family has (`design.json` →
+   `fontWeights`); on a tie, the heavier.
+3. **Where.** `<origin>/api/embed/font?f=<family>&w=<weight>&v=<version>` —
+   the family URL-encoded, `v` = `fontAssetVersion`. A TTF, cached for a year:
+   keep it on disk by URL and never fetch it twice.
+4. **Register** it with the platform — Android `Typeface.createFromFile`, iOS
+   `CTFontManagerRegisterGraphicsFont`, Flutter `FontLoader` — under
+   `Graine-<family with only letters and digits>-<weight>` where the platform
+   lets you name it, and redraw. iOS registers a font under the PostScript
+   name inside the file: keep the contract name as the face's key and draw
+   with the name the file registered.
+5. **Draw with the face itself.** A loaded face IS its weight: set the face,
+   not a bold flag on top of it (Android would embolden a bold face twice).
+
+Until a face arrives, and if it never does, draw the system font at the weight —
+silently: never crash, never show the customer a warning. A family the app
+registered itself (React Native `fonts`) wins over the download. React Native
+cannot register a font without a native module, so there the app hands the
+provider `loadFont` (expo-font's `Font.loadAsync`) once, and the SDK does the rest.
 
 ## Launcher glyph images
 

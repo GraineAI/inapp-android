@@ -54,6 +54,12 @@ public class JavaInteropTest {
         assertEquals(28.0, Design.launcherCorner("circle", Design.LAUNCHER_SIZE, Design.CLASSIC_LIGHT.getShape().getRadius()), 0.0);
     }
 
+    @Test public void theCallsPhaseIsReadFromJava() {
+        // The customer finished a line and the agent has not answered: the bar's "Thinking…".
+        assertEquals(CallPhase.THINKING, CallPhase.of(false, Connectivity.READY, false, true, true, false, true));
+        assertEquals(CallPhase.IDLE, CallPhase.of(false, Connectivity.READY, false, true, false, false, false));
+    }
+
     @Test public void aListenerOverridesOnlyTheCallbackItWants() {
         final boolean[] ended = {false};
         GraineListener listener = new GraineListener() {

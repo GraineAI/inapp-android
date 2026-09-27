@@ -96,7 +96,7 @@ class MainActivity : Activity() {
             addView(pan, LinearLayout.LayoutParams(-1, -2))
             addView(error, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
             addView(TextView(context).apply {
-                text = "The assistant sees this screen. Tap the call button to talk; drag the bar to move it — it stays where you leave it."
+                text = "The assistant sees this screen. Tap the microphone to talk; drag the bar to move it — it stays where you leave it."
                 setTextColor(muted); textSize = 13f
             }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(18) })
             // The next step is another activity: a call in progress follows the customer there.
@@ -123,6 +123,8 @@ class MainActivity : Activity() {
             prefs.edit().putInt("bar_offset_dp", offset).apply()
             Log.i("GraineSample", "placement bottomOffset=$offset")
         }
+        // The end button with no call to end. This screen keeps its bar; an app with a launcher hides it here.
+        bar.onClose = { Log.i("GraineSample", "bar closed") }
 
         // Edge to edge (every app targeting Android 15+): keep clear of the system bars ourselves.
         root.setOnApplyWindowInsetsListener { v, insets ->

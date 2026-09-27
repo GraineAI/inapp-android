@@ -55,6 +55,23 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
     var reconnecting = false; private set
     var connectivity = Connectivity.LOADING; private set
 
+    /**
+     * The call cannot work as configured until something is fixed — an agent
+     * or key the gateway was never set up for (the engine reports it as a
+     * `not_configured` transport). Null otherwise. Also sent to onError.
+     * Cleared when the next call is placed.
+     */
+    var error: String? = null; private set
+
+    /** What the call is doing, in one word — see [CallPhase]. A bar says "Thinking…" from this. */
+    val phase: CallPhase
+        get() = CallPhase.of(reconnecting, connectivity, connecting, ready, connected, agentSpeaking, awaitingAgent)
+
+    /** The last caption is the agent's, still arriving. */
+    private var agentSpeaking = false
+    /** The customer finished a line and the agent has not begun its answer. */
+    private var awaitingAgent = false
+
     private var webView: WebView? = null
     private var host: FrameLayout? = null
     /**
@@ -191,6 +208,10 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
         val activity = activityRef.get() ?: run {
             report { it.onError("GraineVoice.attach(activity) must be called before start().") }; return
         }
+        // A new attempt: the last call's fault and its last words are not news.
+        error = null
+        agentSpeaking = false
+        awaitingAgent = false
         setCall(connected = connected, connecting = true)
         if (!hasMic()) {
             pendingStart = true
@@ -355,7 +376,13 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
                 if (!msg.connected && !msg.connecting) startedCall = false
             }
             is PageMessage.Muted -> muted = msg.muted
-            is PageMessage.Caption -> report { it.onCaption(msg.role, msg.text, msg.live) }
+            is PageMessage.Caption -> {
+                // Before the listeners hear it, so a bar reading `phase` in onCaption sees this line.
+                agentSpeaking = msg.role == Role.AGENT && msg.live
+                if (msg.role == Role.CUSTOMER && !msg.live) awaitingAgent = true
+                if (msg.role == Role.AGENT) awaitingAgent = false
+                report { it.onCaption(msg.role, msg.text, msg.live) }
+            }
             is PageMessage.Widget -> {
                 // Retained before it is dispatched, so a view mounted later still finds it.
                 graine.retainWidget(msg.widget)
@@ -369,6 +396,8 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
             PageMessage.Ended -> {
                 graine.main.removeCallbacks(endWatchdog)
                 reconnecting = false
+                agentSpeaking = false
+                awaitingAgent = false
                 setCall(connected = false, connecting = false)
                 startedCall = false
                 setQuality(ConnectionQuality.UNKNOWN)
@@ -379,7 +408,16 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
                 setCall(connected = false, connecting = false)
                 report { it.onMicDenied(msg.reason) }
             }
-            is PageMessage.TransportChanged -> report { it.onTransport(msg.transport, msg.requested, msg.reason, msg.message) }
+            is PageMessage.TransportChanged -> {
+                report { it.onTransport(msg.transport, msg.requested, msg.reason, msg.message) }
+                // A misconfiguration is an error even though the call survived it on the other
+                // transport: nothing recovers from it on its own, as the React Native launcher says too.
+                val fault = msg.message
+                if (msg.reason == "not_configured" && !fault.isNullOrEmpty()) {
+                    error = fault
+                    report { it.onError(fault) }
+                }
+            }
             is PageMessage.QualitySample -> setQuality(ConnectionQuality.classify(msg.rttMs, msg.jitterMs, msg.loss))
             is PageMessage.Network -> {
                 online = msg.online

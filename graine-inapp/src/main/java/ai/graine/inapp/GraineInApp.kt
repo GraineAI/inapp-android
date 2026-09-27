@@ -51,10 +51,12 @@ data class GraineConfig @JvmOverloads constructor(
      */
     val friction: FrictionConfig? = null,
     /**
-     * The fonts this app bundles, by the family names the dashboard offers —
-     * `mapOf("Inter" to Typeface.createFromAsset(assets, "fonts/Inter.ttf"))`.
-     * A design whose font is mapped here draws in it; any other family draws
-     * in the system font, silently. The SDK ships no fonts and downloads none.
+     * Optional: fonts this app already bundles, by the family names the
+     * dashboard offers — `mapOf("Inter" to Typeface.createFromAsset(assets,
+     * "fonts/Inter.ttf"))`. A family mapped here is drawn from the app's file
+     * and never downloaded. Every other family the design uses the SDK fetches
+     * from Graine by itself, keeps on disk and draws once it arrives; until
+     * then, and if it never does, the system font, silently.
      */
     val fonts: Map<String, Typeface> = emptyMap(),
 ) {
@@ -414,11 +416,30 @@ class GraineInApp private constructor(
      */
     fun previewDesign(design: ResolvedDesign?) {
         designPreview = design
+        main.post { loadFaces() }
         announceDesign()
     }
 
     /** A design family's font, if the app mapped one in [GraineConfig.fonts]; null means the system font. */
     internal fun typeface(family: String?): Typeface? = Design.fontFor(config.fonts, family)
+
+    /**
+     * The design's typefaces, fetched by the SDK itself (contract/DESIGN.md →
+     * Fonts). Each face that arrives redraws every SDK view, exactly as a
+     * design change does. Kept in the app's cache directory, by URL.
+     */
+    private val fontStore by lazy {
+        FontStore(java.io.File(application.cacheDir, "graine-fonts"), config.debug) { announceDesign() }
+    }
+
+    /** The face the SDK loaded for a design family at a weight; null means the system font (for now, or for good). */
+    internal fun loadedFace(family: String?, weight: Int): Typeface? = fontStore.face(family, weight)
+
+    /** Fetch the faces the design being drawn uses — in light and in dark — except families the app bundles. Main thread. */
+    private fun loadFaces() {
+        val d = design ?: return
+        fontStore.want(Fonts.facesForDesign(d, config.baseUrl).filter { typeface(it.family) == null })
+    }
 
     /** Called on the main thread whenever what the views draw may have changed: a preview, the phone going dark. */
     internal fun onDesignChange(watch: () -> Unit): () -> Unit {
@@ -445,6 +466,8 @@ class GraineInApp private constructor(
                 val s = result.getOrNull()
                 if (s != null) {
                     session = s
+                    // The typefaces first: they take a round trip, and everything below draws.
+                    loadFaces()
                     variables.setDashboardDefaults(s.variables)
                     // The dashboard's friction rules, under the app's own.
                     friction.configure(Friction.resolve(FrictionConfig.fromJson(s.friction), config.friction))

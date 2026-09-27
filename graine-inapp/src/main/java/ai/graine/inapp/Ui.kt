@@ -124,8 +124,9 @@ internal object Ui {
  *
  * The bar, the launcher and the components all draw through here, so a
  * shadow, a font role or a transition means the same thing on each. Only
- * called with tokens in hand: without a design the views keep drawing from
- * the appearance, exactly as before.
+ * called with tokens in hand: without a design the launcher and components
+ * keep drawing from the appearance, exactly as before, and the bar draws
+ * Graine Classic in the appearance's accent and light or dark.
  */
 internal object Themed {
     /** The text roles contract/DESIGN.md names. */
@@ -171,9 +172,31 @@ internal object Themed {
             Role.BODY, Role.CAPTION -> f.weights.body
             null -> weight
         }
-        Ui.weight(tv, w, graine?.typeface(if (heading) f.heading else f.body))
+        face(tv, if (heading) f.heading else f.body, w, graine)
         tv.letterSpacing = (if (heading) f.letterSpacing.title else f.letterSpacing.body).toFloat()
         if (role == Role.TITLE || role == Role.BODY) Ui.lineHeight(tv, (size * (if (heading) f.lineHeight.title else f.lineHeight.body)).toFloat())
+    }
+
+    /**
+     * A design family at a weight, on a TextView — contract/DESIGN.md → Fonts:
+     *
+     *  - the app mapped the family itself ([GraineConfig.fonts]) → that
+     *    typeface at the weight, as before 0.3.0: the app's file wins;
+     *  - the SDK has loaded the face → the face, and nothing on top: a loaded
+     *    face IS its weight, and asking for bold as well would embolden a bold
+     *    face twice;
+     *  - neither, yet or ever → the system font at the weight, silently.
+     */
+    fun face(tv: TextView, family: String, weight: Int, graine: GraineInApp?) {
+        val own = graine?.typeface(family)
+        if (own != null) { Ui.weight(tv, weight, own); return }
+        val loaded = graine?.loadedFace(family, weight)
+        if (loaded != null) {
+            tv.paint.isFakeBoldText = false
+            tv.typeface = loaded
+            return
+        }
+        Ui.weight(tv, weight)
     }
 
     /**
@@ -295,8 +318,11 @@ internal class FlowRow(context: Context, private val gapH: Int, private val gapV
     }
 }
 
-/** A ScrollView that stops growing at a height — a sheet's body. */
-internal class CappedScrollView(context: Context, private val maxHeightPx: Int) : ScrollView(context) {
+/** A ScrollView that stops growing at a height — a sheet's body, the chat's messages. */
+internal class CappedScrollView(context: Context, maxHeightPx: Int) : ScrollView(context) {
+    var maxHeightPx: Int = maxHeightPx
+        set(v) { if (field != v) { field = v; requestLayout() } }
+
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val size = MeasureSpec.getSize(heightMeasureSpec)
         val cap = if (MeasureSpec.getMode(heightMeasureSpec) == MeasureSpec.UNSPECIFIED) maxHeightPx else minOf(size, maxHeightPx)
@@ -363,7 +389,8 @@ internal object ImageLoader {
         else java.net.URLDecoder.decode(payload, "UTF-8").toByteArray(Charsets.ISO_8859_1)
     }
 
-    private fun httpGet(start: String): ByteArray? {
+    /** GET a URL's body, following redirects (http↔https too); null for anything but a 2xx under `maxBytes`. Off the main thread. */
+    fun httpGet(start: String, maxBytes: Int = MAX_BYTES): ByteArray? {
         var target = URL(start)
         repeat(4) {
             if (target.protocol != "https" && target.protocol != "http") return null
@@ -386,7 +413,7 @@ internal object ImageLoader {
                         val n = input.read(buf)
                         if (n < 0) break
                         out.write(buf, 0, n)
-                        if (out.size() > MAX_BYTES) return null
+                        if (out.size() > maxBytes) return null
                     }
                     return out.toByteArray()
                 }

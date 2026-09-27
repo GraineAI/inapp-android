@@ -17,7 +17,7 @@ Integration guide: https://www.graine.ai/docs/in-app/android
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    implementation("ai.graine:inapp-android:0.2.0")
+    implementation("ai.graine:inapp-android:0.3.0")
 }
 ```
 
@@ -57,13 +57,26 @@ The engine then follows the customer from activity to activity; a call in
 progress carries on. Tell the agent what is on screen with `setScreen`, and
 see the guide for components, friction, Jetpack Compose and Java.
 
+With no call to end, the bar's end button is a close. Say what closing means
+in your app — hide the bar, show your launcher again:
+
+```kotlin
+bar.onClose = { bar.visibility = View.GONE }
+```
+
 ## How it looks
 
-The dashboard decides: the design the brand chose (a philosophy and a few
-knobs) reaches the SDK as light and dark tokens, and the bar, the components,
-the loader and `GraineLauncherView` draw them — colours, corners, outlines,
-shadows, type, glass and motion. Nothing to configure. If the design names a
-font the app bundles, map it and it is used; otherwise the system font is:
+The dashboard decides: the design the brand chose in the Garage (a philosophy
+and a few knobs) reaches the SDK as light and dark tokens, and the bar, its
+caption, the components, the loader and `GraineLauncherView` draw them —
+colours, corners, outlines, shadows or hard offsets, glass, motion, the icon
+style, and the typeface. The voice bar is the Garage's phone preview, element
+by element. Nothing to configure, and nothing in the app names a font: the SDK
+fetches the design's faces from Graine itself, keeps them on disk, and draws in
+them once they arrive (the system font until then).
+
+A family your app already bundles can be mapped instead, and is then never
+downloaded:
 
 ```kotlin
 GraineConfig(
@@ -74,7 +87,8 @@ GraineConfig(
 ```
 
 An app drawing its own UI reads the same tokens with
-`GraineInApp.get().themeTokens(context)`.
+`GraineInApp.get().themeTokens(context)`, and the call's state — including
+`voice.phase` (listening, thinking, speaking…) — from `GraineInApp.get().voice`.
 
 ## The sample app
 

@@ -240,6 +240,102 @@ internal object Warm {
         ready && !startedCall && !connected && !connecting
 }
 
+/**
+ * WHERE A CONNECT IS, AND HOW LONG THE CUSTOMER HAS WAITED ON IT — the React
+ * Native launcher's connectStage, slowConnect and callFailed
+ * (voice-launcher.tsx), with nothing of Android in it. [GraineVoice] feeds it
+ * the engine's `graine:progress` and its own state; the slow clock runs on
+ * whatever [schedule] it is handed — the main thread in the SDK, a fake clock
+ * in the tests.
+ *
+ * Measured, the commonest slow connect on mobile data is a connection the
+ * phone dropped while idle being replaced: a few seconds a customer will wait
+ * if the bar says what is happening, and will not if it says "Connecting…"
+ * for all of them. A clock on the WAIT, not on the network: the network is
+ * the engine's to report.
+ */
+internal class ConnectProgress(
+    /** A wait this long is slow — [GraineConfig.Timing.slowConnectMs]. */
+    private val slowAfterMs: Long,
+    /** Runs `task` after `delayMs`, and returns what cancels it. */
+    private val schedule: (delayMs: Long, task: () -> Unit) -> (() -> Unit),
+    /** [stage], [slow] or [failed] changed. */
+    private val onChange: () -> Unit,
+) {
+    /** Null outside a connect. A stage this build does not know is ignored, never stored. */
+    var stage: ConnectStage? = null
+        private set
+
+    /** The customer has waited on this connect past [slowAfterMs]. */
+    var slow = false
+        private set
+
+    /** Neither transport could carry the last start. */
+    var failed = false
+        private set
+
+    private var waiting = false
+    private var cancelClock: (() -> Unit)? = null
+
+    /**
+     * One `graine:progress`. True for `failed`: nothing could carry the call,
+     * and the caller must stop saying "connecting". An unknown stage changes nothing.
+     */
+    fun onStage(raw: String?): Boolean {
+        if (raw == FAILED) { set(null, true); return true }
+        ConnectStage.from(raw)?.let { set(it, failed) }
+        return false
+    }
+
+    /** A new attempt, a call that connected, or the customer's UI closing: the last stage and failure are not news. */
+    fun clear() = set(null, false)
+
+    /**
+     * Whether the customer is waiting on a connect now ([waitingOnConnect]).
+     * The clock starts when the wait does; a wait that ends — the call landed
+     * or failed, the bar closed — is no longer slow.
+     */
+    fun waiting(now: Boolean) {
+        if (now == waiting) return
+        waiting = now
+        cancelClock?.invoke()
+        cancelClock = null
+        if (now) {
+            cancelClock = schedule(slowAfterMs) {
+                cancelClock = null
+                if (waiting && !slow) { slow = true; onChange() }
+            }
+        } else if (slow) {
+            slow = false
+            onChange()
+        }
+    }
+
+    private fun set(stage: ConnectStage?, failed: Boolean) {
+        if (stage == this.stage && failed == this.failed) return
+        this.stage = stage
+        this.failed = failed
+        onChange()
+    }
+
+    companion object {
+        /** The engine's word that ends a connect rather than describing one. */
+        const val FAILED = "failed"
+
+        /**
+         * The React Native launcher's waitingOnConnect, for a platform with no
+         * `active` prop: nothing has landed or failed, and the customer IS
+         * waiting — a call they placed is connecting (a start held for the
+         * page counts: start() says connecting at once), or their bar is open
+         * on a page that is not ready yet. A page loading behind no open bar
+         * is nobody's slow connect.
+         */
+        @JvmStatic
+        fun waitingOnConnect(connected: Boolean, failed: Boolean, connecting: Boolean, ready: Boolean, barOpen: Boolean): Boolean =
+            !connected && !failed && (connecting || (!ready && barOpen))
+    }
+}
+
 /** What an action handler answers. The agent speaks about exactly this, so tell the truth. */
 data class ActionResult(
     val status: Status,
@@ -1132,7 +1228,7 @@ internal class FrictionDetector(rules: FrictionRules = FrictionRules(), private 
 // ── appearance: what the dashboard says, translated for a phone ─────────────
 
 /** The dashboard's appearance, translated: see [Appearance.resolve]. */
-data class NativeAppearance(
+data class NativeAppearance @JvmOverloads constructor(
     /** Always a valid "#rgb" or "#rrggbb". */
     val accent: String,
     /** The panel heading ("Talk to our AI assistant") — NOT the assistant's name. */
@@ -1141,7 +1237,86 @@ data class NativeAppearance(
     val logoUrl: String?,
     /** Corner rounding, clamped to what the host draws. */
     val radius: Double,
+    /**
+     * What the logo sits on where it stands in for the launcher glyph — the
+     * accent, or a white plate (contract/DESIGN.md "The brand's logo"). Last,
+     * with a default, so 0.4.0's four-argument constructor still builds.
+     */
+    val logoPlate: LogoPlate = LogoPlate.ACCENT,
 )
+
+/**
+ * WHAT THE BRAND'S LOGO SITS ON — `appearance.logoPlate`, contract/DESIGN.md
+ * "The brand's logo".
+ *
+ *   ACCENT  the shape's own fill: for a white or light logo made for a
+ *           coloured background. How logos were always drawn, and the default.
+ *   WHITE   #FFFFFF with a hairline in `border`: for a coloured or dark logo,
+ *           or an opaque image — which is what most logo files are. A logo in
+ *           the brand's own colour on the brand's own fill is no logo at all.
+ *
+ * The dashboard reads it from the logo's pixels when it is uploaded, and the
+ * brand can change it under Appearance → Logo.
+ */
+enum class LogoPlate(val wire: String) {
+    ACCENT("accent"), WHITE("white");
+
+    companion object {
+        /** theme.ts's normaliseLogoPlate: exactly "white" is white; anything else — "WHITE", 1, absent — is the accent. */
+        @JvmStatic
+        fun from(value: Any?): LogoPlate = if (value == WHITE.wire) WHITE else ACCENT
+    }
+}
+
+/**
+ * THE BRAND'S LOGO, WHOLE AND ON ITS PLATE — theme.ts's logoBox and
+ * logoPlateLook, for every place the logo stands in for the launcher glyph:
+ * the launcher, the voice bar's avatar, the chat header's mark.
+ *
+ * It used to be drawn FILLING its shape (centre-crop): a wordmark lost both
+ * ends, a square logo lost its corners to the circle. It is fitted instead —
+ * whole, proportions kept, centred — into the largest square the shape holds.
+ */
+object Logo {
+    /** A white plate's fill. */
+    const val PLATE_WHITE = "#FFFFFF"
+
+    /** A pill's label on the white plate — theme.ts's readableOn("#FFFFFF"). */
+    const val ON_WHITE = "#101318"
+
+    /** The hairline under a classic (design-less) launcher's white plate, as the React Native classic launcher draws it. */
+    const val CLASSIC_HAIRLINE = "#E5E7EB"
+
+    /**
+     * The side of the square a logo is fitted into, in the shape's own units,
+     * inside a shape `size` across (a pill: its height, drawn as a circle).
+     * 80% for `rounded-square` and `square`; 70% for the rest — the largest
+     * square a circle holds is 70.7% of it, and a squircle is treated as one.
+     * Rounded down, never up: a box rounded up pokes its corners past the circle.
+     */
+    @JvmStatic
+    fun box(shape: String?, size: Double): Int {
+        val k = if (shape == "rounded-square" || shape == "square") 0.8 else 0.7
+        return maxOf(1, Math.floor(size * k).toInt())
+    }
+
+    /** An outline: a width in the shape's units and a #RRGGBB colour. */
+    data class Stroke(val width: Double, val color: String)
+
+    /** The fill under a logo, and its outline — null for none. */
+    data class Plate(val fill: String, val outline: Stroke?)
+
+    /**
+     * What a plate looks like: `WHITE` is #FFFFFF outlined `max(1, borderWidth)`
+     * in `border`; `ACCENT` is the accent, no outline. Callers pass `ACCENT`
+     * whenever the mark is not the logo — a glyph or a letter is always on the accent.
+     */
+    @JvmStatic
+    @JvmOverloads
+    fun plate(plate: LogoPlate, accent: String, border: String, borderWidth: Double = 1.0): Plate =
+        if (plate == LogoPlate.WHITE) Plate(PLATE_WHITE, Stroke(maxOf(1.0, borderWidth), border))
+        else Plate(accent, null)
+}
 
 /** The colours a component is drawn in, as #RRGGBB. */
 data class WidgetPalette(
@@ -1173,7 +1348,8 @@ object Appearance {
     /**
      * The dashboard decides, the host's values are the fallback — one rule in
      * one direction. `accent` may arrive without its "#"; `title` is a heading;
-     * `logo` is an S3 key that becomes `<origin>/api/embed/logo?k=…`.
+     * `logo` is an S3 key that becomes `<origin>/api/embed/logo?k=…`;
+     * `logoPlate` is [LogoPlate.from]'s — only "white" is white.
      */
     fun resolve(
         appearance: JSONObject?,
@@ -1193,6 +1369,7 @@ object Appearance {
             heading = Js.strOrEmpty(a.opt("title")).trim().ifEmpty { heading },
             logoUrl = if (logoKey.isEmpty()) null else "$base/api/embed/logo?k=${encodeURIComponent(logoKey)}",
             radius = clamp(numeric(a.opt("radius")) ?: radius ?: 18.0, max),
+            logoPlate = LogoPlate.from(a.opt("logoPlate")),
         )
     }
 

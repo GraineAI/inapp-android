@@ -135,13 +135,28 @@ internal object VoiceBar {
         /** The agent's line is still arriving. */
         val speaking: Boolean = false,
         val quality: ConnectionQuality = ConnectionQuality.UNKNOWN,
+        /** Neither transport could carry the last start ([GraineVoice.callFailed]). */
+        val callFailed: Boolean = false,
+        /** Where the connect is ([GraineVoice.connectStage]). */
+        val connectStage: ConnectStage? = null,
+        /** The customer has waited on it long enough to say so ([GraineVoice.slowConnect]). */
+        val slowConnect: Boolean = false,
+        /** The brand's words for the connecting moment (Appearance → Loading): "Connecting…" unless it chose its own. */
+        val connectingText: String = DEFAULT_CONNECTING,
     )
 
     /**
      * The words, and whether they are drawn as the loader (with that moment's
-     * dashboard words) or after the meter instead of standing alone.
+     * dashboard words — or [label], when the bar has words of its own for it)
+     * or after the meter instead of standing alone.
      */
-    data class Status(val text: String, val loader: String? = null, val meter: Boolean = false)
+    data class Status(val text: String, val loader: String? = null, val meter: Boolean = false, val label: String? = null)
+
+    /** The loader's own words for connecting, which a slow connect may replace — and no others. */
+    val DEFAULT_CONNECTING: String = Loaders.DEFAULT_TEXT.connecting ?: "Connecting…"
+
+    /** What a connect the customer has waited on says, while the brand's words are the default. */
+    const val STILL_CONNECTING = "Still connecting…"
 
     /** First match wins, in the contract's order. */
     fun status(s: StatusInput): Status = when {
@@ -153,7 +168,9 @@ internal object VoiceBar {
         s.reconnecting || s.connectivity == Connectivity.RETRYING -> Status("Reconnecting…", "reconnecting")
         s.micDenied -> Status("Needs microphone")
         s.connectivity == Connectivity.FAILED -> Status("Couldn’t load · tap to retry")
-        !s.ready || s.connecting -> Status("Connecting…", "connecting")
+        // Neither transport could carry the call. The microphone starts a new one.
+        s.callFailed -> Status("Couldn’t connect · tap to retry")
+        !s.ready || s.connecting -> connecting(s)
         s.muted -> Status("Muted")
         // The gap between the customer finishing and the agent answering: the loader, not a meter over silence.
         s.connected && s.thinking -> Status("Thinking…", "thinking")
@@ -162,6 +179,29 @@ internal object VoiceBar {
         s.connected -> Status("Listening", meter = true)
         else -> Status("Tap to talk")
     }
+
+    /**
+     * WHAT A CONNECT SAYS WHILE IT RUNS — the React Native bar's connectingLook.
+     *
+     * The words stay the BRAND's. The loader draws each moment in the wording
+     * set under Appearance → Loading — often not English — so a retry, or a
+     * switch to the other transport, is the "reconnecting" moment in their
+     * words; and a connect the customer has waited on says "Still connecting…"
+     * only while the brand left "Connecting…" as it was. A wording someone
+     * chose is never overwritten.
+     */
+    fun connecting(s: StatusInput): Status = when {
+        s.connectStage == ConnectStage.RETRYING || s.connectStage == ConnectStage.SWITCHING -> Status("Reconnecting…", "reconnecting")
+        s.slowConnect && s.connectingText == DEFAULT_CONNECTING -> Status(STILL_CONNECTING, "connecting", label = STILL_CONNECTING)
+        else -> Status(s.connectingText, "connecting")
+    }
+
+    /**
+     * The words the loader draws for a status that is the loader: the bar's
+     * own ([Status.label], "Still connecting…") when it has some, else the
+     * brand's for that moment (Appearance → Loading). Null for words alone.
+     */
+    fun loaderWords(st: Status, text: LoaderText): String? = st.loader?.let { st.label ?: text.forMoment(it) }
 
     /**
      * The microphone cannot act while connecting, before the page is ready,

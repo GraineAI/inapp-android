@@ -49,7 +49,8 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
     var connected = false; private set
     var connecting = false; private set
     var muted = false; private set
-    var ready = false; private set
+    var ready = false
+        private set(value) { field = value; rearm() }
     var quality = ConnectionQuality.UNKNOWN; private set
     var online: Boolean? = null; private set
     var reconnecting = false; private set
@@ -62,6 +63,31 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
      * Cleared when the next call is placed.
      */
     var error: String? = null; private set
+
+    /**
+     * Where a call being placed is, as the engine reports it — registering,
+     * dialling, retrying, switching ([ConnectStage]). Null outside a connect.
+     * A bar that says what is happening across a retry is one the customer
+     * waits for; "Connecting…" for eight seconds is one they close.
+     */
+    val connectStage: ConnectStage? get() = progress.stage
+
+    /**
+     * The customer has waited on this connect past [GraineConfig.Timing.slowConnectMs]
+     * (4 s): say so — "Still connecting…" — honestly, not with a faster
+     * spinner. Only while they ARE waiting: a call they placed, or a bar of
+     * this SDK open on a page not yet ready.
+     */
+    val slowConnect: Boolean get() = progress.slow
+
+    /**
+     * The last start could not be connected at all — not on WebRTC, not on
+     * the fallback. Distinct from [error] (a setting someone must change): the
+     * network may well be better in a moment, so [start] simply tries again.
+     * Cleared by the next start, by a call that connects, and when the last
+     * of this SDK's bars leaves the screen.
+     */
+    val callFailed: Boolean get() = progress.failed
 
     /** What the call is doing, in one word — see [CallPhase]. A bar says "Thinking…" from this. */
     val phase: CallPhase
@@ -88,6 +114,22 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
     private var cacheKey: String = System.currentTimeMillis().toString()
     private var mountedIdle = true
     private var unwatch: List<() -> Unit> = emptyList()
+
+    private val progress = ConnectProgress(
+        graine.config.timing.slowConnectMs,
+        schedule = { delayMs, task ->
+            val r = Runnable { task() }
+            graine.main.postDelayed(r, delayMs)
+            ({ graine.main.removeCallbacks(r) })
+        },
+        onChange = { report { it.onConnectProgress(connectStage, slowConnect, callFailed) } },
+    )
+
+    /**
+     * This SDK's bars on screen — the React Native launcher's `active`: the
+     * customer's UI is open. Weak, so a bar can never hold its activity here.
+     */
+    private val openBars: MutableSet<Any> = java.util.Collections.newSetFromMap(java.util.WeakHashMap<Any, Boolean>())
 
     private val watchdog = LoadWatchdog(graine.config.timing.stallMs, graine.config.timing.bootMs, graine.config.timing.hardCapMs)
     private val ladder = RetryLadder(graine.config.timing.retryDelaysMs)
@@ -193,6 +235,7 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
         }
         webView = null; host = null; engineContext = null
         activityRef = WeakReference(null)
+        progress.clear()
         ready = false; startedCall = false; pendingStart = false
         setCall(connected = false, connecting = false)
     }
@@ -208,8 +251,9 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
         val activity = activityRef.get() ?: run {
             report { it.onError("GraineVoice.attach(activity) must be called before start().") }; return
         }
-        // A new attempt: the last call's fault and its last words are not news.
+        // A new attempt: the last call's fault, its failure to connect and its last words are not news.
         error = null
+        progress.clear()
         agentSpeaking = false
         awaitingAgent = false
         setCall(connected = connected, connecting = true)
@@ -338,6 +382,7 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
         val liveChanged = connected != this.connected
         this.connected = connected
         this.connecting = connecting
+        rearm()
         if (liveChanged) graine.callStateChanged(connected)
         if (changed) report { it.onCallState(connected, connecting) }
     }
@@ -366,7 +411,7 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
                 else if (!startedCall) post(Protocol.out(Protocol.Out.WARM))
             }
             is PageMessage.Call -> {
-                if (msg.connected) { endNotified = false; reconnecting = false; graine.main.removeCallbacks(endWatchdog) }
+                if (msg.connected) { endNotified = false; reconnecting = false; graine.main.removeCallbacks(endWatchdog); progress.clear() }
                 // The page announces "not connected" as it loads. With a start
                 // queued behind it, that is not idle — the customer pressed
                 // the button, and the bar must keep saying "connecting".
@@ -429,7 +474,35 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
                 if (msg.active) setCall(connected = connected, connecting = true)
                 report { it.onReconnecting(msg.active) }
             }
+            is PageMessage.Progress -> {
+                if (progress.onStage(msg.stage)) {
+                    // Neither transport could carry the call: stop saying "connecting", and
+                    // let the next press be a new start rather than a wait on this one.
+                    startedCall = false
+                    pendingStart = false
+                    setCall(connected = false, connecting = false)
+                }
+                rearm()
+            }
         }
+    }
+
+    /**
+     * A bar of this SDK came on screen or left it — [GraineAgentBarView] says
+     * so itself. The last one leaving is the customer closing their UI: the
+     * React Native launcher deactivating, which forgets a failed connect and
+     * its stage, as this does.
+     */
+    internal fun barShown(bar: Any, shown: Boolean) {
+        val changed = if (shown) openBars.add(bar) else openBars.remove(bar)
+        if (!changed) return
+        if (!shown && openBars.isEmpty()) progress.clear()
+        rearm()
+    }
+
+    /** Start, stop or keep the slow-connect clock, from the state as it now stands. */
+    private fun rearm() {
+        progress.waiting(ConnectProgress.waitingOnConnect(connected, progress.failed, connecting, ready, openBars.isNotEmpty()))
     }
 
     private fun setQuality(q: ConnectionQuality) {

@@ -286,7 +286,7 @@ class VoiceBarTest {
         // Everything at once, then taken away one condition at a time, in the contract's order.
         var s = VoiceBar.StatusInput(
             error = true, chat = true, chatOnline = true, online = false, reconnecting = true,
-            connectivity = Connectivity.FAILED, micDenied = true, ready = false, connecting = true,
+            connectivity = Connectivity.FAILED, micDenied = true, callFailed = true, ready = false, connecting = true,
             muted = true, connected = true, thinking = true, speaking = true, quality = ConnectionQuality.POOR,
         )
         val seen = mutableListOf<VoiceBar.Status>()
@@ -297,6 +297,7 @@ class VoiceBarTest {
         see(); s = s.copy(reconnecting = false)
         see(); s = s.copy(micDenied = false)
         see(); s = s.copy(connectivity = Connectivity.READY)
+        see(); s = s.copy(callFailed = false)
         see(); s = s.copy(ready = true)
         see(); s = s.copy(connecting = false)
         see(); s = s.copy(muted = false)
@@ -312,6 +313,7 @@ class VoiceBarTest {
             VoiceBar.Status("Reconnecting…", "reconnecting"),
             VoiceBar.Status("Needs microphone"),
             VoiceBar.Status("Couldn’t load · tap to retry"),
+            VoiceBar.Status("Couldn’t connect · tap to retry"),
             VoiceBar.Status("Connecting…", "connecting"),
             VoiceBar.Status("Connecting…", "connecting"),
             VoiceBar.Status("Muted"),

@@ -78,6 +78,22 @@ public class JavaInteropTest {
         listener.onEnded();
         // A Java default method, not an abstract one the app is forced to write.
         listener.onError("unheard");
+        // 0.5.0's new callback too: an app written before it still compiles, and need not hear it.
+        listener.onConnectProgress(ConnectStage.RETRYING, true, false);
         assertTrue(ended[0]);
+    }
+
+    @Test public void connectStagesAndTheLogosPlateAreReadFromJava() {
+        assertEquals(ConnectStage.DIALLING, ConnectStage.from("dialling"));
+        assertEquals("failed ends a connect; it is not a stage", null, ConnectStage.from("failed"));
+        assertEquals(4000L, new GraineConfig.Timing().getSlowConnectMs());
+        assertEquals(LogoPlate.WHITE, LogoPlate.from("white"));
+        assertEquals(LogoPlate.ACCENT, LogoPlate.from("WHITE"));
+        assertEquals(26, Logo.box("circle", 38.0));
+        Logo.Plate plate = Logo.plate(LogoPlate.WHITE, "#318CE7", "#E5E5E5");
+        assertEquals("#FFFFFF", plate.getFill());
+        assertEquals(1.0, plate.getOutline().getWidth(), 0.0);
+        // 0.4.0's four-argument constructor still builds, on the accent.
+        assertEquals(LogoPlate.ACCENT, new NativeAppearance("#318CE7", "Ring", null, 18.0).getLogoPlate());
     }
 }

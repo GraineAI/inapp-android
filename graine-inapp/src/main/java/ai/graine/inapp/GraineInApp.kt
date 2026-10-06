@@ -66,6 +66,13 @@ data class GraineConfig @JvmOverloads constructor(
         val hardCapMs: Long = 120_000,
         val retryDelaysMs: List<Long> = listOf(1_000, 2_000, 4_000, 8_000, 15_000, 15_000),
         val endWatchdogMs: Long = 4_000,
+        /**
+         * A connect the customer has waited on this long says "Still
+         * connecting…" ([GraineVoice.slowConnect]). Past the point a healthy
+         * connect finishes, well inside the ten seconds after which, without a
+         * word, people decide it is broken.
+         */
+        val slowConnectMs: Long = 4_000,
     )
 }
 
@@ -112,6 +119,13 @@ interface GraineListener {
     fun onNetwork(online: Boolean) {}
     /** The network interrupted the call and it is being re-established. Not an end. */
     fun onReconnecting(active: Boolean) {}
+    /**
+     * Where a call being placed is ([GraineVoice.connectStage]), whether the
+     * customer has waited on it long enough to say so ([GraineVoice.slowConnect]),
+     * and whether it could not be connected at all ([GraineVoice.callFailed]).
+     * Fires when any of the three changes.
+     */
+    fun onConnectProgress(stage: ConnectStage?, slow: Boolean, failed: Boolean) {}
     fun onTransport(transport: Transport, requested: Transport, reason: String?, message: String?) {}
     fun onConnectivity(state: Connectivity, attempt: Int, reason: String?) {}
     fun onActionRequested(name: String) {}

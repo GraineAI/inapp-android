@@ -67,12 +67,33 @@ iOS points, Android dp, Flutter logical pixels).
 ## Element by element
 
 **Launcher** (the floating button). 56 × 56 (a `pill` is 56 high and as wide as
-its label). Fill `accent`; glyph or logo in `onAccent` at 46% of the height.
+its label). Fill `accent`; glyph in `onAccent` at 46% of the height; a logo as
+**The brand's logo** below.
 Corners: `circle` = fully round; `squircle` = continuous corners at 30% of the
 size (iOS `.continuous`, elsewhere a 30% radius); `rounded-square` = `radius.lg`;
 `square` = `radius.sm`. Shadow `elevation.floating`; with `hardOffset`, a solid
 `colors.text` copy offset by `{x, y}` and a `borderWidth` outline in
 `colors.text`.
+
+**The brand's logo** — wherever it stands in for the launcher glyph (the
+launcher, the voice bar's avatar, the chat header's mark):
+
+- **Whole.** Scaled to fit, proportions kept, centred — **never cropped**. It
+  fills the largest square its shape holds: 70% of the size for `circle`,
+  `squircle` and a `pill`'s height, 80% for `rounded-square` and `square`
+  (`logoBox()` in theme.ts). Drawing it to fill the circle (`cover`) cut a
+  wordmark down to its middle and a square logo's corners off.
+- **On its plate**, `appearance.logoPlate`: `accent` — the shape's own fill,
+  for a white or light mark made for a coloured background — or `white`:
+  `#FFFFFF` with a `max(1, borderWidth)` outline in `border` (a pill's label
+  then `#101318`). Absent: `accent`, as logos were drawn before. A logo drawn
+  in the brand's own colour on the brand's own fill is no logo at all, which
+  is why the plate exists. The dashboard reads it from the pixels on upload
+  (85%+ of the visible pixels near white → `accent`, otherwise `white`; an
+  opaque image → `white`) and the brand can change it. A hard offset keeps its
+  `colors.text` outline instead of the hairline.
+- The uploaded file has its empty transparent margins trimmed, so a logo with
+  padding is not drawn small.
 
 **Voice bar** — what the customer sees during a call, and what the dashboard's
 Garage draws in its phone preview. Every SDK draws it itself from these tokens;
@@ -85,8 +106,9 @@ the app passes nothing about how it looks.
   blurred.
 - **Left to right:**
   1. **Avatar** 38 × 38, fully round, `accent`. Inside: `icons.launcher` in
-     `onAccent` at 18; when that is null, the brand's logo filling the circle;
-     else the heading's first letter, 15, bold, `onAccent`.
+     `onAccent` at 18; when that is null, the brand's logo (see **The brand's
+     logo**: whole, 70% of the circle, on its plate); else the heading's first
+     letter, 15, bold, `onAccent`.
   2. **Name and status**, taking the rest. Name: the appearance heading, 14, the
      body family at `weights.strong`, `text`, one line. Status under it:
      `font.scale.caption`, the body family at `weights.body`, `textMuted`, one
@@ -104,12 +126,25 @@ the app passes nothing about how it looks.
 - **Status words**, first match wins: error → "Unavailable"; in the chat →
   "Online" / "Connecting…"; offline → "No connection"; reconnecting →
   "Reconnecting…"; microphone refused → "Needs microphone"; load failed →
-  "Couldn’t load · tap to retry" (a curly apostrophe); not ready or placing → "Connecting…"; muted →
+  "Couldn’t load · tap to retry" (a curly apostrophe); the call could not be
+  connected on either transport (`graine:progress` `failed`) → "Couldn’t
+  connect · tap to retry", and the microphone button starts a new call; not
+  ready or placing → "Connecting…" (see **Connecting** below); muted →
   "Muted"; the agent working out its answer (the call's phase is `thinking`) →
   "Thinking…"; the agent's line still arriving → "Speaking"; poor network →
   "Weak connection"; on a call → "Listening"; otherwise → "Tap to talk". While
   connecting, reconnecting or thinking, draw the loader (Appearance → Loading)
   with that moment's words instead of the words above.
+- **Connecting.** The engine reports where a connect is with `graine:progress`
+  `{ stage }`: `registering`, `dialling`, `retrying` (the first attempt went
+  unanswered — on mobile data, usually a connection the phone dropped while
+  idle — and a fresh one is being made), `switching` (moving to the other
+  transport), `failed` (nothing could carry it; stop connecting). While
+  `retrying` or `switching`, draw the **reconnecting** moment. A connect the
+  customer has waited on for 4 s (their bar open, the page or the call not
+  there yet) says "Still connecting…" — but only while the brand's
+  connecting words are the default "Connecting…": a wording the brand chose,
+  often not English, is never replaced. Ignore stages you do not know.
 - **Meter.** Four bars 2.5 wide, 2 apart, bottoms aligned, heights 55%, 100%,
   70%, 40% of 12, fully round, `accent`. Each scales from its bottom between 35%
   and 100% and back, each leg `max(420, motion.durationMs × 3.2)` ms, bar *i*

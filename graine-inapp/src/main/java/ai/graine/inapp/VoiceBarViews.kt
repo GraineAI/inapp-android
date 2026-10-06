@@ -126,35 +126,48 @@ internal class RoundButton(context: Context, sizeDp: Double = VoiceBar.BUTTON) :
 
 /**
  * THE BRAND'S MARK IN A SHAPE: the design's launcher glyph in `onAccent`, else
- * the logo, else the heading's first letter — the avatar on the bar (a circle,
- * the logo filling it) and the chat header's launcher mark (the launcher's
- * shape, the logo fitted).
+ * the logo, else the heading's first letter — the avatar on the bar (a circle)
+ * and the chat header's launcher mark (the launcher's shape, a pill drawn as a
+ * circle).
+ *
+ * The logo is drawn WHOLE (contract/DESIGN.md "The brand's logo"): fitted,
+ * proportions kept, centred in the largest square the shape holds
+ * ([Logo.box]) — never cropped. It filled the avatar here, centre-cropped: a
+ * wordmark lost both ends and a square logo its corners. Under it, its plate:
+ * the accent, or white with a hairline in `border`. A glyph or a letter is
+ * always on the accent.
  */
 internal object Mark {
+    /** `markShape` is the launcher shape the mark is drawn in — what [Logo.box] fits the logo to. */
     fun fill(
-        box: FrameLayout, t: ThemeTokens, sizeDp: Double, glyphDp: Double, cornerDp: Double?,
-        accent: Int, onAccent: Int, hostImage: String?, logoUrl: String?, initial: String, logoFills: Boolean,
+        box: FrameLayout, t: ThemeTokens, sizeDp: Double, glyphDp: Double, markShape: String, cornerDp: Double?,
+        accent: Int, onAccent: Int, hostImage: String?, logoUrl: String?, logoPlate: LogoPlate, initial: String,
     ) {
         val ctx = box.context
         val side = Ui.dp(ctx, sizeDp.toFloat())
+        val glyphPx = Ui.dp(ctx, glyphDp.toFloat())
         box.removeAllViews()
+        // A host's own picture is its override and wins; then the design's order: glyph, logo, letter.
+        val glyph = if (hostImage.isNullOrEmpty()) GlyphDrawable.of(t.icons.launcher, t.icons.stroke, onAccent, glyphPx) else null
+        val showsLogo = hostImage.isNullOrEmpty() && glyph == null && !logoUrl.isNullOrEmpty()
+        val plate = Logo.plate(if (showsLogo) logoPlate else LogoPlate.ACCENT, t.colors.accent, t.colors.border, t.shape.borderWidth)
         box.background = GradientDrawable().apply {
-            setColor(accent)
             if (cornerDp == null) shape = GradientDrawable.OVAL else cornerRadius = Ui.dp(ctx, cornerDp.toFloat()).toFloat()
+            // The accent plate is the bar's accent, a host's override included; the white one is white.
+            setColor(if (plate.outline == null) accent else Themed.color(plate.fill, android.graphics.Color.WHITE))
+            plate.outline?.let { setStroke(maxOf(1, Themed.px(ctx, it.width)), Themed.color(it.color)) }
         }
-        // Clipped to its shape, so a logo that fills it takes the shape too.
+        // Clipped to its shape: a host's picture takes the shape.
         box.clipToOutline = true
         box.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-        val glyphPx = Ui.dp(ctx, glyphDp.toFloat())
-        // A host's own picture is its override and wins; then the design's order: glyph, logo, letter.
-        if (!hostImage.isNullOrEmpty()) { box.addView(image(ctx, hostImage, true), FrameLayout.LayoutParams(side, side)); return }
-        GlyphDrawable.of(t.icons.launcher, t.icons.stroke, onAccent, glyphPx)?.let { g ->
-            box.addView(ImageView(ctx).apply { setImageDrawable(g) }, FrameLayout.LayoutParams(glyphPx, glyphPx, Gravity.CENTER))
+        if (!hostImage.isNullOrEmpty()) { box.addView(image(ctx, hostImage, crop = true), FrameLayout.LayoutParams(side, side)); return }
+        if (glyph != null) {
+            box.addView(ImageView(ctx).apply { setImageDrawable(glyph) }, FrameLayout.LayoutParams(glyphPx, glyphPx, Gravity.CENTER))
             return
         }
-        if (!logoUrl.isNullOrEmpty()) {
-            val lp = if (logoFills) FrameLayout.LayoutParams(side, side) else FrameLayout.LayoutParams(glyphPx, glyphPx, Gravity.CENTER)
-            box.addView(image(ctx, logoUrl, logoFills), lp)
+        if (showsLogo) {
+            val logoPx = Ui.dp(ctx, Logo.box(markShape, sizeDp).toFloat())
+            box.addView(image(ctx, logoUrl!!, crop = false), FrameLayout.LayoutParams(logoPx, logoPx, Gravity.CENTER))
             return
         }
         box.addView(TextView(ctx).apply {
@@ -168,8 +181,12 @@ internal object Mark {
         }, FrameLayout.LayoutParams(side, side))
     }
 
-    private fun image(ctx: Context, url: String, fills: Boolean): ImageView = ImageView(ctx).apply {
-        scaleType = if (fills) ImageView.ScaleType.CENTER_CROP else ImageView.ScaleType.FIT_CENTER
+    /**
+     * The brand's logo is never cropped (FIT_CENTER). Only a host's own avatar
+     * picture fills its circle — [GraineAgentBarView.avatarUrl] says it does.
+     */
+    private fun image(ctx: Context, url: String, crop: Boolean): ImageView = ImageView(ctx).apply {
+        scaleType = if (crop) ImageView.ScaleType.CENTER_CROP else ImageView.ScaleType.FIT_CENTER
         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         ImageLoader.load(this, url)
     }
@@ -404,7 +421,7 @@ internal class ChatWindowView(context: Context, private val graine: GraineInApp)
 
     /** Draw the conversation in the design. Cheap enough to call on every change. */
     fun render(
-        t: ThemeTokens, accent: Int, onAccent: Int, heading: String, hostImage: String?, logoUrl: String?,
+        t: ThemeTokens, accent: Int, onAccent: Int, heading: String, hostImage: String?, logoUrl: String?, logoPlate: LogoPlate,
         messages: List<ChatLine>, isOnline: Boolean, typing: Boolean,
     ) {
         val c = t.colors
@@ -444,9 +461,9 @@ internal class ChatWindowView(context: Context, private val graine: GraineInApp)
             divider.layoutParams = (divider.layoutParams as LayoutParams).apply { height = maxOf(1, bw) }
             // The launcher's own shape, a pill drawn as a circle.
             val markShape = if (t.shape.launcher == "pill") "circle" else t.shape.launcher
-            Mark.fill(mark, t, VoiceBar.CHAT_MARK, VoiceBar.CHAT_MARK_GLYPH,
+            Mark.fill(mark, t, VoiceBar.CHAT_MARK, VoiceBar.CHAT_MARK_GLYPH, markShape,
                 if (markShape == "circle") null else Design.launcherCorner(markShape, VoiceBar.CHAT_MARK, r),
-                accent, onAccent, hostImage, logoUrl, heading.trim().firstOrNull()?.uppercase() ?: "A", logoFills = false)
+                accent, onAccent, hostImage, logoUrl, logoPlate, heading.trim().firstOrNull()?.uppercase() ?: "A")
             val titleSp = minOf(t.font.scale.title, VoiceBar.CHAT_TITLE_MAX_SP)
             title.text = heading
             title.setTextColor(text)

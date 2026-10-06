@@ -181,8 +181,15 @@ class RnParityTest {
                 maxRadius = if (f.has("maxRadius")) f.getDouble("maxRadius") else null,
                 origin = if (f.has("origin")) f.getString("origin") else null,
             )
-            assertEquals(c.toString(), canon(c.get("output")), canon(mapOf("accent" to a.accent, "heading" to a.heading, "logoUrl" to a.logoUrl, "radius" to a.radius)))
+            assertEquals(c.toString(), canon(c.get("output")),
+                canon(mapOf("accent" to a.accent, "heading" to a.heading, "logoUrl" to a.logoUrl, "logoPlate" to a.logoPlate.wire, "radius" to a.radius)))
         }
+        // Not a vacuous pass: the file carries both plates, and junk that must fall back to the accent.
+        val plates = cases("appearance").map { it.getJSONObject("output").getString("logoPlate") }
+        assertTrue("rn-parity has no white plate", "white" in plates)
+        assertTrue("rn-parity has no accent plate", "accent" in plates)
+        val junk = cases("appearance").filter { (it.opt("appearance") as? JSONObject)?.let { a -> a.has("logoPlate") && a.opt("logoPlate") != "white" && a.opt("logoPlate") != "accent" } == true }
+        assertTrue("rn-parity has no junk plate (\"WHITE\", 1)", junk.size >= 2)
         for (c in cases("palette")) {
             val p = Appearance.palette(c.opt("appearance") as? JSONObject, deviceDark = str(c, "scheme") == "dark", accent = c.getString("accent"))
             val mine = mapOf("surface" to p.surface, "border" to p.border, "text" to p.text, "muted" to p.muted, "onAccent" to p.onAccent, "mode" to p.mode)

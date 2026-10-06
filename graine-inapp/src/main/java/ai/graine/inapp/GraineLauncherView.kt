@@ -19,7 +19,9 @@ import android.widget.TextView
  *
  * Everything about it comes from the session's design (contract/DESIGN.md →
  * Launcher): 56 dp, filled with the accent; the design's glyph in the colour
- * that reads on the accent at 46% of the height, or the brand's logo, or the
+ * that reads on the accent at 46% of the height, or the brand's logo — whole,
+ * fitted into the largest square the shape holds, on its plate (the accent,
+ * or white with a hairline; contract/DESIGN.md "The brand's logo") — or the
  * first letter of the name; the corners of its shape — a circle, a squircle
  * (30% of the size), a rounded or plain square, or a pill as wide as its
  * label; and its depth — the floating shadow, or a hard offset in the text
@@ -32,8 +34,8 @@ import android.widget.TextView
  * usual spot); it measures its own size, shadow room included.
  *
  * Without a design (a server that predates designs) it is a circle in the
- * dashboard's accent with its logo — no glyph, since there is no design to
- * choose one. Main thread only.
+ * dashboard's accent with its logo, on its plate — no glyph, since there is no
+ * design to choose one. Main thread only.
  */
 class GraineLauncherView @JvmOverloads constructor(
     context: Context,
@@ -66,6 +68,11 @@ class GraineLauncherView @JvmOverloads constructor(
     private var offsetY = 0
     private var words = ""
     private var letter = "✦"
+    /** The brand's logo and what it sits on; the hairline a white plate draws (#RRGGBB, px). */
+    private var logoUrl: String? = null
+    private var logoPlate = LogoPlate.ACCENT
+    private var hairline = Color.TRANSPARENT
+    private var hairlinePx = 0f
 
     private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
@@ -122,6 +129,13 @@ class GraineLauncherView @JvmOverloads constructor(
         offsetY = if (hard != null) dp(hard.y).toInt() else 0
         outlineInk = if (hard != null) Themed.color(t.colors.text) else 0
         borderPx = if (hard != null) dp(t.shape.borderWidth) else 0f
+        // A white plate's hairline: the design's border at max(1, borderWidth) — the classic look's
+        // light grey at 1 without a design, as the React Native classic launcher draws it.
+        logoUrl = dash.logoUrl
+        logoPlate = dash.logoPlate
+        val white = Logo.plate(LogoPlate.WHITE, accentHex, t?.colors?.border ?: Logo.CLASSIC_HAIRLINE, t?.shape?.borderWidth ?: 1.0)
+        hairline = Themed.color(white.outline?.color, Color.TRANSPARENT)
+        hairlinePx = dp(white.outline?.width ?: 1.0)
         words = label?.trim()?.takeIf { it.isNotEmpty() }
             ?: Js.strOrEmpty(appearance?.opt("launcherLabel")).trim().ifEmpty { "Talk to us" }
         letter = dash.heading.trim().firstOrNull()?.uppercase() ?: "✦"
@@ -158,10 +172,24 @@ class GraineLauncherView @JvmOverloads constructor(
 
     private fun glyphPx() = dp(Design.LAUNCHER_SIZE * Design.LAUNCHER_GLYPH)
 
+    /** The mark on the button is the brand's logo (not the glyph, not the letter): it sits on its plate. */
+    private fun showsLogo() = mark.bitmap != null && logoUrl != null && mark.source == logoUrl
+
+    /** A white plate under the logo, rather than the accent. */
+    private fun onWhite() = showsLogo() && logoPlate == LogoPlate.WHITE
+
+    /**
+     * The side of the square the mark is drawn in: a glyph at 46% of the
+     * height; the logo in the largest square the shape holds (a pill's as a
+     * circle's) — whole, never cropped.
+     */
+    private fun markPx() =
+        if (showsLogo()) dp(Logo.box(if (isPill) "circle" else shape, Design.LAUNCHER_SIZE).toDouble()) else glyphPx()
+
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val h = dp(Design.LAUNCHER_SIZE)
         val w = if (!isPill) h else {
-            val icon = if (mark.bitmap != null) glyphPx() + dp(10.0) else 0f
+            val icon = if (mark.bitmap != null) markPx() + dp(10.0) else 0f
             dp(20.0) + icon + type.paint.measureText(words) + dp(22.0)
         }
         // Room for the hard offset, so the copy is drawn inside the view rather than clipped.
@@ -192,16 +220,20 @@ class GraineLauncherView @JvmOverloads constructor(
             canvas.drawRoundRect(face, r, r, fillPaint)
             canvas.restore()
         }
-        fillPaint.color = fill
+        // The logo's plate: white when the brand's logo asks for it; the accent for everything else.
+        val onWhite = onWhite()
+        fillPaint.color = if (onWhite) Color.WHITE else fill
         canvas.drawRoundRect(face, r, r, fillPaint)
-        if (borderPx > 0) {
-            strokePaint.color = outlineInk
-            strokePaint.strokeWidth = borderPx
-            val half = borderPx / 2
+        // A hard offset keeps its text-coloured outline; otherwise a white plate draws its hairline.
+        val line = if (borderPx > 0) borderPx else if (onWhite) hairlinePx else 0f
+        if (line > 0) {
+            strokePaint.color = if (borderPx > 0) outlineInk else hairline
+            strokePaint.strokeWidth = line
+            val half = line / 2
             canvas.drawRoundRect(face.left + half, face.top + half, face.right - half, face.bottom - half, r - half, r - half, strokePaint)
         }
 
-        val g = glyphPx()
+        val g = markPx()
         val cy = face.centerY()
         val bmp = mark.bitmap
         if (isPill) {
@@ -211,7 +243,8 @@ class GraineLauncherView @JvmOverloads constructor(
                 x += g + dp(10.0)
             }
             val p = type.paint
-            p.color = ink
+            // On the white plate the label is dark, whatever reads on the accent.
+            p.color = if (onWhite) Color.parseColor(Logo.ON_WHITE) else ink
             canvas.drawText(words, x, cy - (p.descent() + p.ascent()) / 2, p)
         } else if (bmp != null) {
             drawFitted(canvas, bmp, face.centerX() - g / 2, cy - g / 2, g)
@@ -219,13 +252,13 @@ class GraineLauncherView @JvmOverloads constructor(
             val p = type.paint
             p.color = ink
             val size = p.textSize
-            p.textSize = g
+            p.textSize = glyphPx()
             canvas.drawText(letter, face.centerX() - p.measureText(letter) / 2, cy - (p.descent() + p.ascent()) / 2, p)
             p.textSize = size
         }
     }
 
-    /** A glyph or a logo, fitted into a square, its proportions kept. */
+    /** A glyph or a logo, fitted into a square, its proportions kept: whole, never cropped. */
     private fun drawFitted(canvas: Canvas, bmp: Bitmap, x: Float, y: Float, side: Float) {
         val scale = minOf(side / bmp.width, side / bmp.height)
         val w = bmp.width * scale; val h = bmp.height * scale
@@ -278,12 +311,16 @@ class GraineLauncherView @JvmOverloads constructor(
 internal class MarkLoader(private val onChange: () -> Unit) {
     var bitmap: Bitmap? = null
         private set
+    /** The address [bitmap] came from — which of the marks it is. */
+    var source: String? = null
+        private set
     private var want: List<String> = emptyList()
 
     fun load(urls: List<String>) {
         if (urls == want) return
         want = urls
         bitmap = null
+        source = null
         next(urls, 0)
     }
 
@@ -291,7 +328,7 @@ internal class MarkLoader(private val onChange: () -> Unit) {
         if (i >= urls.size) { onChange(); return }
         ImageLoader.fetch(urls[i]) { bmp ->
             if (want !== urls) return@fetch
-            if (bmp != null) { bitmap = bmp; onChange() } else next(urls, i + 1)
+            if (bmp != null) { bitmap = bmp; source = urls[i]; onChange() } else next(urls, i + 1)
         }
     }
 }

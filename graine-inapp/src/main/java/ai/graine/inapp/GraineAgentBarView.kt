@@ -36,7 +36,8 @@ import org.json.JSONObject
  * element as contract/DESIGN.md → Voice bar specifies, and nothing the app
  * passes: a 60 dp bar in `surface` (translucent under glass) with its outline,
  * `radius.xl` corners and the floating shadow or the hard offset; the accent
- * avatar with the design's launcher glyph (or the logo, or the first letter);
+ * avatar with the design's launcher glyph (or the brand's logo, whole, on its
+ * plate — contract/DESIGN.md "The brand's logo" — or the first letter);
  * the heading and a status line whose four-bar meter moves at the design's
  * pace; the microphone in `accent` (`danger` when muted); the end button in
  * `danger` on a call and a quiet close otherwise. The SDK's own icons are
@@ -51,7 +52,11 @@ import org.json.JSONObject
  * "Reconnecting…" — because a customer whose agent goes quiet on a train
  * reads "Listening" and concludes the agent is broken. While the call is
  * coming up, and while the agent works out its answer, the status line IS the
- * dashboard's loader, in the brand's words.
+ * dashboard's loader, in the brand's words — and a connect says where it is: a
+ * retry or a switch to the other transport is the loader's "reconnecting"
+ * moment, a wait past four seconds "Still connecting…" (only while the brand
+ * kept the default words), and a call nothing could carry "Couldn’t connect ·
+ * tap to retry", with the microphone starting a new one.
  *
  * One unit, bottom up: the bar, the live caption, and the components the
  * agent draws ([widgetView]) — so a card the agent shows sits on the bar and
@@ -88,7 +93,11 @@ class GraineAgentBarView @JvmOverloads constructor(
     /** The name beside the status. Default: the dashboard's heading, else "Assistant". */
     var name: String? = null
         set(v) { field = v; applyLook() }
-    /** A picture for the avatar, filling its circle. Default: the design's glyph, else the dashboard's logo, else the first letter. */
+    /**
+     * A picture for the avatar, filling its circle — the app's own, so it is
+     * the app's to crop. Default: the design's glyph, else the dashboard's
+     * logo (drawn whole on its plate, never cropped), else the first letter.
+     */
     var avatarUrl: String? = null
         set(v) { field = v; applyLook() }
     /** "light", "dark" or "auto" (the device). Default: the design's scheme. */
@@ -160,7 +169,7 @@ class GraineAgentBarView @JvmOverloads constructor(
     private var unwatch: (() -> Unit)? = null
     private var captionShown = false
     private var chatShown = false
-    /** The loader moment the status line shows; null while it shows words. */
+    /** The loader moment and words the status line shows; null while it shows words alone. */
     private var shownLoader: String? = null
     /** The customer's last switch between the call and the chat; null follows the dashboard. */
     private var chosenSurface: String? = null
@@ -267,6 +276,7 @@ class GraineAgentBarView @JvmOverloads constructor(
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         graine.addListener(this)
+        voice.barShown(this, isShown)
         unwatch = graine.onDesignChange { applyLook() }
         viewTreeObserver.addOnGlobalLayoutListener(layoutWatcher)
         setOnApplyWindowInsetsListener { v, insets -> post { updateKeyboard() }; v.onApplyWindowInsets(insets) }
@@ -275,6 +285,7 @@ class GraineAgentBarView @JvmOverloads constructor(
     }
 
     override fun onDetachedFromWindow() {
+        voice.barShown(this, false)
         graine.removeListener(this)
         unwatch?.invoke()
         unwatch = null
@@ -287,6 +298,18 @@ class GraineAgentBarView @JvmOverloads constructor(
     override fun onConfigurationChanged(newConfig: Configuration?) {
         super.onConfigurationChanged(newConfig)
         applyLook()
+    }
+
+    /**
+     * Shown or hidden — this view, or anything holding it (onClose hiding it
+     * is the usual way). While it is on screen the customer's UI is open: a
+     * page still loading behind it is a connect they wait on, and the last
+     * bar leaving forgets a failed connect, as the React Native launcher does
+     * when it is deactivated. Only ever dispatched to an attached view.
+     */
+    override fun onVisibilityChanged(changedView: View, visibility: Int) {
+        super.onVisibilityChanged(changedView, visibility)
+        voice.barShown(this, isShown)
     }
 
     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
@@ -313,6 +336,8 @@ class GraineAgentBarView @JvmOverloads constructor(
         /** A host's own avatar picture; it wins over the glyph. */
         val hostImage: String?,
         val logoUrl: String?,
+        /** What the logo sits on: the accent, or white with a hairline. */
+        val logoPlate: LogoPlate,
         val loader: LoaderLook,
         val loaderColor: Int,
         val barRadiusDp: Double,
@@ -349,6 +374,7 @@ class GraineAgentBarView @JvmOverloads constructor(
                     name = v.name ?: dash.heading,
                     hostImage = v.avatarUrl?.takeIf { it.isNotBlank() },
                     logoUrl = dash.logoUrl,
+                    logoPlate = dash.logoPlate,
                     loader = loader,
                     // The loader's own colour, else the design's accent — as the React Native loader draws it.
                     loaderColor = Appearance.argb(loader.color) ?: Appearance.argb(designed?.colors?.accent ?: dash.accent) ?: accent,
@@ -413,8 +439,9 @@ class GraineAgentBarView @JvmOverloads constructor(
         captionText.setTextColor(l.text)
         type(captionText, t.font.weights.strong, VoiceBar.CAPTION_SP, VoiceBar.CAPTION_LINE_SP)
 
-        Mark.fill(avatar, t, VoiceBar.BUTTON, VoiceBar.AVATAR_GLYPH, null, l.accent, l.onAccent, l.hostImage, l.logoUrl,
-            l.name.trim().firstOrNull()?.uppercase() ?: "A", logoFills = true)
+        // A circle: the logo fitted into 70% of it, whole, on its plate.
+        Mark.fill(avatar, t, VoiceBar.BUTTON, VoiceBar.AVATAR_GLYPH, "circle", null, l.accent, l.onAccent, l.hostImage, l.logoUrl,
+            l.logoPlate, l.name.trim().firstOrNull()?.uppercase() ?: "A")
         shownLoader = null
         refresh()
     }
@@ -441,6 +468,7 @@ class GraineAgentBarView @JvmOverloads constructor(
     override fun onQuality(quality: ConnectionQuality) = refresh()
     override fun onNetwork(online: Boolean) = refresh()
     override fun onReconnecting(active: Boolean) = refresh()
+    override fun onConnectProgress(stage: ConnectStage?, slow: Boolean, failed: Boolean) = refresh()
     override fun onConnectivity(state: Connectivity, attempt: Int, reason: String?) = refresh()
     override fun onTransport(transport: Transport, requested: Transport, reason: String?, message: String?) = refresh()
     override fun onError(message: String) = refresh()
@@ -463,6 +491,7 @@ class GraineAgentBarView @JvmOverloads constructor(
         val inChat = source != null && s?.start == "chat"
         val canSwitch = source != null && s?.canSwitch == true
         val failed = voice.connectivity == Connectivity.FAILED
+        val callFailed = voice.callFailed
 
         val status = VoiceBar.status(VoiceBar.StatusInput(
             error = voice.error != null,
@@ -479,15 +508,22 @@ class GraineAgentBarView @JvmOverloads constructor(
             thinking = voice.phase == CallPhase.THINKING,
             speaking = voice.phase == CallPhase.SPEAKING,
             quality = voice.quality,
+            callFailed = callFailed,
+            connectStage = voice.connectStage,
+            slowConnect = voice.slowConnect,
+            connectingText = l.loader.text.connecting ?: VoiceBar.DEFAULT_CONNECTING,
         ))
         val moment = status.loader
         if (moment != null) {
-            // Waiting: the status line IS the loader the brand chose, in its words for this moment.
-            if (shownLoader != moment) {
-                shownLoader = moment
+            // Waiting: the status line IS the loader the brand chose, in its words for this moment —
+            // or the bar's own, when it has some ("Still connecting…").
+            val loaderWords = VoiceBar.loaderWords(status, l.loader.text)
+            val key = "$moment|$loaderWords"
+            if (shownLoader != key) {
+                shownLoader = key
                 statusSlot.removeAllViews()
                 statusSlot.addView(GraineLoaderView.withLabel(context, l.loader, l.loaderColor, l.border, l.muted,
-                    l.loader.text.forMoment(moment), sizeDp = VoiceBar.LOADER, logoUrl = l.logoUrl) { label ->
+                    loaderWords, sizeDp = VoiceBar.LOADER, logoUrl = l.logoUrl) { label ->
                     type(label, t.font.weights.strong, maxOf(t.font.scale.caption, Math.round(VoiceBar.LOADER * 0.65).toDouble()), null)
                     label.maxLines = 1
                     label.ellipsize = TextUtils.TruncateAt.END
@@ -502,9 +538,11 @@ class GraineAgentBarView @JvmOverloads constructor(
             statusText.text = status.text
             meter.visibility = if (status.meter) VISIBLE else GONE
         }
-        // "Couldn’t load · tap to retry" means the words too, not only the microphone.
-        words.setOnClickListener(if (failed && !inChat) OnClickListener { voice.retry() } else null)
-        words.isClickable = failed && !inChat
+        // "Couldn’t load · tap to retry" and "Couldn’t connect · tap to retry" mean the words too, not only
+        // the microphone: a failed load reloads the page, a call nothing could carry is placed again.
+        val retries = (failed || callFailed) && !inChat
+        words.setOnClickListener(if (retries) OnClickListener { if (voice.connectivity == Connectivity.FAILED) voice.retry() else voice.start() } else null)
+        words.isClickable = retries
 
         // The way to the other surface, only when both are offered.
         switchButton.visibility = if (canSwitch) VISIBLE else GONE
@@ -518,7 +556,7 @@ class GraineAgentBarView @JvmOverloads constructor(
         micButton.draw(
             if (muted) l.danger else l.accent,
             icon(if (muted) SdkIcons.MIC_OFF else SdkIcons.MIC, if (muted) Color.WHITE else l.onAccent),
-            when { failed -> "Try again"; !voice.connected -> "Start talking to ${l.name}"; muted -> "Unmute"; else -> "Mute" },
+            when { failed || callFailed -> "Try again"; !voice.connected -> "Start talking to ${l.name}"; muted -> "Unmute"; else -> "Mute" },
             enabled = !VoiceBar.micBlocked(voice.error != null, micDenied, voice.connecting, voice.ready, voice.connectivity),
         )
 
@@ -538,7 +576,7 @@ class GraineAgentBarView @JvmOverloads constructor(
                 cw.onCollapse = { if (surfaces()?.canSwitch == true) setSurface("voice") else pressEnd() }
                 chatSlot.addView(cw, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
             }
-            w.render(t, l.accent, l.onAccent, l.name, l.hostImage, l.logoUrl, source.messages, source.online, typing = imeLiftPx > 0)
+            w.render(t, l.accent, l.onAccent, l.name, l.hostImage, l.logoUrl, l.logoPlate, source.messages, source.online, typing = imeLiftPx > 0)
             chatSlot.visibility = VISIBLE
             if (!chatShown) Themed.enter(chatSlot, t, px(VoiceBar.RISE).toFloat())
         } else {

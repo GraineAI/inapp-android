@@ -1504,6 +1504,233 @@
     },
     {
       "config": {
+        "preset": "fintech-clear"
+      },
+      "design": {
+        "config": {
+          "preset": "fintech-clear"
+        },
+        "light": {
+          "v": 1,
+          "preset": "fintech-clear",
+          "scheme": "light",
+          "colors": {
+            "background": "#F6F9FC",
+            "surface": "#FFFFFF",
+            "surfaceRaised": "#FFFFFF",
+            "text": "#0A2540",
+            "textMuted": "#425466",
+            "border": "#E3E8EE",
+            "accent": "#0B7A75",
+            "onAccent": "#FFFFFF",
+            "success": "#16794A",
+            "warning": "#A65400",
+            "danger": "#DF1B41",
+            "userBubble": "#0A2540",
+            "userBubbleText": "#FFFFFF",
+            "agentBubble": "#EEF2F6",
+            "agentBubbleText": "#0A2540",
+            "scrim": "#0A2540",
+            "accentSoft": "#E2EFEE"
+          },
+          "font": {
+            "body": "IBM Plex Sans Devanagari",
+            "heading": "IBM Plex Sans Devanagari",
+            "scale": {
+              "caption": 12,
+              "body": 15,
+              "title": 18,
+              "display": 26
+            },
+            "weights": {
+              "body": 400,
+              "strong": 500,
+              "title": 600
+            },
+            "letterSpacing": {
+              "body": 0,
+              "title": 0
+            },
+            "lineHeight": {
+              "body": 1.55,
+              "title": 1.3
+            }
+          },
+          "shape": {
+            "radius": {
+              "sm": 4,
+              "md": 6,
+              "lg": 10,
+              "xl": 14
+            },
+            "borderWidth": 1,
+            "launcher": "circle"
+          },
+          "spacing": {
+            "unit": 4,
+            "cardPadding": 16,
+            "gap": 12
+          },
+          "elevation": {
+            "card": {
+              "y": 2,
+              "blur": 5,
+              "spread": -1,
+              "opacity": 0.25,
+              "color": "#32325D"
+            },
+            "floating": {
+              "y": 13,
+              "blur": 27,
+              "spread": -5,
+              "opacity": 0.25,
+              "color": "#32325D"
+            },
+            "hardOffset": null
+          },
+          "motion": {
+            "durationMs": 200,
+            "easing": "standard",
+            "bounce": 0
+          },
+          "icons": {
+            "style": "outline",
+            "stroke": 1.75,
+            "launcher": {
+              "id": "headset",
+              "path": "M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1 -2 2H5a2 2 0 0 1 -2 -2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1 -2 2h-1a2 2 0 0 1 -2 -2v-3a2 2 0 0 1 2 -2h3ZM21 16v2a4 4 0 0 1 -4 4h-5",
+              "stroke": true
+            }
+          },
+          "glass": null,
+          "bubbles": "filled",
+          "chrome": "none"
+        },
+        "dark": {
+          "v": 1,
+          "preset": "fintech-clear",
+          "scheme": "dark",
+          "colors": {
+            "background": "#081624",
+            "surface": "#0E2032",
+            "surfaceRaised": "#15293D",
+            "text": "#F3F6FA",
+            "textMuted": "#A3B3C4",
+            "border": "#22384F",
+            "accent": "#3CC2B8",
+            "onAccent": "#04211F",
+            "success": "#3DCB86",
+            "warning": "#F5A623",
+            "danger": "#D7304A",
+            "userBubble": "#24507A",
+            "userBubbleText": "#FFFFFF",
+            "agentBubble": "#15293D",
+            "agentBubbleText": "#F3F6FA",
+            "scrim": "#000000",
+            "accentSoft": "#18444F"
+          },
+          "font": {
+            "body": "IBM Plex Sans Devanagari",
+            "heading": "IBM Plex Sans Devanagari",
+            "scale": {
+              "caption": 12,
+              "body": 15,
+              "title": 18,
+              "display": 26
+            },
+            "weights": {
+              "body": 400,
+              "strong": 500,
+              "title": 600
+            },
+            "letterSpacing": {
+              "body": 0,
+              "title": 0
+            },
+            "lineHeight": {
+              "body": 1.55,
+              "title": 1.3
+            }
+          },
+          "shape": {
+            "radius": {
+              "sm": 4,
+              "md": 6,
+              "lg": 10,
+              "xl": 14
+            },
+            "borderWidth": 1,
+            "launcher": "circle"
+          },
+          "spacing": {
+            "unit": 4,
+            "cardPadding": 16,
+            "gap": 12
+          },
+          "elevation": {
+            "card": {
+              "y": 2,
+              "blur": 5,
+              "spread": -1,
+              "opacity": 0.5,
+              "color": "#32325D"
+            },
+            "floating": {
+              "y": 13,
+              "blur": 27,
+              "spread": -5,
+              "opacity": 0.25,
+              "color": "#32325D"
+            },
+            "hardOffset": null
+          },
+          "motion": {
+            "durationMs": 200,
+            "easing": "standard",
+            "bounce": 0
+          },
+          "icons": {
+            "style": "outline",
+            "stroke": 1.75,
+            "launcher": {
+              "id": "headset",
+              "path": "M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1 -2 2H5a2 2 0 0 1 -2 -2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1 -2 2h-1a2 2 0 0 1 -2 -2v-3a2 2 0 0 1 2 -2h3ZM21 16v2a4 4 0 0 1 -4 4h-5",
+              "stroke": true
+            }
+          },
+          "glass": null,
+          "bubbles": "filled",
+          "chrome": "none"
+        }
+      },
+      "picks": {
+        "deviceLight": "light",
+        "deviceDark": "dark",
+        "deviceUnknown": "light"
+      },
+      "fontFaces": [
+        {
+          "family": "IBM Plex Sans Devanagari",
+          "weight": 400,
+          "name": "Graine-IBMPlexSansDevanagari-400",
+          "url": "https://www.graine.ai/api/embed/font?f=IBM%20Plex%20Sans%20Devanagari&w=400&v=1"
+        },
+        {
+          "family": "IBM Plex Sans Devanagari",
+          "weight": 500,
+          "name": "Graine-IBMPlexSansDevanagari-500",
+          "url": "https://www.graine.ai/api/embed/font?f=IBM%20Plex%20Sans%20Devanagari&w=500&v=1"
+        },
+        {
+          "family": "IBM Plex Sans Devanagari",
+          "weight": 600,
+          "name": "Graine-IBMPlexSansDevanagari-600",
+          "url": "https://www.graine.ai/api/embed/font?f=IBM%20Plex%20Sans%20Devanagari&w=600&v=1"
+        }
+      ]
+    },
+    {
+      "config": {
         "preset": "liquid-glass"
       },
       "design": {
@@ -2161,6 +2388,657 @@
           "weight": 600,
           "name": "Graine-Inter-600",
           "url": "https://www.graine.ai/api/embed/font?f=Inter&w=600&v=1"
+        }
+      ]
+    },
+    {
+      "config": {
+        "preset": "swiss-grid"
+      },
+      "design": {
+        "config": {
+          "preset": "swiss-grid"
+        },
+        "light": {
+          "v": 1,
+          "preset": "swiss-grid",
+          "scheme": "light",
+          "colors": {
+            "background": "#FFFFFF",
+            "surface": "#FFFFFF",
+            "surfaceRaised": "#F3F3F3",
+            "text": "#111111",
+            "textMuted": "#545454",
+            "border": "#1A1A1A",
+            "accent": "#111111",
+            "onAccent": "#FFFFFF",
+            "success": "#1C7C3A",
+            "warning": "#9E5200",
+            "danger": "#DA291C",
+            "userBubble": "#DA291C",
+            "userBubbleText": "#FFFFFF",
+            "agentBubble": "#F3F3F3",
+            "agentBubbleText": "#111111",
+            "scrim": "#000000",
+            "accentSoft": "#E2E2E2"
+          },
+          "font": {
+            "body": "Inter",
+            "heading": "Inter",
+            "scale": {
+              "caption": 12,
+              "body": 15,
+              "title": 21,
+              "display": 34
+            },
+            "weights": {
+              "body": 400,
+              "strong": 600,
+              "title": 700
+            },
+            "letterSpacing": {
+              "body": -0.006,
+              "title": -0.022
+            },
+            "lineHeight": {
+              "body": 1.42,
+              "title": 1.12
+            }
+          },
+          "shape": {
+            "radius": {
+              "sm": 0,
+              "md": 0,
+              "lg": 0,
+              "xl": 0
+            },
+            "borderWidth": 1,
+            "launcher": "square"
+          },
+          "spacing": {
+            "unit": 4,
+            "cardPadding": 16,
+            "gap": 8
+          },
+          "elevation": {
+            "card": null,
+            "floating": null,
+            "hardOffset": null
+          },
+          "motion": {
+            "durationMs": 160,
+            "easing": "standard",
+            "bounce": 0
+          },
+          "icons": {
+            "style": "sharp",
+            "stroke": 1.75,
+            "launcher": {
+              "id": "audio-lines",
+              "path": "M2 10v3M6 6v11M10 3v18M14 8v7M18 5v13M22 10v3",
+              "stroke": true
+            }
+          },
+          "glass": null,
+          "bubbles": "filled",
+          "chrome": "none"
+        },
+        "dark": {
+          "v": 1,
+          "preset": "swiss-grid",
+          "scheme": "dark",
+          "colors": {
+            "background": "#0A0A0A",
+            "surface": "#111111",
+            "surfaceRaised": "#1C1C1C",
+            "text": "#F5F5F5",
+            "textMuted": "#A8A8A8",
+            "border": "#D4D4D4",
+            "accent": "#F5F5F5",
+            "onAccent": "#0A0A0A",
+            "success": "#3DBA68",
+            "warning": "#F0A23B",
+            "danger": "#DA291C",
+            "userBubble": "#DA291C",
+            "userBubbleText": "#FFFFFF",
+            "agentBubble": "#1C1C1C",
+            "agentBubbleText": "#F5F5F5",
+            "scrim": "#000000",
+            "accentSoft": "#434343"
+          },
+          "font": {
+            "body": "Inter",
+            "heading": "Inter",
+            "scale": {
+              "caption": 12,
+              "body": 15,
+              "title": 21,
+              "display": 34
+            },
+            "weights": {
+              "body": 400,
+              "strong": 600,
+              "title": 700
+            },
+            "letterSpacing": {
+              "body": -0.006,
+              "title": -0.022
+            },
+            "lineHeight": {
+              "body": 1.42,
+              "title": 1.12
+            }
+          },
+          "shape": {
+            "radius": {
+              "sm": 0,
+              "md": 0,
+              "lg": 0,
+              "xl": 0
+            },
+            "borderWidth": 1,
+            "launcher": "square"
+          },
+          "spacing": {
+            "unit": 4,
+            "cardPadding": 16,
+            "gap": 8
+          },
+          "elevation": {
+            "card": null,
+            "floating": null,
+            "hardOffset": null
+          },
+          "motion": {
+            "durationMs": 160,
+            "easing": "standard",
+            "bounce": 0
+          },
+          "icons": {
+            "style": "sharp",
+            "stroke": 1.75,
+            "launcher": {
+              "id": "audio-lines",
+              "path": "M2 10v3M6 6v11M10 3v18M14 8v7M18 5v13M22 10v3",
+              "stroke": true
+            }
+          },
+          "glass": null,
+          "bubbles": "filled",
+          "chrome": "none"
+        }
+      },
+      "picks": {
+        "deviceLight": "light",
+        "deviceDark": "dark",
+        "deviceUnknown": "light"
+      },
+      "fontFaces": [
+        {
+          "family": "Inter",
+          "weight": 400,
+          "name": "Graine-Inter-400",
+          "url": "https://www.graine.ai/api/embed/font?f=Inter&w=400&v=1"
+        },
+        {
+          "family": "Inter",
+          "weight": 600,
+          "name": "Graine-Inter-600",
+          "url": "https://www.graine.ai/api/embed/font?f=Inter&w=600&v=1"
+        },
+        {
+          "family": "Inter",
+          "weight": 700,
+          "name": "Graine-Inter-700",
+          "url": "https://www.graine.ai/api/embed/font?f=Inter&w=700&v=1"
+        }
+      ]
+    },
+    {
+      "config": {
+        "preset": "precision"
+      },
+      "design": {
+        "config": {
+          "preset": "precision"
+        },
+        "light": {
+          "v": 1,
+          "preset": "precision",
+          "scheme": "light",
+          "colors": {
+            "background": "#F7F8F8",
+            "surface": "#FFFFFF",
+            "surfaceRaised": "#FFFFFF",
+            "text": "#0F1011",
+            "textMuted": "#5C616A",
+            "border": "#E2E4E7",
+            "accent": "#5E6AD2",
+            "onAccent": "#FFFFFF",
+            "success": "#2E8A57",
+            "warning": "#B0560B",
+            "danger": "#CF3B41",
+            "userBubble": "#5E6AD2",
+            "userBubbleText": "#FFFFFF",
+            "agentBubble": "#EFF0F2",
+            "agentBubbleText": "#0F1011",
+            "scrim": "#000000",
+            "accentSoft": "#ECEDFA"
+          },
+          "font": {
+            "body": "Inter",
+            "heading": "Inter",
+            "scale": {
+              "caption": 12,
+              "body": 14,
+              "title": 17,
+              "display": 24
+            },
+            "weights": {
+              "body": 400,
+              "strong": 500,
+              "title": 600
+            },
+            "letterSpacing": {
+              "body": -0.005,
+              "title": -0.014
+            },
+            "lineHeight": {
+              "body": 1.5,
+              "title": 1.3
+            }
+          },
+          "shape": {
+            "radius": {
+              "sm": 4,
+              "md": 6,
+              "lg": 8,
+              "xl": 12
+            },
+            "borderWidth": 1,
+            "launcher": "rounded-square"
+          },
+          "spacing": {
+            "unit": 4,
+            "cardPadding": 12,
+            "gap": 8
+          },
+          "elevation": {
+            "card": {
+              "y": 1,
+              "blur": 2,
+              "spread": 0,
+              "opacity": 0.12,
+              "color": "#000000"
+            },
+            "floating": {
+              "y": 12,
+              "blur": 32,
+              "spread": -8,
+              "opacity": 0.28,
+              "color": "#000000"
+            },
+            "hardOffset": null
+          },
+          "motion": {
+            "durationMs": 140,
+            "easing": "standard",
+            "bounce": 0
+          },
+          "icons": {
+            "style": "outline",
+            "stroke": 1.5,
+            "launcher": {
+              "id": "sparkles",
+              "path": "M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0 -1.594 1.594l-1.051 5.558a1 1 0 0 1 -1.966 0l-1.051 -5.558a2 2 0 0 0 -1.594 -1.594l-5.558 -1.051a1 1 0 0 1 0 -1.966l5.558 -1.051a2 2 0 0 0 1.594 -1.594zM20 2v4M22 4h-4M2 20a2 2 0 1 0 4 0a2 2 0 1 0 -4 0z",
+              "stroke": true
+            }
+          },
+          "glass": null,
+          "bubbles": "filled",
+          "chrome": "none"
+        },
+        "dark": {
+          "v": 1,
+          "preset": "precision",
+          "scheme": "dark",
+          "colors": {
+            "background": "#08090A",
+            "surface": "#111214",
+            "surfaceRaised": "#191A1D",
+            "text": "#F7F8F8",
+            "textMuted": "#8E939C",
+            "border": "#26282C",
+            "accent": "#5E6AD2",
+            "onAccent": "#FFFFFF",
+            "success": "#4CB782",
+            "warning": "#F2994A",
+            "danger": "#D5434A",
+            "userBubble": "#5E6AD2",
+            "userBubbleText": "#FFFFFF",
+            "agentBubble": "#1A1B1E",
+            "agentBubbleText": "#F7F8F8",
+            "scrim": "#000000",
+            "accentSoft": "#22253E"
+          },
+          "font": {
+            "body": "Inter",
+            "heading": "Inter",
+            "scale": {
+              "caption": 12,
+              "body": 14,
+              "title": 17,
+              "display": 24
+            },
+            "weights": {
+              "body": 400,
+              "strong": 500,
+              "title": 600
+            },
+            "letterSpacing": {
+              "body": -0.005,
+              "title": -0.014
+            },
+            "lineHeight": {
+              "body": 1.5,
+              "title": 1.3
+            }
+          },
+          "shape": {
+            "radius": {
+              "sm": 4,
+              "md": 6,
+              "lg": 8,
+              "xl": 12
+            },
+            "borderWidth": 1,
+            "launcher": "rounded-square"
+          },
+          "spacing": {
+            "unit": 4,
+            "cardPadding": 12,
+            "gap": 8
+          },
+          "elevation": {
+            "card": {
+              "y": 1,
+              "blur": 2,
+              "spread": 0,
+              "opacity": 0.24,
+              "color": "#000000"
+            },
+            "floating": {
+              "y": 12,
+              "blur": 32,
+              "spread": -8,
+              "opacity": 0.28,
+              "color": "#000000"
+            },
+            "hardOffset": null
+          },
+          "motion": {
+            "durationMs": 140,
+            "easing": "standard",
+            "bounce": 0
+          },
+          "icons": {
+            "style": "outline",
+            "stroke": 1.5,
+            "launcher": {
+              "id": "sparkles",
+              "path": "M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0 -1.594 1.594l-1.051 5.558a1 1 0 0 1 -1.966 0l-1.051 -5.558a2 2 0 0 0 -1.594 -1.594l-5.558 -1.051a1 1 0 0 1 0 -1.966l5.558 -1.051a2 2 0 0 0 1.594 -1.594zM20 2v4M22 4h-4M2 20a2 2 0 1 0 4 0a2 2 0 1 0 -4 0z",
+              "stroke": true
+            }
+          },
+          "glass": null,
+          "bubbles": "filled",
+          "chrome": "none"
+        }
+      },
+      "picks": {
+        "deviceLight": "light",
+        "deviceDark": "dark",
+        "deviceUnknown": "light"
+      },
+      "fontFaces": [
+        {
+          "family": "Inter",
+          "weight": 400,
+          "name": "Graine-Inter-400",
+          "url": "https://www.graine.ai/api/embed/font?f=Inter&w=400&v=1"
+        },
+        {
+          "family": "Inter",
+          "weight": 500,
+          "name": "Graine-Inter-500",
+          "url": "https://www.graine.ai/api/embed/font?f=Inter&w=500&v=1"
+        },
+        {
+          "family": "Inter",
+          "weight": 600,
+          "name": "Graine-Inter-600",
+          "url": "https://www.graine.ai/api/embed/font?f=Inter&w=600&v=1"
+        }
+      ]
+    },
+    {
+      "config": {
+        "preset": "japandi-calm"
+      },
+      "design": {
+        "config": {
+          "preset": "japandi-calm"
+        },
+        "light": {
+          "v": 1,
+          "preset": "japandi-calm",
+          "scheme": "light",
+          "colors": {
+            "background": "#F5F1EA",
+            "surface": "#FBF8F3",
+            "surfaceRaised": "#FFFFFF",
+            "text": "#2B2824",
+            "textMuted": "#625C54",
+            "border": "#E2DBD0",
+            "accent": "#56654D",
+            "onAccent": "#FBF8F3",
+            "success": "#4A7646",
+            "warning": "#94661C",
+            "danger": "#A5422D",
+            "userBubble": "#E2E7DA",
+            "userBubbleText": "#2B2824",
+            "agentBubble": "#EEE9E0",
+            "agentBubbleText": "#2B2824",
+            "scrim": "#1A1814",
+            "accentSoft": "#E7E6DF"
+          },
+          "font": {
+            "body": "Noto Sans",
+            "heading": "Noto Serif Devanagari",
+            "scale": {
+              "caption": 12,
+              "body": 16,
+              "title": 20,
+              "display": 28
+            },
+            "weights": {
+              "body": 400,
+              "strong": 500,
+              "title": 400
+            },
+            "letterSpacing": {
+              "body": 0,
+              "title": 0
+            },
+            "lineHeight": {
+              "body": 1.6,
+              "title": 1.35
+            }
+          },
+          "shape": {
+            "radius": {
+              "sm": 6,
+              "md": 10,
+              "lg": 14,
+              "xl": 22
+            },
+            "borderWidth": 1,
+            "launcher": "circle"
+          },
+          "spacing": {
+            "unit": 4,
+            "cardPadding": 18,
+            "gap": 14
+          },
+          "elevation": {
+            "card": null,
+            "floating": {
+              "y": 8,
+              "blur": 28,
+              "spread": -8,
+              "opacity": 0.12,
+              "color": "#3B342B"
+            },
+            "hardOffset": null
+          },
+          "motion": {
+            "durationMs": 360,
+            "easing": "standard",
+            "bounce": 0
+          },
+          "icons": {
+            "style": "outline",
+            "stroke": 1.25,
+            "launcher": {
+              "id": "waveform",
+              "path": "M2 13a2 2 0 0 0 2 -2V7a2 2 0 0 1 4 0v13a2 2 0 0 0 4 0V4a2 2 0 0 1 4 0v13a2 2 0 0 0 4 0v-4a2 2 0 0 1 2 -2",
+              "stroke": true
+            }
+          },
+          "glass": null,
+          "bubbles": "minimal",
+          "chrome": "none"
+        },
+        "dark": {
+          "v": 1,
+          "preset": "japandi-calm",
+          "scheme": "dark",
+          "colors": {
+            "background": "#1A1917",
+            "surface": "#22201D",
+            "surfaceRaised": "#2B2925",
+            "text": "#EEE8DF",
+            "textMuted": "#ADA59A",
+            "border": "#3A3631",
+            "accent": "#A6B596",
+            "onAccent": "#1A1917",
+            "success": "#8DB487",
+            "warning": "#D9A55B",
+            "danger": "#B9503A",
+            "userBubble": "#3A4234",
+            "userBubbleText": "#EEE8DF",
+            "agentBubble": "#2B2925",
+            "agentBubbleText": "#EEE8DF",
+            "scrim": "#000000",
+            "accentSoft": "#3F4138"
+          },
+          "font": {
+            "body": "Noto Sans",
+            "heading": "Noto Serif Devanagari",
+            "scale": {
+              "caption": 12,
+              "body": 16,
+              "title": 20,
+              "display": 28
+            },
+            "weights": {
+              "body": 400,
+              "strong": 500,
+              "title": 400
+            },
+            "letterSpacing": {
+              "body": 0,
+              "title": 0
+            },
+            "lineHeight": {
+              "body": 1.6,
+              "title": 1.35
+            }
+          },
+          "shape": {
+            "radius": {
+              "sm": 6,
+              "md": 10,
+              "lg": 14,
+              "xl": 22
+            },
+            "borderWidth": 1,
+            "launcher": "circle"
+          },
+          "spacing": {
+            "unit": 4,
+            "cardPadding": 18,
+            "gap": 14
+          },
+          "elevation": {
+            "card": null,
+            "floating": {
+              "y": 8,
+              "blur": 28,
+              "spread": -8,
+              "opacity": 0.12,
+              "color": "#3B342B"
+            },
+            "hardOffset": null
+          },
+          "motion": {
+            "durationMs": 360,
+            "easing": "standard",
+            "bounce": 0
+          },
+          "icons": {
+            "style": "outline",
+            "stroke": 1.25,
+            "launcher": {
+              "id": "waveform",
+              "path": "M2 13a2 2 0 0 0 2 -2V7a2 2 0 0 1 4 0v13a2 2 0 0 0 4 0V4a2 2 0 0 1 4 0v13a2 2 0 0 0 4 0v-4a2 2 0 0 1 2 -2",
+              "stroke": true
+            }
+          },
+          "glass": null,
+          "bubbles": "minimal",
+          "chrome": "none"
+        }
+      },
+      "picks": {
+        "deviceLight": "light",
+        "deviceDark": "dark",
+        "deviceUnknown": "light"
+      },
+      "fontFaces": [
+        {
+          "family": "Noto Sans",
+          "weight": 400,
+          "name": "Graine-NotoSans-400",
+          "url": "https://www.graine.ai/api/embed/font?f=Noto%20Sans&w=400&v=1"
+        },
+        {
+          "family": "Noto Sans",
+          "weight": 500,
+          "name": "Graine-NotoSans-500",
+          "url": "https://www.graine.ai/api/embed/font?f=Noto%20Sans&w=500&v=1"
+        },
+        {
+          "family": "Noto Serif Devanagari",
+          "weight": 400,
+          "name": "Graine-NotoSerifDevanagari-400",
+          "url": "https://www.graine.ai/api/embed/font?f=Noto%20Serif%20Devanagari&w=400&v=1"
+        },
+        {
+          "family": "Noto Serif Devanagari",
+          "weight": 500,
+          "name": "Graine-NotoSerifDevanagari-500",
+          "url": "https://www.graine.ai/api/embed/font?f=Noto%20Serif%20Devanagari&w=500&v=1"
         }
       ]
     },
@@ -3302,6 +4180,466 @@
           "weight": 600,
           "name": "Graine-Mukta-600",
           "url": "https://www.graine.ai/api/embed/font?f=Mukta&w=600&v=1"
+        }
+      ]
+    },
+    {
+      "config": {
+        "preset": "bauhaus"
+      },
+      "design": {
+        "config": {
+          "preset": "bauhaus"
+        },
+        "light": {
+          "v": 1,
+          "preset": "bauhaus",
+          "scheme": "light",
+          "colors": {
+            "background": "#F4EFE6",
+            "surface": "#FBF8F2",
+            "surfaceRaised": "#FFFFFF",
+            "text": "#141414",
+            "textMuted": "#55514A",
+            "border": "#D8D0C1",
+            "accent": "#21409A",
+            "onAccent": "#FFFFFF",
+            "success": "#2B7A3D",
+            "warning": "#985A00",
+            "danger": "#C62A1F",
+            "userBubble": "#F2C230",
+            "userBubbleText": "#141414",
+            "agentBubble": "#ECE5D8",
+            "agentBubbleText": "#141414",
+            "scrim": "#000000",
+            "accentSoft": "#E1E2E7"
+          },
+          "font": {
+            "body": "DM Sans",
+            "heading": "Poppins",
+            "scale": {
+              "caption": 12,
+              "body": 15,
+              "title": 22,
+              "display": 32
+            },
+            "weights": {
+              "body": 400,
+              "strong": 600,
+              "title": 700
+            },
+            "letterSpacing": {
+              "body": 0,
+              "title": -0.01
+            },
+            "lineHeight": {
+              "body": 1.45,
+              "title": 1.15
+            }
+          },
+          "shape": {
+            "radius": {
+              "sm": 0,
+              "md": 24,
+              "lg": 0,
+              "xl": 30
+            },
+            "borderWidth": 0,
+            "launcher": "circle"
+          },
+          "spacing": {
+            "unit": 4,
+            "cardPadding": 16,
+            "gap": 10
+          },
+          "elevation": {
+            "card": {
+              "y": 2,
+              "blur": 6,
+              "spread": 0,
+              "opacity": 0.1,
+              "color": "#000000"
+            },
+            "floating": {
+              "y": 10,
+              "blur": 28,
+              "spread": -6,
+              "opacity": 0.2,
+              "color": "#000000"
+            },
+            "hardOffset": null
+          },
+          "motion": {
+            "durationMs": 200,
+            "easing": "standard",
+            "bounce": 0
+          },
+          "icons": {
+            "style": "filled",
+            "stroke": 2,
+            "launcher": {
+              "id": "graphic-eq",
+              "path": "M7 17v-10q0 -0.425 0.288 -0.713T8 6q0.425 0 0.713 0.288T9 7v10q0 0.425 -0.288 0.713T8 18q-0.425 0 -0.713 -0.288T7 17Zm4 4v-18q0 -0.425 0.288 -0.713T12 2q0.425 0 0.713 0.288T13 3v18q0 0.425 -0.288 0.713T12 22q-0.425 0 -0.713 -0.288T11 21ZM3 13v-2q0 -0.425 0.288 -0.713T4 10q0.425 0 0.713 0.288T5 11v2q0 0.425 -0.288 0.713T4 14q-0.425 0 -0.713 -0.288T3 13Zm12 4v-10q0 -0.425 0.288 -0.713T16 6q0.425 0 0.713 0.288T17 7v10q0 0.425 -0.288 0.713T16 18q-0.425 0 -0.713 -0.288T15 17Zm4 -4v-2q0 -0.425 0.288 -0.713T20 10q0.425 0 0.713 0.288T21 11v2q0 0.425 -0.288 0.713T20 14q-0.425 0 -0.713 -0.288T19 13Z",
+              "stroke": false
+            }
+          },
+          "glass": null,
+          "bubbles": "filled",
+          "chrome": "none"
+        },
+        "dark": {
+          "v": 1,
+          "preset": "bauhaus",
+          "scheme": "dark",
+          "colors": {
+            "background": "#121212",
+            "surface": "#1B1B1B",
+            "surfaceRaised": "#252525",
+            "text": "#F4EFE6",
+            "textMuted": "#B2ABA0",
+            "border": "#3A3733",
+            "accent": "#F2C230",
+            "onAccent": "#141414",
+            "success": "#5DBE6D",
+            "warning": "#E8A33A",
+            "danger": "#D0332A",
+            "userBubble": "#2F4FB8",
+            "userBubbleText": "#FFFFFF",
+            "agentBubble": "#252525",
+            "agentBubbleText": "#F4EFE6",
+            "scrim": "#000000",
+            "accentSoft": "#4A4020"
+          },
+          "font": {
+            "body": "DM Sans",
+            "heading": "Poppins",
+            "scale": {
+              "caption": 12,
+              "body": 15,
+              "title": 22,
+              "display": 32
+            },
+            "weights": {
+              "body": 400,
+              "strong": 600,
+              "title": 700
+            },
+            "letterSpacing": {
+              "body": 0,
+              "title": -0.01
+            },
+            "lineHeight": {
+              "body": 1.45,
+              "title": 1.15
+            }
+          },
+          "shape": {
+            "radius": {
+              "sm": 0,
+              "md": 24,
+              "lg": 0,
+              "xl": 30
+            },
+            "borderWidth": 0,
+            "launcher": "circle"
+          },
+          "spacing": {
+            "unit": 4,
+            "cardPadding": 16,
+            "gap": 10
+          },
+          "elevation": {
+            "card": {
+              "y": 2,
+              "blur": 6,
+              "spread": 0,
+              "opacity": 0.2,
+              "color": "#000000"
+            },
+            "floating": {
+              "y": 10,
+              "blur": 28,
+              "spread": -6,
+              "opacity": 0.2,
+              "color": "#000000"
+            },
+            "hardOffset": null
+          },
+          "motion": {
+            "durationMs": 200,
+            "easing": "standard",
+            "bounce": 0
+          },
+          "icons": {
+            "style": "filled",
+            "stroke": 2,
+            "launcher": {
+              "id": "graphic-eq",
+              "path": "M7 17v-10q0 -0.425 0.288 -0.713T8 6q0.425 0 0.713 0.288T9 7v10q0 0.425 -0.288 0.713T8 18q-0.425 0 -0.713 -0.288T7 17Zm4 4v-18q0 -0.425 0.288 -0.713T12 2q0.425 0 0.713 0.288T13 3v18q0 0.425 -0.288 0.713T12 22q-0.425 0 -0.713 -0.288T11 21ZM3 13v-2q0 -0.425 0.288 -0.713T4 10q0.425 0 0.713 0.288T5 11v2q0 0.425 -0.288 0.713T4 14q-0.425 0 -0.713 -0.288T3 13Zm12 4v-10q0 -0.425 0.288 -0.713T16 6q0.425 0 0.713 0.288T17 7v10q0 0.425 -0.288 0.713T16 18q-0.425 0 -0.713 -0.288T15 17Zm4 -4v-2q0 -0.425 0.288 -0.713T20 10q0.425 0 0.713 0.288T21 11v2q0 0.425 -0.288 0.713T20 14q-0.425 0 -0.713 -0.288T19 13Z",
+              "stroke": false
+            }
+          },
+          "glass": null,
+          "bubbles": "filled",
+          "chrome": "none"
+        }
+      },
+      "picks": {
+        "deviceLight": "light",
+        "deviceDark": "dark",
+        "deviceUnknown": "light"
+      },
+      "fontFaces": [
+        {
+          "family": "DM Sans",
+          "weight": 400,
+          "name": "Graine-DMSans-400",
+          "url": "https://www.graine.ai/api/embed/font?f=DM%20Sans&w=400&v=1"
+        },
+        {
+          "family": "DM Sans",
+          "weight": 600,
+          "name": "Graine-DMSans-600",
+          "url": "https://www.graine.ai/api/embed/font?f=DM%20Sans&w=600&v=1"
+        },
+        {
+          "family": "Poppins",
+          "weight": 600,
+          "name": "Graine-Poppins-600",
+          "url": "https://www.graine.ai/api/embed/font?f=Poppins&w=600&v=1"
+        },
+        {
+          "family": "Poppins",
+          "weight": 700,
+          "name": "Graine-Poppins-700",
+          "url": "https://www.graine.ai/api/embed/font?f=Poppins&w=700&v=1"
+        }
+      ]
+    },
+    {
+      "config": {
+        "preset": "gamified"
+      },
+      "design": {
+        "config": {
+          "preset": "gamified"
+        },
+        "light": {
+          "v": 1,
+          "preset": "gamified",
+          "scheme": "light",
+          "colors": {
+            "background": "#FFFFFF",
+            "surface": "#FFFFFF",
+            "surfaceRaised": "#F7F7F7",
+            "text": "#3C3C3C",
+            "textMuted": "#646464",
+            "border": "#E5E5E5",
+            "accent": "#3A8400",
+            "onAccent": "#FFFFFF",
+            "success": "#3A8400",
+            "warning": "#A86F00",
+            "danger": "#D83434",
+            "userBubble": "#58CC02",
+            "userBubbleText": "#102B00",
+            "agentBubble": "#F1F1F1",
+            "agentBubbleText": "#3C3C3C",
+            "scrim": "#000000",
+            "accentSoft": "#E7F0E0"
+          },
+          "font": {
+            "body": "Nunito",
+            "heading": "Nunito",
+            "scale": {
+              "caption": 13,
+              "body": 16,
+              "title": 20,
+              "display": 30
+            },
+            "weights": {
+              "body": 500,
+              "strong": 700,
+              "title": 800
+            },
+            "letterSpacing": {
+              "body": 0,
+              "title": 0
+            },
+            "lineHeight": {
+              "body": 1.45,
+              "title": 1.2
+            }
+          },
+          "shape": {
+            "radius": {
+              "sm": 8,
+              "md": 14,
+              "lg": 16,
+              "xl": 20
+            },
+            "borderWidth": 2,
+            "launcher": "rounded-square"
+          },
+          "spacing": {
+            "unit": 4,
+            "cardPadding": 16,
+            "gap": 10
+          },
+          "elevation": {
+            "card": {
+              "y": 4,
+              "blur": 0,
+              "spread": 0,
+              "opacity": 0.14,
+              "color": "#000000"
+            },
+            "floating": {
+              "y": 5,
+              "blur": 0,
+              "spread": 0,
+              "opacity": 0.18,
+              "color": "#000000"
+            },
+            "hardOffset": null
+          },
+          "motion": {
+            "durationMs": 280,
+            "easing": "spring",
+            "bounce": 0.4
+          },
+          "icons": {
+            "style": "filled",
+            "stroke": 2.5,
+            "launcher": {
+              "id": "star",
+              "path": "M11.525 2.295a0.53 0.53 0 0 1 0.95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166 0.756a0.53 0.53 0 0 1 0.294 0.904l-3.736 3.638a2.123 2.123 0 0 0 -0.611 1.878l0.882 5.14a0.53 0.53 0 0 1 -0.771 0.56l-4.618 -2.428a2.122 2.122 0 0 0 -1.973 0L6.396 21.01a0.53 0.53 0 0 1 -0.77 -0.56l0.881 -5.139a2.122 2.122 0 0 0 -0.611 -1.879L2.16 9.795a0.53 0.53 0 0 1 0.294 -0.906l5.165 -0.755a2.122 2.122 0 0 0 1.597 -1.16z",
+              "stroke": true
+            }
+          },
+          "glass": null,
+          "bubbles": "filled",
+          "chrome": "none"
+        },
+        "dark": {
+          "v": 1,
+          "preset": "gamified",
+          "scheme": "dark",
+          "colors": {
+            "background": "#131F24",
+            "surface": "#1A2A31",
+            "surfaceRaised": "#22343C",
+            "text": "#F1F7FB",
+            "textMuted": "#A5B5BD",
+            "border": "#37464F",
+            "accent": "#58CC02",
+            "onAccent": "#102B00",
+            "success": "#79D634",
+            "warning": "#FFC800",
+            "danger": "#D83434",
+            "userBubble": "#58CC02",
+            "userBubbleText": "#102B00",
+            "agentBubble": "#22343C",
+            "agentBubbleText": "#F1F7FB",
+            "scrim": "#000000",
+            "accentSoft": "#284E27"
+          },
+          "font": {
+            "body": "Nunito",
+            "heading": "Nunito",
+            "scale": {
+              "caption": 13,
+              "body": 16,
+              "title": 20,
+              "display": 30
+            },
+            "weights": {
+              "body": 500,
+              "strong": 700,
+              "title": 800
+            },
+            "letterSpacing": {
+              "body": 0,
+              "title": 0
+            },
+            "lineHeight": {
+              "body": 1.45,
+              "title": 1.2
+            }
+          },
+          "shape": {
+            "radius": {
+              "sm": 8,
+              "md": 14,
+              "lg": 16,
+              "xl": 20
+            },
+            "borderWidth": 2,
+            "launcher": "rounded-square"
+          },
+          "spacing": {
+            "unit": 4,
+            "cardPadding": 16,
+            "gap": 10
+          },
+          "elevation": {
+            "card": {
+              "y": 4,
+              "blur": 0,
+              "spread": 0,
+              "opacity": 0.28,
+              "color": "#000000"
+            },
+            "floating": {
+              "y": 5,
+              "blur": 0,
+              "spread": 0,
+              "opacity": 0.18,
+              "color": "#000000"
+            },
+            "hardOffset": null
+          },
+          "motion": {
+            "durationMs": 280,
+            "easing": "spring",
+            "bounce": 0.4
+          },
+          "icons": {
+            "style": "filled",
+            "stroke": 2.5,
+            "launcher": {
+              "id": "star",
+              "path": "M11.525 2.295a0.53 0.53 0 0 1 0.95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166 0.756a0.53 0.53 0 0 1 0.294 0.904l-3.736 3.638a2.123 2.123 0 0 0 -0.611 1.878l0.882 5.14a0.53 0.53 0 0 1 -0.771 0.56l-4.618 -2.428a2.122 2.122 0 0 0 -1.973 0L6.396 21.01a0.53 0.53 0 0 1 -0.77 -0.56l0.881 -5.139a2.122 2.122 0 0 0 -0.611 -1.879L2.16 9.795a0.53 0.53 0 0 1 0.294 -0.906l5.165 -0.755a2.122 2.122 0 0 0 1.597 -1.16z",
+              "stroke": true
+            }
+          },
+          "glass": null,
+          "bubbles": "filled",
+          "chrome": "none"
+        }
+      },
+      "picks": {
+        "deviceLight": "light",
+        "deviceDark": "dark",
+        "deviceUnknown": "light"
+      },
+      "fontFaces": [
+        {
+          "family": "Nunito",
+          "weight": 500,
+          "name": "Graine-Nunito-500",
+          "url": "https://www.graine.ai/api/embed/font?f=Nunito&w=500&v=1"
+        },
+        {
+          "family": "Nunito",
+          "weight": 700,
+          "name": "Graine-Nunito-700",
+          "url": "https://www.graine.ai/api/embed/font?f=Nunito&w=700&v=1"
+        },
+        {
+          "family": "Nunito",
+          "weight": 800,
+          "name": "Graine-Nunito-800",
+          "url": "https://www.graine.ai/api/embed/font?f=Nunito&w=800&v=1"
         }
       ]
     },

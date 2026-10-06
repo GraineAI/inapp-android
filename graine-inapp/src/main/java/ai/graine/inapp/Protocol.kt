@@ -52,6 +52,8 @@ internal object Protocol {
         const val QUALITY = "graine:quality"
         const val NETWORK = "graine:network"
         const val RECONNECTING = "graine:reconnecting"
+        /** Where a connect is: registering · dialling · retrying · switching · failed (sdk/contract/DESIGN.md "Connecting"). */
+        const val PROGRESS = "graine:progress"
     }
 
     /**
@@ -155,6 +157,8 @@ internal object Protocol {
             }
             In.NETWORK -> PageMessage.Network(o.optBoolean("online"))
             In.RECONNECTING -> PageMessage.Reconnecting(o.optBoolean("active"))
+            // Passed on as the engine wrote it: a stage this build does not know is ignored where it is handled.
+            In.PROGRESS -> PageMessage.Progress(o.optString("stage"))
             else -> null
         }
     }
@@ -190,6 +194,30 @@ enum class Transport(val wire: String) {
 
 enum class Role { AGENT, CUSTOMER }
 
+/**
+ * WHERE A CALL BEING PLACED IS, as the engine reports it (`graine:progress`,
+ * contract/DESIGN.md "Connecting") — the React Native launcher's `connectStage`.
+ *
+ *   REGISTERING  a credential and a line are being set up (a cold start)
+ *   DIALLING     the call is on its way to the agent
+ *   RETRYING     the first attempt went unanswered and a fresh connection is
+ *                being made — on mobile data, usually a connection the phone
+ *                dropped while it sat idle
+ *   SWITCHING    the call is moving to the other transport
+ *
+ * The engine's fifth word, `failed`, is not a stage but the end of a connect:
+ * it is [GraineVoice.callFailed].
+ */
+enum class ConnectStage(val wire: String) {
+    REGISTERING("registering"), DIALLING("dialling"), RETRYING("retrying"), SWITCHING("switching");
+
+    companion object {
+        /** Null for anything else — `failed`, and any stage this build does not know. */
+        @JvmStatic
+        fun from(s: String?): ConnectStage? = values().firstOrNull { it.wire == s }
+    }
+}
+
 /** Everything the page can say, typed. */
 internal sealed class PageMessage {
     object Ready : PageMessage()
@@ -210,6 +238,8 @@ internal sealed class PageMessage {
     data class QualitySample(val rttMs: Double?, val jitterMs: Double?, val loss: Double?) : PageMessage()
     data class Network(val online: Boolean) : PageMessage()
     data class Reconnecting(val active: Boolean) : PageMessage()
+    /** `graine:progress` — the stage as the engine wrote it, known or not. */
+    data class Progress(val stage: String) : PageMessage()
 }
 
 /**

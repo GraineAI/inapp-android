@@ -2204,6 +2204,7 @@
     "accent": "#FF3D00",
     "heading": "Ring",
     "logoUrl": null,
+    "logoPlate": "accent",
     "radius": 18
    }
   },
@@ -2219,6 +2220,7 @@
     "accent": "#FF3D00",
     "heading": "Ring",
     "logoUrl": null,
+    "logoPlate": "accent",
     "radius": 18
    }
   },
@@ -2236,6 +2238,7 @@
     "accent": "#318CE7",
     "heading": "Ring",
     "logoUrl": null,
+    "logoPlate": "accent",
     "radius": 18
    }
   },
@@ -2253,6 +2256,7 @@
     "accent": "#318CE7",
     "heading": "Ring",
     "logoUrl": null,
+    "logoPlate": "accent",
     "radius": 18
    }
   },
@@ -2270,6 +2274,7 @@
     "accent": "#f0a",
     "heading": "Ring",
     "logoUrl": null,
+    "logoPlate": "accent",
     "radius": 18
    }
   },
@@ -2287,6 +2292,7 @@
     "accent": "#FF3D00",
     "heading": "Ring",
     "logoUrl": null,
+    "logoPlate": "accent",
     "radius": 18
    }
   },
@@ -2304,6 +2310,7 @@
     "accent": "#FF3D00",
     "heading": "Ring",
     "logoUrl": null,
+    "logoPlate": "accent",
     "radius": 18
    }
   },
@@ -2321,6 +2328,7 @@
     "accent": "#FF3D00",
     "heading": "Ring",
     "logoUrl": null,
+    "logoPlate": "accent",
     "radius": 18
    }
   },
@@ -2338,6 +2346,7 @@
     "accent": "#FF3D00",
     "heading": "Ring",
     "logoUrl": null,
+    "logoPlate": "accent",
     "radius": 18
    }
   },
@@ -2355,6 +2364,7 @@
     "accent": "#FF3D00",
     "heading": "Talk to our AI assistant",
     "logoUrl": null,
+    "logoPlate": "accent",
     "radius": 18
    }
   },
@@ -2372,6 +2382,7 @@
     "accent": "#FF3D00",
     "heading": "Ring",
     "logoUrl": null,
+    "logoPlate": "accent",
     "radius": 18
    }
   },
@@ -2389,6 +2400,7 @@
     "accent": "#FF3D00",
     "heading": "Ring",
     "logoUrl": "https://www.graine.ai/api/embed/logo?k=embed-logos%2Forg_123%2Fa%20b%2Bc.png",
+    "logoPlate": "accent",
     "radius": 18
    }
   },
@@ -2406,6 +2418,7 @@
     "accent": "#FF3D00",
     "heading": "Ring",
     "logoUrl": "https://www.graine.ai/api/embed/logo?k=x%26k%3Dy",
+    "logoPlate": "accent",
     "radius": 18
    }
   },
@@ -2424,6 +2437,7 @@
     "accent": "#FF3D00",
     "heading": "Ring",
     "logoUrl": "https://graine.example/api/embed/logo?k=k.png",
+    "logoPlate": "accent",
     "radius": 18
    }
   },
@@ -2441,6 +2455,7 @@
     "accent": "#FF3D00",
     "heading": "Ring",
     "logoUrl": null,
+    "logoPlate": "accent",
     "radius": 28
    }
   },
@@ -2458,6 +2473,7 @@
     "accent": "#FF3D00",
     "heading": "Ring",
     "logoUrl": null,
+    "logoPlate": "accent",
     "radius": 12
    }
   },
@@ -2475,6 +2491,7 @@
     "accent": "#FF3D00",
     "heading": "Ring",
     "logoUrl": null,
+    "logoPlate": "accent",
     "radius": 0
    }
   },
@@ -2492,6 +2509,7 @@
     "accent": "#FF3D00",
     "heading": "Ring",
     "logoUrl": null,
+    "logoPlate": "accent",
     "radius": 48
    }
   },
@@ -2509,6 +2527,7 @@
     "accent": "#FF3D00",
     "heading": "Ring",
     "logoUrl": null,
+    "logoPlate": "accent",
     "radius": 18
    }
   },
@@ -2524,6 +2543,7 @@
     "accent": "#FF3D00",
     "heading": "Ring",
     "logoUrl": null,
+    "logoPlate": "accent",
     "radius": 28
    }
   },
@@ -2541,7 +2561,83 @@
     "accent": "#FF3D00",
     "heading": "Ring",
     "logoUrl": null,
+    "logoPlate": "accent",
     "radius": 0
+   }
+  },
+  {
+   "appearance": {
+    "logo": "embed-logos/o/a.png",
+    "logoPlate": "white"
+   },
+   "fallback": {
+    "accent": "#FF3D00",
+    "heading": "Ring",
+    "radius": 18,
+    "maxRadius": 28
+   },
+   "output": {
+    "accent": "#FF3D00",
+    "heading": "Ring",
+    "logoUrl": "https://www.graine.ai/api/embed/logo?k=embed-logos%2Fo%2Fa.png",
+    "logoPlate": "white",
+    "radius": 18
+   }
+  },
+  {
+   "appearance": {
+    "logo": "embed-logos/o/a.png",
+    "logoPlate": "accent"
+   },
+   "fallback": {
+    "accent": "#FF3D00",
+    "heading": "Ring",
+    "radius": 18,
+    "maxRadius": 28
+   },
+   "output": {
+    "accent": "#FF3D00",
+    "heading": "Ring",
+    "logoUrl": "https://www.graine.ai/api/embed/logo?k=embed-logos%2Fo%2Fa.png",
+    "logoPlate": "accent",
+    "radius": 18
+   }
+  },
+  {
+   "appearance": {
+    "logo": "embed-logos/o/a.png",
+    "logoPlate": "WHITE"
+   },
+   "fallback": {
+    "accent": "#FF3D00",
+    "heading": "Ring",
+    "radius": 18,
+    "maxRadius": 28
+   },
+   "output": {
+    "accent": "#FF3D00",
+    "heading": "Ring",
+    "logoUrl": "https://www.graine.ai/api/embed/logo?k=embed-logos%2Fo%2Fa.png",
+    "logoPlate": "accent",
+    "radius": 18
+   }
+  },
+  {
+   "appearance": {
+    "logoPlate": 1
+   },
+   "fallback": {
+    "accent": "#FF3D00",
+    "heading": "Ring",
+    "radius": 18,
+    "maxRadius": 28
+   },
+   "output": {
+    "accent": "#FF3D00",
+    "heading": "Ring",
+    "logoUrl": null,
+    "logoPlate": "accent",
+    "radius": 18
    }
   },
   {
@@ -2558,6 +2654,7 @@
     "accent": "#FF3D00",
     "heading": "Ring",
     "logoUrl": null,
+    "logoPlate": "accent",
     "radius": 12
    }
   },
@@ -2575,6 +2672,7 @@
     "accent": "#FF3D00",
     "heading": "Ring",
     "logoUrl": null,
+    "logoPlate": "accent",
     "radius": 7.5
    }
   },
@@ -2592,6 +2690,7 @@
     "accent": "#FF3D00",
     "heading": "Ring",
     "logoUrl": "https://www.graine.ai/api/embed/logo?k=it's%20(ok)!~*",
+    "logoPlate": "accent",
     "radius": 18
    }
   },
@@ -2614,6 +2713,7 @@
     "accent": "#0A7",
     "heading": "Acme Support",
     "logoUrl": "https://www.graine.ai/api/embed/logo?k=embed-logos%2Facme.png",
+    "logoPlate": "accent",
     "radius": 24
    }
   },
@@ -2631,6 +2731,7 @@
     "accent": "#318CE7",
     "heading": "Talk to our AI assistant",
     "logoUrl": null,
+    "logoPlate": "accent",
     "radius": 18
    }
   }

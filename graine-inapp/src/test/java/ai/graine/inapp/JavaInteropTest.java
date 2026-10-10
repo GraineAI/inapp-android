@@ -96,4 +96,34 @@ public class JavaInteropTest {
         // 0.4.0's four-argument constructor still builds, on the accent.
         assertEquals(LogoPlate.ACCENT, new NativeAppearance("#318CE7", "Ring", null, 18.0).getLogoPlate());
     }
+
+    @Test public void aJavaAppConfiguresCallsAndHearsTheirOutcomes() {
+        // Every argument has a default: a Java app names only what it cares about.
+        GraineCallsConfig config = new GraineCallsConfig("Acme Support");
+        assertEquals("Acme Support", config.getDisplayName());
+        assertEquals(30_000L, config.getRingTimeoutMs());
+        assertEquals("Assistant", new GraineCallsConfig().getDisplayName());
+
+        final String[] heard = {null, null};
+        GraineCallListener listener = new GraineCallListener() {
+            @Override public void onCallOutcome(String callId, GraineCallOutcome outcome) {
+                heard[0] = callId;
+                heard[1] = outcome.getWire();
+            }
+        };
+        // Default methods: an app written against one callback still compiles as more are added.
+        listener.onCallState(GraineCallState.RINGING, null);
+        listener.onAgentSpeaking(true);
+        listener.onCallOutcome("call_1", GraineCallOutcome.MISSED);
+        assertEquals("call_1", heard[0]);
+        assertEquals("missed", heard[1]);
+
+        assertEquals("local", GraineCallOutcome.ended(GraineCallOutcome.EndReason.LOCAL).getEndReason().getWire());
+        assertEquals("failed", GraineCallOutcome.failed("no network").getWire());
+        assertEquals(GraineCallOutcome.Kind.ANSWERED, GraineCallOutcome.ANSWERED.getKind());
+        assertEquals("ai.graine.inapp.action.ANSWER_CALL", GraineCalls.ACTION_ANSWER);
+        GraineCall call = new GraineCall("c", GraineCall.Direction.INCOMING, "Acme", "payment_due",
+                Collections.singletonMap("who_called", "agent"));
+        assertEquals(GraineCall.Direction.INCOMING, call.getDirection());
+    }
 }

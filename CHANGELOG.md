@@ -1,3 +1,18 @@
+## 0.6.0
+
+- **Calls like WhatsApp**: `GraineInApp.get().calls`. Your agent rings the customer — hand your FCM data message (`type: "agent_call"`, `call_id`, `reason`, `caller_name`, `variables`) to `calls.handlePush(data)`, and the phone rings with a call notification (the ringtone, Answer and Decline, CallStyle on Android 12+) and a call screen over the lock screen. Or the customer calls the agent with `calls.startCall(activity, reason, variables)`.
+- **The call keeps going with the screen off**, with its audio in your app — the microphone with the platform's echo canceller, the earpiece or speaker — inside a microphone foreground service, with an ongoing-call notification and Hang up.
+- **Outcomes for your server**: `GraineCallListener` reports the call's state, captions and speech, and its outcome with the call's id — answered, declined, missed (30 s by default, or busy), ended (local, remote, failed) or failed.
+- `GraineCallsConfig` sets the name, the status-bar icon, the ringtone, your own call screen and the ring timeout. The library's manifest declares the call screen, the service, the receiver and their permissions.
+- Starting a call ends a conversation in the assistant bar, and the bar cannot start one while a call is live.
+- `SessionConfig.wsHost`, filled in by the server.
+- `GraineCallsHost`, for the React Native and Flutter call packages: the calls driven in plain values (maps, lists, strings), the options kept for a cold start, the call as one snapshot, and the agent's actions answered from JavaScript or Dart. A native app keeps using `GraineInApp.get().calls`.
+- `GraineInApp.registerDeferredAction(name) { args, answer -> }`: an action answered later — after a network call, a confirmation, another screen — held to the same six seconds and the first answer.
+- Still no runtime dependencies.
+- The library's manifest adds what a call needs. On Android 14+, Google Play asks apps that declare `USE_FULL_SCREEN_INTENT` or `FOREGROUND_SERVICE_MICROPHONE` to explain them; an app that does not use calls removes those two permissions and `ai.graine.inapp.GraineCallService` with `tools:node="remove"` (snippet in the Android guide).
+
+Guide: [In-app calling](https://www.graine.ai/docs/in-app/calling).
+
 ## 0.5.0
 
 - A connect says where it is. The engine now reports each stage of placing a call (`graine:progress`): setting up the line, dialling, a fresh try after the first attempt went unanswered (on mobile data, usually a connection the phone dropped while it sat idle), a move to the other transport, or that nothing could carry the call. The voice bar draws a retry or a switch as the loader's "reconnecting" moment, in the brand's own words. A connect the customer has waited on for 4 seconds — a call they placed, or their bar open on a page still loading — says "Still connecting…", but only while the brand's connecting words are the default "Connecting…": a wording the brand chose, often not English, is never replaced. A call that could not be connected on either transport stops saying "connecting" and says "Couldn’t connect · tap to retry"; the microphone (or the words) places it again. An app drawing its own UI reads the same from `GraineVoice.connectStage`, `slowConnect` and `callFailed`, and hears every change in `GraineListener.onConnectProgress`; `GraineConfig.Timing.slowConnectMs` moves the 4-second mark. A stage this build does not know is ignored.
@@ -27,7 +42,7 @@
 
 ## 0.1.1
 
-- Back in the foreground, an idle engine is told to warm (`graine:warm`). The engine keeps a SIP registration warm so a tap costs only the call itself, but a phone drops that idle connection while the app is in the background, and the engine page is not reliably told by its own web view. The SDK now says so when the app returns — only when the page is ready, never during a call.
+- Back in the foreground, an idle engine is told to get ready again (`graine:warm`). The engine keeps its line ready so a tap costs only the call itself, but a phone drops that idle connection while the app is in the background. The SDK now tells the engine when the app returns — only when the page is ready, never during a call.
 - Connecting is faster in the hosted engine itself — a warm tap connects in about 0.2 s — with no change to this package.
 
 ## 0.1.0

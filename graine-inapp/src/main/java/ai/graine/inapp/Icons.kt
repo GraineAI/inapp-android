@@ -280,7 +280,7 @@ internal object SvgPath {
  * as an SVG viewBox does.
  */
 internal class IconDrawable(
-    name: String,
+    private val icon: SdkIcon?,
     style: String?,
     stroke: Double,
     private val color: Int,
@@ -288,7 +288,10 @@ internal class IconDrawable(
     /** Turned 180° — the chat header's chevron, pointing down. */
     private val flipped: Boolean = false,
 ) : Drawable() {
-    private val icon = SdkIcons.ALL[name]
+    /** One of [SdkIcons.ALL], by name. */
+    constructor(name: String, style: String?, stroke: Double, color: Int, sizePx: Int, flipped: Boolean = false) :
+        this(SdkIcons.ALL[name], style, stroke, color, sizePx, flipped)
+
     private val body = icon?.body?.let { SvgPath.path(it) }
     private val lines = icon?.lines?.let { SvgPath.path(it) }
     private val treatment = SdkIcons.treatment(style, stroke)

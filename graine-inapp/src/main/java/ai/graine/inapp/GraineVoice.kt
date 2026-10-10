@@ -251,6 +251,10 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
         val activity = activityRef.get() ?: run {
             report { it.onError("GraineVoice.attach(activity) must be called before start().") }; return
         }
+        // One call at a time: a native call (GraineCalls) holds the microphone and the line.
+        if (graine.nativeCallLive()) {
+            report { it.onError("A call is already in progress.") }; return
+        }
         // A new attempt: the last call's fault, its failure to connect and its last words are not news.
         error = null
         progress.clear()

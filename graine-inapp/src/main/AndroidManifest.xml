@@ -1,9 +1,45 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Merged into the host app. INTERNET for the engine page; RECORD_AUDIO
-         for the agent to hear the customer; MODIFY_AUDIO_SETTINGS so the
-         WebView can route the call's audio. -->
+    <!-- Merged into the host app. INTERNET for the engine page and the call's
+         socket; RECORD_AUDIO for the agent to hear the customer;
+         MODIFY_AUDIO_SETTINGS so a call can route its audio (communication
+         mode, earpiece or loudspeaker). -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+    <!-- Native calls (GraineCalls): the ring is a notification (Android 13+
+         asks the customer for POST_NOTIFICATIONS); it opens the call screen
+         over the lock screen (USE_FULL_SCREEN_INTENT: from Android 14 Play
+         grants it to calling apps, otherwise the ring is a heads-up
+         notification, still ringing); and a call keeps its microphone with the
+         screen off in a microphone foreground service. An app that never uses
+         calls may remove these with tools:node="remove". -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+
+    <application>
+        <!-- The call screen: its own task, so ending a call returns the
+             customer to wherever they were, and gone from Recents with it. -->
+        <activity
+            android:name="ai.graine.inapp.GraineCallActivity"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:taskAffinity="${applicationId}.graine.call"
+            android:excludeFromRecents="false"
+            android:autoRemoveFromRecents="true"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|uiMode"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+
+        <service
+            android:name="ai.graine.inapp.GraineCallService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
+        <receiver
+            android:name="ai.graine.inapp.GraineCallReceiver"
+            android:exported="false" />
+    </application>
 </manifest>

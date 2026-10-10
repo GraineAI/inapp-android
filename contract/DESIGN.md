@@ -212,6 +212,36 @@ component card open as desktop windows:
   launcher. Where the platform draws an inner highlight, a primary button may
   carry a glossy top edge (white at 55%, 1 point); optional.
 
+**Signature** — `preset: "signature"` (saved as `"gateway"` for one afternoon;
+that id still resolves here), the look Graine itself wears: the dashboard's
+design system, which follows Sarvam's visual system (Graine and Sarvam are
+partners) with Graine's own motif. Every element above is drawn from its tokens
+exactly as for any design: neutral greys, the customer's bubble in slate, the
+controls in indigo, 24–32 corners, an ambient shadow, `emphasized` motion, DM
+Sans with Newsreader titles, and the `grain` glyph (the G mark's horizontal
+bands cut to a circle) on the launcher and the voice bar's avatar. No token is
+new, so it reaches every shipped SDK as it is.
+
+- **The web widget's voice panel** (the embed page — not the native voice bar)
+  draws the call with the grain, in place of the classic microphone body
+  (components/web-widgets/signature-voice-stage.tsx): seven horizontal bands,
+  each twice the height of the gap, cut to a circle and filled with one fall
+  from a pale top to `accent` — still while idle; a band of light running down
+  them while connecting or thinking (the app loader's own sweep); a slow
+  breath running down them while listening; each band stretching and settling
+  on its own beat while speaking (motion off under reduced motion); one state
+  line, lead in `text` and the rest in `textMuted` ("Listening, go ahead",
+  "Looking it up", "Speaking now"); the line being said, 19 in the body
+  family, the agent's in `accent` and the customer's in `text`, with the line
+  before it at 12.5 in `textMuted`; and the call as a pill on `surfaceRaised`
+  — elapsed time in monospace, the voice as bars in `text`, and a `danger`
+  stop. Off a call, one `accent` pill: "Start a call".
+- The phase comes from the transcript, not a new event: an agent line still
+  arriving is speaking; the customer talking, or the agent finished, is
+  listening; the customer finished with no reply yet is thinking.
+- Native SDKs keep the **Voice bar** above for this design. Drawing the grain
+  on a phone is a future SDK release, not a token change.
+
 ## Icons
 
 The SDK's own icons — `mic`, `micOff`, `end`, `send`, `chat`, `call`, `chevron`,

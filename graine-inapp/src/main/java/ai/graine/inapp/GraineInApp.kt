@@ -92,6 +92,11 @@ data class SessionConfig(
      * draws everything, as it always did.
      */
     val design: ResolvedDesign? = null,
+    /**
+     * Where this agent's voice socket lives (`wss://…`), when the server says;
+     * null means Graine's default. A native call's direct socket uses it.
+     */
+    val wsHost: String? = null,
 ) {
     /** The dashboard's Call audio setting. */
     val preferredTransport: Transport
@@ -167,11 +172,17 @@ class GraineInApp private constructor(
     internal val variables = VariableStore(config.variables)
     private val variableWatchers = CopyOnWriteArraySet<(Map<String, String>) -> Unit>()
 
-    private val actions = LinkedHashMap<String, (JSONObject) -> ActionResult>()
+    private val actions = ActionRegistry(
+        post = { task -> main.post { task() } },
+        schedule = { delayMs, task -> val r = Runnable { task() }; main.postDelayed(r, delayMs); ({ main.removeCallbacks(r) }) },
+        requested = { name -> listeners.forEach { it.onActionRequested(name) } },
+        completed = { name, result -> listeners.forEach { it.onActionCompleted(name, result) } },
+    )
     @Volatile private var screen: GraineScreen? = null
     @Volatile private var screenSince = System.currentTimeMillis()
     private val recentEvents = ArrayDeque<JSONObject>()
-    private var contextSeq = 0
+    /** Read from the main thread and a native call's session thread alike. */
+    private val contextSeq = java.util.concurrent.atomic.AtomicInteger()
     private val contextWatchers = CopyOnWriteArraySet<(JSONObject) -> Unit>()
     private var contextPending: Runnable? = null
 
@@ -185,6 +196,23 @@ class GraineInApp private constructor(
 
     /** The voice call. Attach it once, from your first activity; it follows the customer from there. */
     val voice: GraineVoice by voiceLazy
+
+    private val callsLazy = lazy { GraineCalls(this) }
+
+    /**
+     * Native calls, like WhatsApp: the agent rings the customer (a push → the
+     * call notification), or the customer calls the agent — with the screen
+     * off, from the lock screen, outcomes back to the app. See [GraineCalls].
+     */
+    val calls: GraineCalls by callsLazy
+
+    /** A native call takes the line: any web view call ends first. */
+    internal fun endWebViewCall() {
+        if (voiceLazy.isInitialized() && (voice.connected || voice.connecting)) voice.end()
+    }
+
+    /** True while a native call is ringing, connecting or live — the web view engine must not start one too. */
+    internal fun nativeCallLive(): Boolean = callsLazy.isInitialized() && calls.state != GraineCallState.IDLE
 
     /**
      * The component the agent drew that is still waiting to be answered, as
@@ -327,7 +355,7 @@ class GraineInApp private constructor(
             variables.identity(), config.appVersion, events) ?: return null
         val available = screen?.availableActions ?: synchronized(actions) { actions.keys.toList() }
         if (!frame.has("availableActions") && available.isNotEmpty()) frame.put("availableActions", org.json.JSONArray(available))
-        return frame.put("seq", ++contextSeq)
+        return frame.put("seq", contextSeq.incrementAndGet())
     }
 
     /** Coalesced: a screen that updates on every keystroke is sent at most every 400ms. */
@@ -355,10 +383,26 @@ class GraineInApp private constructor(
      * answer within six seconds, or the agent is told it was not done.
      * Returns a function that unregisters it.
      */
-    fun registerAction(name: String, handler: (JSONObject) -> ActionResult): () -> Unit {
-        synchronized(actions) { actions[name] = handler }
+    fun registerAction(name: String, handler: (JSONObject) -> ActionResult): () -> Unit =
+        register(name, ActionHandler.Sync(handler))
+
+    /**
+     * [registerAction] for an answer that is not ready when the handler
+     * returns: a network call, a confirmation the customer taps, code in
+     * another runtime (the React Native and Flutter call packages answer from
+     * JavaScript and Dart this way). The handler runs on the main thread and
+     * calls `answer` once, from any thread. The same six seconds apply: after
+     * them the agent has already been told it was not done, and a late answer
+     * is dropped — as is every answer after the first.
+     * Returns a function that unregisters it.
+     */
+    fun registerDeferredAction(name: String, handler: (args: JSONObject, answer: (ActionResult) -> Unit) -> Unit): () -> Unit =
+        register(name, ActionHandler.Deferred(handler))
+
+    private fun register(name: String, handler: ActionHandler): () -> Unit {
+        val unregister = actions.register(name, handler)
         scheduleContext()
-        return { synchronized(actions) { if (actions[name] === handler) actions.remove(name) }; scheduleContext() }
+        return { unregister(); scheduleContext() }
     }
 
     /** Which registered actions the agent can call, and which it cannot. Log this once at startup. */
@@ -378,26 +422,78 @@ class GraineInApp private constructor(
      * with a timeout message, an unknown one is `refused`. The agent is
      * blocked waiting, so silence is the one answer never given.
      */
-    internal fun executeAction(name: String, args: JSONObject, answer: (ActionResult) -> Unit) {
-        listeners.forEach { it.onActionRequested(name) }
-        val handler = synchronized(actions) { actions[name] }
-        var answered = false
-        fun once(r: ActionResult) {
-            if (answered) return
-            answered = true
-            listeners.forEach { it.onActionCompleted(name, r) }
-            answer(r)
+    internal fun executeAction(name: String, args: JSONObject, answer: (ActionResult) -> Unit) =
+        actions.execute(name, args, answer)
+
+    /** A handler as registered: one that answers when it returns, or one that answers later. */
+    internal sealed class ActionHandler {
+        class Sync(val run: (JSONObject) -> ActionResult) : ActionHandler()
+        class Deferred(val run: (JSONObject, (ActionResult) -> Unit) -> Unit) : ActionHandler()
+    }
+
+    /**
+     * EVERY ACTION, AND THE ONE PATH THAT RUNS THEM. Both kinds of handler are
+     * held to the same rules, and the rules are pure — the main thread and its
+     * clock are handed in — so DeferredActionTest proves them on the JVM: the
+     * handler runs on the main thread; the agent hears exactly one answer (the
+     * handler's, the deadline's, or a refusal for a name nobody registered)
+     * and whatever comes second is dropped, wherever it comes from; the
+     * listeners hear the request and that one answer.
+     */
+    internal class ActionRegistry(
+        /** Runs a task on the main thread, after whatever is running now. */
+        private val post: (() -> Unit) -> Unit,
+        /** Runs a task on the main thread after a delay; returns what cancels it. */
+        private val schedule: (Long, () -> Unit) -> (() -> Unit),
+        private val requested: (String) -> Unit,
+        private val completed: (String, ActionResult) -> Unit,
+        private val deadlineMs: Long = Protocol.ACTION_DEADLINE_MS,
+    ) {
+        private val handlers = LinkedHashMap<String, ActionHandler>()
+
+        /** The names registered now. */
+        val keys: Set<String> get() = synchronized(handlers) { LinkedHashSet(handlers.keys) }
+
+        /** Registers [handler] under [name], replacing any other. What it returns unregisters this one only. */
+        fun register(name: String, handler: ActionHandler): () -> Unit {
+            synchronized(handlers) { handlers[name] = handler }
+            return { synchronized(handlers) { if (handlers[name] === handler) handlers.remove(name) } }
         }
-        if (handler == null) {
-            once(ActionResult.refused("This app build does not implement \"$name\"."))
-            return
+
+        /** Called on the main thread. Always answers, exactly once. */
+        fun execute(name: String, args: JSONObject, answer: (ActionResult) -> Unit) {
+            requested(name)
+            val handler = synchronized(handlers) { handlers[name] }
+            var answered = false
+            var cancelDeadline: () -> Unit = {}
+            // Every answer arrives here on the main thread, so the flag needs no lock.
+            fun once(r: ActionResult) {
+                if (answered) return
+                answered = true
+                cancelDeadline()
+                completed(name, r)
+                answer(r)
+            }
+            if (handler == null) {
+                once(ActionResult.refused("This app build does not implement \"$name\"."))
+                return
+            }
+            cancelDeadline = schedule(deadlineMs) { once(ActionResult.error("The app did not answer within ${deadlineMs / 1000} seconds.")) }
+            post {
+                when (handler) {
+                    is ActionHandler.Sync -> once(try { handler.run(args) } catch (e: Throwable) { failure(e) })
+                    // A deferred answer is always posted, even from the main thread, and so is the
+                    // handler's own failure: whichever came first is the one the agent hears.
+                    is ActionHandler.Deferred -> try {
+                        handler.run(args) { r -> post { once(r) } }
+                    } catch (e: Throwable) {
+                        post { once(failure(e)) }
+                    }
+                }
+            }
         }
-        main.postDelayed({ once(ActionResult.error("The app did not answer within ${Protocol.ACTION_DEADLINE_MS / 1000} seconds.")) },
-            Protocol.ACTION_DEADLINE_MS)
-        main.post {
-            val r = try { handler(args) } catch (e: Throwable) { ActionResult.error(e.message ?: e.javaClass.simpleName) }
-            once(r)
-        }
+
+        private fun failure(e: Throwable) = ActionResult.error(e.message ?: e.javaClass.simpleName)
     }
 
     // ── the design: how the agent looks ─────────────────────────────────────
@@ -502,54 +598,7 @@ class GraineInApp private constructor(
         }
     }
 
-    private fun fetchSession(): SessionConfig {
-        val url = URL("${config.baseUrl.trimEnd('/')}/api/embed/session")
-        val conn = (url.openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            connectTimeout = 10_000
-            readTimeout = 15_000
-            doOutput = true
-            setRequestProperty("Content-Type", "application/json")
-        }
-        try {
-            conn.outputStream.use { it.write(JSONObject().put("publishableKey", config.publishableKey).toString().toByteArray()) }
-            val code = conn.responseCode
-            val body = (if (code in 200..299) conn.inputStream else conn.errorStream)
-                ?.bufferedReader()?.use(BufferedReader::readText).orEmpty()
-            val data = runCatching { JSONObject(body) }.getOrElse { JSONObject() }
-            when (code) {
-                in 200..299 -> Unit
-                403 -> throw IllegalStateException(
-                    "This agent does not accept connections from a mobile app yet. Add \"app://\" to its " +
-                        "Allowed domains in the dashboard, under Embed & Widgets. (server said: ${data.optString("error", "forbidden")})")
-                401 -> throw IllegalStateException("Publishable key was rejected. Check it against Embed & Widgets in the dashboard.")
-                else -> throw IllegalStateException(data.optString("error").ifEmpty { "Embed rejected ($code)" })
-            }
-            val agentId = data.optString("agentId")
-            val declared = mutableSetOf<String>()
-            data.optJSONArray("appActions")?.let { arr ->
-                for (i in 0 until arr.length()) {
-                    val a = arr.optJSONObject(i) ?: continue
-                    val n = a.optString("tool_name").ifEmpty { a.optString("toolName") }.ifEmpty { a.optString("name") }
-                    if (n.isNotEmpty()) declared.add(n)
-                }
-            }
-            val vars = mutableMapOf<String, Any?>()
-            data.optJSONObject("variables")?.let { v -> v.keys().forEach { k -> vars[k] = v.opt(k) } }
-            return SessionConfig(
-                agentId = agentId,
-                webcallAgentId = data.optString("webcallAgentId").ifEmpty { agentId },
-                appearance = data.optJSONObject("appearance") ?: JSONObject(),
-                variables = vars,
-                pageVersion = data.optString("pageVersion").ifEmpty { null },
-                declaredActions = declared,
-                friction = data.opt("friction") as? JSONObject,
-                design = ResolvedDesign.parse(data.opt("design")),
-            )
-        } finally {
-            conn.disconnect()
-        }
-    }
+    private fun fetchSession(): SessionConfig = SessionFetch.fetch(config.baseUrl, config.publishableKey)
 
     // ── the app's lifecycle ─────────────────────────────────────────────────
 
@@ -606,5 +655,69 @@ class GraineInApp private constructor(
         /** The instance init() created. Throws if init() was never called. */
         @JvmStatic
         fun get(): GraineInApp = instance ?: error("GraineInApp.init(application, config) has not been called")
+
+        /** The instance, or null before init() — for the SDK's own service, receiver and screen. */
+        internal fun peek(): GraineInApp? = instance
+    }
+}
+
+/**
+ * `POST {baseUrl}/api/embed/session` — the agent's configuration, as every
+ * Graine SDK reads it. Plain JVM (HttpURLConnection, org.json), so the live
+ * end-to-end test reads it exactly as the app does.
+ */
+internal object SessionFetch {
+    fun fetch(baseUrl: String, publishableKey: String): SessionConfig {
+        val url = URL("${baseUrl.trimEnd('/')}/api/embed/session")
+        val conn = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 10_000
+            readTimeout = 15_000
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json")
+        }
+        try {
+            conn.outputStream.use { it.write(JSONObject().put("publishableKey", publishableKey).toString().toByteArray()) }
+            val code = conn.responseCode
+            val body = (if (code in 200..299) conn.inputStream else conn.errorStream)
+                ?.bufferedReader()?.use(BufferedReader::readText).orEmpty()
+            val data = runCatching { JSONObject(body) }.getOrElse { JSONObject() }
+            when (code) {
+                in 200..299 -> Unit
+                403 -> throw IllegalStateException(
+                    "This agent does not accept connections from a mobile app yet. Add \"app://\" to its " +
+                        "Allowed domains in the dashboard, under Embed & Widgets. (server said: ${data.optString("error", "forbidden")})")
+                401 -> throw IllegalStateException("Publishable key was rejected. Check it against Embed & Widgets in the dashboard.")
+                else -> throw IllegalStateException(data.optString("error").ifEmpty { "Embed rejected ($code)" })
+            }
+            return parse(data)
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    fun parse(data: JSONObject): SessionConfig {
+        val agentId = data.optString("agentId")
+        val declared = mutableSetOf<String>()
+        data.optJSONArray("appActions")?.let { arr ->
+            for (i in 0 until arr.length()) {
+                val a = arr.optJSONObject(i) ?: continue
+                val n = a.optString("tool_name").ifEmpty { a.optString("toolName") }.ifEmpty { a.optString("name") }
+                if (n.isNotEmpty()) declared.add(n)
+            }
+        }
+        val vars = mutableMapOf<String, Any?>()
+        data.optJSONObject("variables")?.let { v -> v.keys().forEach { k -> vars[k] = v.opt(k) } }
+        return SessionConfig(
+            agentId = agentId,
+            webcallAgentId = data.optString("webcallAgentId").ifEmpty { agentId },
+            appearance = data.optJSONObject("appearance") ?: JSONObject(),
+            variables = vars,
+            pageVersion = data.optString("pageVersion").ifEmpty { null },
+            declaredActions = declared,
+            friction = data.opt("friction") as? JSONObject,
+            design = ResolvedDesign.parse(data.opt("design")),
+            wsHost = data.optString("wsHost").takeIf { it.startsWith("wss://") || it.startsWith("ws://") },
+        )
     }
 }

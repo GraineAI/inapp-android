@@ -13,6 +13,8 @@ import android.media.AudioTrack
 import android.media.MediaRecorder
 import android.media.audiofx.AcousticEchoCanceler
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.Process
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantLock
@@ -370,6 +372,42 @@ internal object CallRouting {
         else FOR_THE_EAR.firstOrNull { it in available }
 }
 
+/** What the phone did to a call's audio, for the call to act on. */
+internal enum class CallInterruption {
+    /** A phone call or another app took the audio: nothing is sent or played until it comes back. */
+    HELD,
+    /** The audio came back. */
+    RESUMED,
+    /** The customer answered a phone call during the hold: the agent's call ends, as iOS's End & Accept ends it. */
+    PHONE_CALL,
+}
+
+/**
+ * WHAT A CHANGE OF AUDIO FOCUS MEANS FOR A CALL — the rule, pure, so every
+ * case is proven on the JVM; [AudioRoute] applies it.
+ *
+ *   lost, for good or for now   hold: a phone call ringing, another app's call or player
+ *   lost, but may duck          nothing: a notification sound — a voice does not duck
+ *   gained                      resume
+ *
+ * An agent cannot be put on hold the way a person on a phone call can, so a
+ * phone call answered during the hold ends the agent's call:
+ * [phoneCallActive] is the phone's own call in progress.
+ */
+internal object CallFocus {
+    enum class Act { HOLD, RESUME, NONE }
+
+    fun act(change: Int): Act = when (change) {
+        AudioManager.AUDIOFOCUS_LOSS, AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> Act.HOLD
+        AudioManager.AUDIOFOCUS_GAIN, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT,
+        AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK -> Act.RESUME
+        else -> Act.NONE
+    }
+
+    /** The audio mode a phone call in progress puts the phone in. */
+    fun phoneCallActive(mode: Int): Boolean = mode == AudioManager.MODE_IN_CALL
+}
+
 /**
  * THE CALL'S PLACE IN THE PHONE'S AUDIO: communication mode for the call's
  * length, transient focus (other apps duck or pause), and the device it is
@@ -382,10 +420,18 @@ internal object CallRouting {
  * both off, the platform itself prefers a wired headset or a hearing aid to
  * the earpiece. Main thread only, the device callback included.
  */
-internal class AudioRoute(context: Context) {
+internal class AudioRoute(context: Context, private val onInterruption: (CallInterruption) -> Unit = {}) {
     private val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private val main = Handler(Looper.getMainLooper())
     private var focusRequest: AudioFocusRequest? = null
-    private val focusListener = AudioManager.OnAudioFocusChangeListener { change -> CallLog.debug("audio focus $change") }
+    private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
+        CallLog.debug("audio focus $change")
+        main.post { focusChanged(change) }
+    }
+    /** The phone took the call's audio and has not given it back. */
+    private var onHold = false
+    /** The phone call that ends this call was reported: once. */
+    private var phoneCallReported = false
     private var held = false
     /** The customer chose the loudspeaker. */
     private var speaker = false
@@ -478,9 +524,45 @@ internal class AudioRoute(context: Context) {
         runCatching { am.isBluetoothScoOn = false }
     }
 
+    /** [CallFocus]'s rule, applied on the main thread. */
+    private fun focusChanged(change: Int) {
+        if (!held) return
+        when (CallFocus.act(change)) {
+            CallFocus.Act.HOLD -> if (!onHold) {
+                onHold = true
+                onInterruption(CallInterruption.HELD)
+                main.postDelayed(watchForPhoneCall, PHONE_CALL_CHECK_MS)
+            }
+            CallFocus.Act.RESUME -> if (onHold) {
+                onHold = false
+                main.removeCallbacks(watchForPhoneCall)
+                // A phone call in between put the phone in its own mode, and may have moved the route.
+                runCatching { am.mode = AudioManager.MODE_IN_COMMUNICATION }
+                reroute()
+                onInterruption(CallInterruption.RESUMED)
+            }
+            CallFocus.Act.NONE -> Unit
+        }
+    }
+
+    /** During a hold, and only then: has the customer answered a phone call? Looked at once a second. */
+    private val watchForPhoneCall = object : Runnable {
+        override fun run() {
+            if (!held || !onHold || phoneCallReported) return
+            if (CallFocus.phoneCallActive(am.mode)) {
+                phoneCallReported = true
+                onInterruption(CallInterruption.PHONE_CALL)
+            } else {
+                main.postDelayed(this, PHONE_CALL_CHECK_MS)
+            }
+        }
+    }
+
     fun release() {
         if (!held) return
         held = false
+        main.removeCallbacks(watchForPhoneCall)
+        onHold = false
         runCatching { am.unregisterAudioDeviceCallback(devices) }
         // The phone's routing given back: no device named, no voice link open, no loudspeaker.
         if (Build.VERSION.SDK_INT >= 31) {
@@ -494,5 +576,9 @@ internal class AudioRoute(context: Context) {
         else @Suppress("DEPRECATION") am.abandonAudioFocus(focusListener)
         focusRequest = null
         am.mode = AudioManager.MODE_NORMAL
+    }
+
+    private companion object {
+        const val PHONE_CALL_CHECK_MS = 1_000L
     }
 }

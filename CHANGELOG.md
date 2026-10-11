@@ -1,3 +1,7 @@
+## 0.6.2
+
+- **A call goes on hold when the phone takes its audio** — a phone call ringing, another app's call or player: nothing the customer says is sent and nothing the agent says is played until the audio comes back, and then the call carries on. A notification sound changes nothing. **If the customer answers a phone call during the hold, the agent's call ends** (`ended`, `local`), as iOS's End & Accept ends it.
+
 ## 0.6.1
 
 - **Calls follow the headset**, as a phone call does: a Bluetooth headset first (LE audio, hands-free, hearing aids), then a wired or USB headset, then the earpiece. Turning the loudspeaker off brings the call back to the headset, and the choice is made again whenever a headset is switched on, off, plugged in or pulled out. No new permission.

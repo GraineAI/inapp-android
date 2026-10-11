@@ -180,6 +180,7 @@ internal class VoiceCallSession(
     /** One barge_in per agent turn. */
     private var bargedIn = false
     private var muted = false
+    private var onHold = false
     /** The agent's caption turn so far, its phrases joined (spokenJoinGap). */
     private var spokenTurn = ""
 
@@ -212,6 +213,17 @@ internal class VoiceCallSession(
 
     /** Muted: frames are dropped before they are sent; the microphone keeps running. */
     fun setMuted(value: Boolean) = scheduler.post { muted = value }
+
+    /**
+     * On hold: the phone took the call's audio — a phone call ringing, another
+     * app's call or player. Nothing the customer says is sent and nothing the
+     * agent says is played, and what was queued is dropped, until it comes back.
+     */
+    fun setOnHold(value: Boolean) = scheduler.post {
+        if (onHold == value) return@post
+        onHold = value
+        if (value) runCatching { audio.clear() }
+    }
 
     /** A newer screen while the call is up. */
     fun sendContext(frame: JSONObject) = scheduler.post { if (phase == Phase.OPEN) send(CallFrames.appContext(frame)) }
@@ -394,6 +406,7 @@ internal class VoiceCallSession(
     }
 
     private fun onAgentAudio(f: Inbound.Audio) {
+        if (onHold) return
         agentAudioArrived()
         val bytes = B64.decode(f.data)
         val decoded = AgentAudio.decode(bytes, f.format, f.sampleRate, format) ?: return
@@ -483,7 +496,7 @@ internal class VoiceCallSession(
     }
 
     private fun sendMicrophone(frame: ShortArray) {
-        if (muted) return
+        if (muted || onHold) return
         // Once per agent turn, immediately before the first frame released over the agent's voice.
         if (speaking && !bargedIn) {
             bargedIn = true

@@ -197,6 +197,16 @@ class GraineCalls internal constructor(private val graine: GraineInApp) {
     }
 
     /** Hang up — or, while ringing, decline. */
+    /** The phone took the call's audio, gave it back, or the customer answered a phone call during the hold. */
+    private fun interrupted(callId: String, i: CallInterruption) {
+        if (machine.call?.callId != callId) return
+        when (i) {
+            CallInterruption.HELD -> { CallLog.debug("on hold: the phone took the call's audio"); session?.setOnHold(true) }
+            CallInterruption.RESUMED -> { CallLog.debug("the call's audio is back"); session?.setOnHold(false) }
+            CallInterruption.PHONE_CALL -> { CallLog.error("a phone call was answered during the hold; the agent's call ends"); end() }
+        }
+    }
+
     fun end() = onMain {
         when (machine.state) {
             GraineCallState.RINGING -> machine.decline()
@@ -295,7 +305,7 @@ class GraineCalls internal constructor(private val graine: GraineInApp) {
         graine.loadSession { s ->
             if (machine.call?.callId != c.callId || machine.state != GraineCallState.CONNECTING || session != null) return@loadSession
             if (s == null) { machine.fail("The agent could not be loaded."); return@loadSession }
-            route = AudioRoute(app).also { it.acquire(speaker) }
+            route = AudioRoute(app) { i -> onMain { interrupted(c.callId, i) } }.also { it.acquire(speaker) }
             val events = object : CallSessionEvents {
                 override fun onOpen() = onMain {
                     if (machine.call?.callId == c.callId && machine.connected()) {

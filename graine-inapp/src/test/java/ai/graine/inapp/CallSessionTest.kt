@@ -492,6 +492,31 @@ class CallSessionTest {
         assertEquals(listOf("audio"), socket.types())
     }
 
+    @Test fun onHoldNothingIsSentOrPlayedAndWhatWasQueuedIsDropped() {
+        val s = open()
+        socket.sent.clear()
+        val clearsBefore = audio.clears
+        s.setOnHold(true); sched.drain()
+        assertEquals("what was queued is dropped", clearsBefore + 1, audio.clears)
+        repeat(3) { mic(9000.0) }
+        agentAudio()
+        assertEquals("the customer is not sent", emptyList<String>(), socket.types())
+        assertTrue("the agent is not played", audio.played.isEmpty())
+        assertEquals("the microphone keeps running", 0, audio.stopped)
+        s.setOnHold(false); sched.drain()
+        mic(9000.0)
+        assertEquals(listOf("audio"), socket.types())
+        agentAudio()
+        assertEquals(1, audio.played.size)
+    }
+
+    @Test fun holdingTwiceDropsTheQueueOnce() {
+        val s = open()
+        val clearsBefore = audio.clears
+        s.setOnHold(true); s.setOnHold(true); sched.drain()
+        assertEquals(clearsBefore + 1, audio.clears)
+    }
+
     // ── endings ─────────────────────────────────────────────────────────────
 
     @Test fun hangingUpSendsStopThenClosesAbout200MsLater() {

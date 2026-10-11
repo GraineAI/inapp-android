@@ -12,6 +12,7 @@ import android.media.AudioDeviceInfo.TYPE_USB_DEVICE
 import android.media.AudioDeviceInfo.TYPE_USB_HEADSET
 import android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES
 import android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET
+import android.media.AudioManager
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -134,5 +135,27 @@ class CallAudioDeviceTest {
         assertTrue(recovery.failed(11_000))
         assertTrue("minutes later, the same", recovery.failed(300_000))
         assertFalse(recovery.failed(300_001))
+    }
+
+    // ── the phone taking the call's audio ───────────────────────────────────
+
+    @Test fun losingTheAudioHoldsTheCallAndGettingItBackResumesIt() {
+        assertEquals(CallFocus.Act.HOLD, CallFocus.act(AudioManager.AUDIOFOCUS_LOSS_TRANSIENT))   // a phone call ringing
+        assertEquals(CallFocus.Act.HOLD, CallFocus.act(AudioManager.AUDIOFOCUS_LOSS))             // another app's call or player
+        assertEquals(CallFocus.Act.RESUME, CallFocus.act(AudioManager.AUDIOFOCUS_GAIN))
+        assertEquals(CallFocus.Act.RESUME, CallFocus.act(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT))
+    }
+
+    @Test fun aNotificationSoundIsNotAHold() {
+        // A voice does not duck: the call goes on as it was.
+        assertEquals(CallFocus.Act.NONE, CallFocus.act(AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK))
+        assertEquals(CallFocus.Act.NONE, CallFocus.act(0))
+    }
+
+    @Test fun onlyThePhonesOwnCallInProgressEndsTheAgentsCall() {
+        assertTrue(CallFocus.phoneCallActive(AudioManager.MODE_IN_CALL))
+        assertFalse(CallFocus.phoneCallActive(AudioManager.MODE_RINGTONE))          // still ringing: the hold goes on
+        assertFalse(CallFocus.phoneCallActive(AudioManager.MODE_IN_COMMUNICATION))  // our own call, or another app's
+        assertFalse(CallFocus.phoneCallActive(AudioManager.MODE_NORMAL))
     }
 }

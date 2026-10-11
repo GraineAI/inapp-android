@@ -105,7 +105,8 @@ data class GraineCallsConfig @JvmOverloads constructor(
  *   idle → connecting (outgoing) → active → ended → idle
  *
  * One call at a time: a push while a call is live is reported MISSED for its
- * own id and leaves the live call alone; a second outgoing call is refused.
+ * own id and leaves the live call alone — unless it is the live call's own id
+ * again, which is ignored; a second outgoing call is refused.
  */
 internal class CallMachine(
     private val schedule: (Long, () -> Unit) -> (() -> Unit),
@@ -121,10 +122,12 @@ internal class CallMachine(
 
     val live: Boolean get() = state != GraineCallState.IDLE
 
-    /** A push. Null when another call is live — it was reported missed. */
+    /** A push. Null when a call is live: another call's push was reported missed, the live call's own was ignored. */
     fun incoming(push: AgentCallPush.Call): GraineCall? {
         if (live) {
-            onOutcome(push.callId, GraineCallOutcome.MISSED)
+            // The same call pushed twice (a push can be delivered again): one ring is enough, and
+            // it is not missed — a missed outcome would tell the server the call in progress was.
+            if (push.callId != call?.callId) onOutcome(push.callId, GraineCallOutcome.MISSED)
             return null
         }
         val vars = LinkedHashMap<String, String>()

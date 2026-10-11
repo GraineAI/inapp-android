@@ -277,17 +277,18 @@ object GraineCallsHost {
 
         val calls: GraineCalls? get() = graine?.calls
 
-        override fun makeInstance(options: CallsHostOptions): Pair<String, String> {
+        override fun makeInstance(options: CallsHostOptions): CallsHostInstance {
             val app = application ?: error("GraineCallsHost was handed no context")
             // The app may have made the instance itself; then the calls run on that one.
             val g = GraineInApp.peek() ?: GraineInApp.init(app, GraineConfig(
                 baseUrl = options.baseUrl,
                 publishableKey = options.publishableKey,
                 appVersion = options.appVersion,
+                debug = options.debug,
             ))
             graine = g
             g.calls.addListener(this)
-            return g.config.publishableKey to g.config.baseUrl
+            return CallsHostInstance(g.config.publishableKey, g.config.baseUrl, g.config.debug)
         }
 
         override fun configureCalls(options: CallsHostOptions) {

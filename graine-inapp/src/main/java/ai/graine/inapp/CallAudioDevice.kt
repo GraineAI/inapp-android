@@ -3,6 +3,7 @@ package ai.graine.inapp
 import android.annotation.SuppressLint
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioFormat
@@ -23,7 +24,9 @@ import kotlin.concurrent.withLock
  * Microphone: AudioRecord on VOICE_COMMUNICATION (the source the platform
  * runs its echo canceller and noise suppression on), 16 kHz mono PCM16, read
  * 20 ms at a time on its own thread, plus AcousticEchoCanceler where the phone
- * has one. The echo guard in the session runs as well, not instead.
+ * has one. The echo guard in the session runs as well, not instead. A
+ * recorder that dies mid-call is rebuilt; one that cannot be, or that fails
+ * again soon after ([MicrophoneRecovery]), is reported, and the call ends.
  *
  * Speaker: one AudioTrack for the call (voice communication, speech, stream
  * mode) at 24 kHz — the agent's rate in production; any other rate is
@@ -36,14 +39,34 @@ import kotlin.concurrent.withLock
  */
 internal class AndroidCallAudio : CallAudioIO {
     // ── the microphone ─────────────────────────────────────────────────────
-    @Volatile private var capturing = false
-    private var record: AudioRecord? = null
-    private var echoCanceller: AcousticEchoCanceler? = null
-    private var captureThread: Thread? = null
+    /** A recording microphone: the recorder and the echo canceller on its audio session. */
+    private class Mic(val record: AudioRecord, val echoCanceller: AcousticEchoCanceler?) {
+        fun release() {
+            runCatching { record.stop() }
+            runCatching { echoCanceller?.release() }
+            runCatching { record.release() }
+        }
+    }
 
-    @SuppressLint("MissingPermission")   // the call never starts without RECORD_AUDIO; GraineCalls checks first
-    override fun startCapture(onFrame: (ShortArray) -> Unit) {
+    @Volatile private var capturing = false
+    /** Guards [mic]: the capture thread swaps it when it rebuilds, [stop] takes it. */
+    private val micLock = Any()
+    private var mic: Mic? = null
+    private var captureThread: Thread? = null
+    private val recovery = MicrophoneRecovery()
+
+    override fun startCapture(onFrame: (ShortArray) -> Unit, onFailed: () -> Unit) {
         check(!stopped) { "this call's audio was already stopped" }
+        val first = openMicrophone()
+        synchronized(micLock) { mic = first }
+        capturing = true
+        captureThread = Thread({ capture(first.record, onFrame, onFailed) }, "graine-call-mic").apply { start() }
+        startSpeaker()
+    }
+
+    /** A microphone that is recording, or an exception that says why there is none. */
+    @SuppressLint("MissingPermission")   // the call never starts without RECORD_AUDIO; GraineCalls checks first
+    private fun openMicrophone(): Mic {
         val rate = AgentAudio.CAPTURE_RATE
         val frame = AgentAudio.CAPTURE_FRAME_SAMPLES
         val min = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
@@ -54,31 +77,66 @@ internal class AndroidCallAudio : CallAudioIO {
             r.release()
             throw IllegalStateException("The microphone could not be opened (is RECORD_AUDIO granted?)")
         }
-        if (AcousticEchoCanceler.isAvailable()) {
-            echoCanceller = runCatching { AcousticEchoCanceler.create(r.audioSessionId)?.apply { enabled = true } }.getOrNull()
-        }
+        val echoCanceller = if (!AcousticEchoCanceler.isAvailable()) null
+            else runCatching { AcousticEchoCanceler.create(r.audioSessionId)?.apply { enabled = true } }.getOrNull()
         r.startRecording()
         if (r.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
-            echoCanceller?.release(); echoCanceller = null
+            echoCanceller?.release()
             r.release()
             throw IllegalStateException("The microphone is in use by another app")
         }
-        record = r
-        capturing = true
-        captureThread = Thread({
-            Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
-            val buf = ShortArray(frame)
-            while (capturing) {
-                var n = 0
-                while (n < frame && capturing) {
-                    val got = r.read(buf, n, frame - n)
-                    if (got < 0) { CallLog.error("microphone read failed ($got)"); capturing = false; break }
-                    n += got
-                }
-                if (n == frame) onFrame(buf.copyOf())
+        return Mic(r, echoCanceller)
+    }
+
+    /** The capture thread: a 20 ms frame at a time until the call stops it. */
+    private fun capture(first: AudioRecord, onFrame: (ShortArray) -> Unit, onFailed: () -> Unit) {
+        Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
+        val frame = AgentAudio.CAPTURE_FRAME_SAMPLES
+        val buf = ShortArray(frame)
+        var r = first
+        while (capturing) {
+            var n = 0
+            var error = 0
+            while (n < frame && capturing) {
+                val got = r.read(buf, n, frame - n)
+                if (got < 0) { error = got; break }
+                n += got
             }
-        }, "graine-call-mic").apply { start() }
-        startSpeaker()
+            if (n == frame) { onFrame(buf.copyOf()); continue }
+            if (!capturing) return
+            // The recorder died under the call — the audio server restarted, or the route changed
+            // under it. Left alone, the call goes on with the customer silent; rebuilt, it usually
+            // records again. One that cannot be rebuilt, or fails again soon after, is not coming back.
+            CallLog.error("microphone read failed ($error)")
+            r = (if (recovery.failed(clock())) rebuildMicrophone() else null) ?: run {
+                if (capturing) { capturing = false; onFailed() }
+                return
+            }
+        }
+    }
+
+    /** The dead recorder released and a new one recording — or null: it could not be, or the call ended meanwhile. */
+    private fun rebuildMicrophone(): AudioRecord? {
+        // A moment for whatever took it down (an audio server restarting, a route still moving) to settle.
+        val until = clock() + MIC_REBUILD_AFTER_MS
+        while (capturing && clock() < until) {
+            try { Thread.sleep(10) } catch (e: InterruptedException) { return null }
+        }
+        synchronized(micLock) {
+            // Under the lock: stop() either took the old one already, or will find the new one.
+            if (!capturing) return null
+            mic?.release()
+            mic = null
+            val fresh = try {
+                openMicrophone()
+            } catch (e: Exception) {
+                CallLog.error("the microphone could not be rebuilt", e)
+                return null
+            }
+            mic = fresh
+            CallLog.debug("microphone rebuilt")
+            return fresh.record
+        }
     }
 
     // ── the speaker ────────────────────────────────────────────────────────
@@ -211,15 +269,13 @@ internal class AndroidCallAudio : CallAudioIO {
     override fun stop() {
         stopped = true
         capturing = false
-        val r = record
-        record = null
-        if (r != null) {
-            runCatching { r.stop() }
-            runCatching { captureThread?.join(500) }
-            runCatching { echoCanceller?.release() }
-            echoCanceller = null
-            runCatching { r.release() }
-        }
+        // Under the lock, so a rebuild in progress finishes first and the recorder it made is the one released here.
+        val m = synchronized(micLock) { mic.also { mic = null } }
+        // Stopped before the join: a blocking read returns, and the capture thread sees the call is over.
+        m?.let { runCatching { it.record.stop() } }
+        runCatching { captureThread?.join(500) }
+        captureThread = null
+        m?.release()
         val w: Thread?
         lock.withLock {
             speaking = false
@@ -239,23 +295,112 @@ internal class AndroidCallAudio : CallAudioIO {
     companion object {
         /** The speaker's rate for the whole call: what the agent sends in production. */
         const val OUT_RATE = AgentAudio.PCM_RATE
+        /** How long a dead microphone is left before it is rebuilt. */
+        const val MIC_REBUILD_AFTER_MS = 200L
     }
 }
 
 /**
+ * WHEN A MICROPHONE THAT DIED IS REBUILT, AND WHEN THE CALL ENDS INSTEAD.
+ * Pure (the clock is handed in), so the rule is proven on the JVM.
+ *
+ * A recorder can die under a call and a new one usually records again, so
+ * every failure is answered with one rebuild. A failure within [windowMs] of
+ * the one before means the rebuilt microphone did not hold: it is not coming
+ * back, and the call ends rather than go on with the customer silent. Two
+ * failures far apart are two separate events, each worth its own rebuild.
+ */
+internal class MicrophoneRecovery(private val windowMs: Long = WINDOW_MS) {
+    private var lastFailureAt: Long? = null
+
+    /** The microphone failed at [now] (ms): true to rebuild it, false to give up on it. */
+    fun failed(now: Long): Boolean {
+        val last = lastFailureAt
+        lastFailureAt = now
+        return last == null || now - last >= windowMs
+    }
+
+    companion object {
+        /** "Soon after": a microphone that fails again within this of its last failure is gone. */
+        const val WINDOW_MS = 5_000L
+    }
+}
+
+/**
+ * WHERE A CALL IS HEARD — the choice a phone call makes, as a rule. Pure (the
+ * devices are handed in), so every case is proven on the JVM; [AudioRoute]
+ * applies it.
+ *
+ *   loudspeaker chosen  the built-in speaker
+ *   otherwise           a Bluetooth headset (LE audio, then hands-free, then a
+ *                       hearing aid), else a wired or USB headset (or wired
+ *                       headphones, or a USB audio device), else the earpiece
+ *
+ * So turning the loudspeaker off brings the call back to the headset the
+ * customer is wearing, not to the earpiece. The choice is made again whenever
+ * a device comes or goes: a headset switched on mid-call takes the call, and
+ * one switched off hands it to the next in line.
+ */
+internal object CallRouting {
+    /** Bluetooth headsets a call can use, in the order it prefers them. */
+    private val BLUETOOTH = intArrayOf(
+        AudioDeviceInfo.TYPE_BLE_HEADSET, AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_HEARING_AID,
+    )
+    /**
+     * Then what is plugged in. A USB audio device that does not call itself a
+     * headset (many USB-C earphone adapters) comes last: before Android 12 the
+     * platform routes a call to it over the earpiece by itself, and naming the
+     * earpiece over it from 12 on would split the two.
+     */
+    private val WIRED = intArrayOf(
+        AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+        AudioDeviceInfo.TYPE_USB_DEVICE,
+    )
+    /** Everything for the ear, best first: the earpiece last. */
+    private val FOR_THE_EAR = BLUETOOTH + WIRED + AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
+
+    /**
+     * The AudioDeviceInfo type the call should be heard on, out of
+     * [available] (Android 12+: the phone's communication devices; before
+     * that, its outputs), with the loudspeaker [speaker] chosen or not. Null
+     * when none of them is there: the phone's own default.
+     */
+    fun choose(available: Collection<Int>, speaker: Boolean): Int? =
+        if (speaker) AudioDeviceInfo.TYPE_BUILTIN_SPEAKER.takeIf { it in available }
+        else FOR_THE_EAR.firstOrNull { it in available }
+}
+
+/**
  * THE CALL'S PLACE IN THE PHONE'S AUDIO: communication mode for the call's
- * length, transient focus (other apps duck or pause), and the earpiece or the
- * loudspeaker. Released exactly once.
+ * length, transient focus (other apps duck or pause), and the device it is
+ * heard on — [CallRouting]'s choice, made again whenever a device comes or
+ * goes. Released exactly once, with the phone's routing given back.
+ *
+ * Android 12+ names the device (setCommunicationDevice). Before that there
+ * are two switches: the loudspeaker, and a Bluetooth headset's voice link
+ * (SCO), which the call opens when its choice is a hands-free headset; with
+ * both off, the platform itself prefers a wired headset or a hearing aid to
+ * the earpiece. Main thread only, the device callback included.
  */
 internal class AudioRoute(context: Context) {
     private val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private var focusRequest: AudioFocusRequest? = null
     private val focusListener = AudioManager.OnAudioFocusChangeListener { change -> CallLog.debug("audio focus $change") }
     private var held = false
+    /** The customer chose the loudspeaker. */
+    private var speaker = false
+    /** Below Android 12: this call opened the Bluetooth voice link, so it closes it. */
+    private var scoStarted = false
+    /** A device came or went — a headset switched on or off, plugged or pulled: the choice is made again. */
+    private val devices = object : AudioDeviceCallback() {
+        override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>?) = reroute()
+        override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>?) = reroute()
+    }
 
     fun acquire(speaker: Boolean) {
         if (held) return
         held = true
+        this.speaker = speaker
         am.mode = AudioManager.MODE_IN_COMMUNICATION
         if (Build.VERSION.SDK_INT >= 26) {
             val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
@@ -271,29 +416,80 @@ internal class AudioRoute(context: Context) {
             @Suppress("DEPRECATION")
             am.requestAudioFocus(focusListener, AudioManager.STREAM_VOICE_CALL, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
         }
-        setSpeaker(speaker)
+        reroute()
+        // For the call's length. A null handler is the main thread, where every other call into this class is made.
+        runCatching { am.registerAudioDeviceCallback(devices, null) }
     }
 
-    /** The loudspeaker, or back to the earpiece (or a headset, if one is connected). */
+    /** The loudspeaker on, or off: back to the device the call prefers — a headset if one is connected, else the earpiece. */
     fun setSpeaker(on: Boolean) {
         if (!held) return
-        if (Build.VERSION.SDK_INT >= 31) {
-            if (on) {
-                am.availableCommunicationDevices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
-                    ?.let { runCatching { am.setCommunicationDevice(it) } }
+        speaker = on
+        reroute()
+    }
+
+    /**
+     * [CallRouting]'s choice, applied — again on every device that comes or
+     * goes, so it changes nothing that is already right. Never throws: it
+     * runs from the platform's callback, where a throw would take the app down.
+     */
+    private fun reroute() {
+        if (!held) return
+        try {
+            if (Build.VERSION.SDK_INT >= 31) {
+                val available = am.availableCommunicationDevices
+                val type = CallRouting.choose(available.map { it.type }, speaker)
+                val device = type?.let { t -> available.firstOrNull { it.type == t } }
+                if (device == null) am.clearCommunicationDevice()
+                else if (am.communicationDevice?.id != device.id) am.setCommunicationDevice(device)
             } else {
-                runCatching { am.clearCommunicationDevice() }
+                setSwitches()
             }
-        } else {
-            @Suppress("DEPRECATION")
-            am.isSpeakerphoneOn = on
+        } catch (e: Exception) {
+            CallLog.error("the call's audio route could not be set", e)
         }
+    }
+
+    /** Below Android 12: the loudspeaker switch and the Bluetooth voice link, set to [CallRouting]'s choice. */
+    @Suppress("DEPRECATION")
+    private fun setSwitches() {
+        val type = CallRouting.choose(am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).map { it.type }, speaker)
+        val sco = type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO && am.isBluetoothScoAvailableOffCall
+        // One switch off before the other goes on: both claim the call's route, and the last one set wins.
+        if (!sco) stopSco()
+        am.isSpeakerphoneOn = type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+        if (sco) startSco()
+    }
+
+    /** Below Android 12: open the hands-free headset's voice link — once; the platform routes the call to it. */
+    @Suppress("DEPRECATION")
+    private fun startSco() {
+        if (scoStarted) return
+        scoStarted = true
+        runCatching { am.startBluetoothSco() }
+        runCatching { am.isBluetoothScoOn = true }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun stopSco() {
+        if (!scoStarted) return
+        scoStarted = false
+        runCatching { am.stopBluetoothSco() }
+        runCatching { am.isBluetoothScoOn = false }
     }
 
     fun release() {
         if (!held) return
-        setSpeaker(false)
         held = false
+        runCatching { am.unregisterAudioDeviceCallback(devices) }
+        // The phone's routing given back: no device named, no voice link open, no loudspeaker.
+        if (Build.VERSION.SDK_INT >= 31) {
+            runCatching { am.clearCommunicationDevice() }
+        } else {
+            stopSco()
+            @Suppress("DEPRECATION")
+            runCatching { am.isSpeakerphoneOn = false }
+        }
         if (Build.VERSION.SDK_INT >= 26) focusRequest?.let { am.abandonAudioFocusRequest(it) }
         else @Suppress("DEPRECATION") am.abandonAudioFocus(focusListener)
         focusRequest = null

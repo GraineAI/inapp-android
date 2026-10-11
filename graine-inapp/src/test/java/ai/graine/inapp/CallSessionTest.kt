@@ -55,14 +55,17 @@ class CallSessionTest {
 
     private class FakeAudio : CallAudioIO {
         var onFrame: ((ShortArray) -> Unit)? = null
+        /** What the device calls when its microphone stopped and could not be brought back. */
+        var onFailed: (() -> Unit)? = null
         val played = mutableListOf<Pair<ShortArray, Int>>()
         var buffered = 0.0
         var clears = 0
         var stopped = 0
         var failCapture = false
-        override fun startCapture(onFrame: (ShortArray) -> Unit) {
+        override fun startCapture(onFrame: (ShortArray) -> Unit, onFailed: () -> Unit) {
             if (failCapture) throw IllegalStateException("no microphone")
             this.onFrame = onFrame
+            this.onFailed = onFailed
         }
         override fun play(pcm: ShortArray, sampleRate: Int) { played += pcm to sampleRate }
         override fun clear() { clears++ }
@@ -565,5 +568,53 @@ class CallSessionTest {
         open()
         assertEquals(listOf("failed:The microphone could not start: no microphone"), events.log)
         assertTrue(socket.sent.last().contains("client_hangup"))
+    }
+
+    /**
+     * The microphone died mid-call and the device could not bring it back.
+     * Left up, the agent would talk on to someone it can no longer hear: the
+     * call hangs up as the customer would — the stop, then the close — and
+     * ends as failed, saying why.
+     */
+    @Test fun aMicrophoneThatStopsMidCallEndsItAsFailed() {
+        open()
+        audio.buffered = 1.0
+        agentAudio()
+        socket.sent.clear()
+        audio.onFailed!!()
+        assertEquals("reported from the capture thread, handled on the session's", listOf("open"), events.log)
+        sched.drain()
+        assertEquals(listOf("open", "ended:failed:The microphone stopped working."), events.log)
+        assertEquals(listOf("""{"type":"stop","event":"stop","data":"client_hangup"}"""), socket.sent)
+        assertEquals("audio released at once", 1, audio.stopped)
+        assertEquals("the agent is no longer heard", listOf(true, false), events.speaking)
+        assertNull("not yet: the stop must leave first", socket.closed)
+        sched.advance(200)
+        assertEquals(1000, socket.closed)
+        sched.advance(60_000)
+        assertFalse("no pings after the end", socket.types().contains("ping"))
+        // Nothing after it is reported again: a second failure, the line closing.
+        audio.onFailed!!(); sched.drain()
+        listener!!.onClosed(1000, ""); sched.drain()
+        assertEquals(listOf("open", "ended:failed:The microphone stopped working."), events.log)
+        assertEquals(1, socket.sent.count { it.contains("client_hangup") })
+    }
+
+    @Test fun aMicrophoneThatStopsAfterTheCustomerHungUpChangesNothing() {
+        val s = open()
+        s.hangUp(); sched.drain()
+        audio.onFailed!!(); sched.drain()
+        sched.advance(1_000)
+        assertEquals("the caller ended it; no event", listOf("open"), events.log)
+        assertEquals(1, socket.sent.count { it.contains("client_hangup") })
+        assertEquals(1, audio.stopped)
+    }
+
+    @Test fun aMicrophoneThatStopsAfterTheAgentHungUpChangesNothing() {
+        open()
+        listener!!.onClosed(1000, ""); sched.drain()
+        audio.onFailed!!(); sched.drain()
+        assertEquals(listOf("open", "ended:remote:"), events.log)
+        assertFalse("no stop down a line the agent closed", socket.sent.any { it.contains("client_hangup") })
     }
 }

@@ -12,8 +12,13 @@ import java.util.concurrent.TimeUnit
  * on a phone, a fake in the tests and the live end-to-end run.
  */
 internal interface CallAudioIO {
-    /** Start the microphone. [onFrame] gets every 20 ms frame — 320 samples of 16 kHz mono PCM16 — on the capture thread. */
-    fun startCapture(onFrame: (ShortArray) -> Unit)
+    /**
+     * Start the microphone. [onFrame] gets every 20 ms frame — 320 samples of
+     * 16 kHz mono PCM16 — on the capture thread. [onFailed] runs at most once,
+     * on any thread, when the microphone stops mid-call and cannot be brought
+     * back: from then on nothing the customer says is captured.
+     */
+    fun startCapture(onFrame: (ShortArray) -> Unit, onFailed: () -> Unit)
     /** Queue the agent's speech; the player rules decide when it plays. */
     fun play(pcm: ShortArray, sampleRate: Int)
     /** Drop everything queued and unplayed, now. */
@@ -108,7 +113,7 @@ internal interface CallSessionEvents {
     fun onOpen() {}
     /** It never opened. */
     fun onFailed(error: String) {}
-    /** It was open and is over: the agent hung up (REMOTE) or the connection broke (FAILED). */
+    /** It was open and is over: the agent hung up (REMOTE), or the connection broke or the microphone stopped (FAILED). */
     fun onEnded(reason: GraineCallOutcome.EndReason, error: String?) {}
     fun onCaption(role: Role, text: String, live: Boolean) {}
     fun onAgentSpeaking(speaking: Boolean) {}
@@ -291,18 +296,37 @@ internal class VoiceCallSession(
         format = null
         echo.reset()
         try {
-            audio.startCapture { pcm -> scheduler.post { onMicrophone(pcm) } }
+            audio.startCapture(
+                onFrame = { pcm -> scheduler.post { onMicrophone(pcm) } },
+                onFailed = { scheduler.post { microphoneStopped() } },
+            )
         } catch (e: Exception) {
             // Open, but deaf: nothing the customer says would arrive. End it honestly.
-            val s = socket
-            phase = Phase.CLOSED
-            teardown()
-            s?.send(CallFrames.STOP)
-            s?.let { scheduler.schedule(CallFrames.CLOSE_AFTER_STOP_MS) { it.close(1000, "") } }
+            hangUpFromHere()
             events.onFailed("The microphone could not start: ${e.message ?: e.javaClass.simpleName}")
             return
         }
         events.onOpen()
+    }
+
+    /**
+     * The microphone stopped mid-call and could not be brought back. The agent
+     * would go on talking to someone it can no longer hear, and the customer
+     * would think it was ignoring them: hang up, and say why.
+     */
+    private fun microphoneStopped() {
+        if (phase != Phase.OPEN) return
+        hangUpFromHere()
+        events.onEnded(GraineCallOutcome.EndReason.FAILED, "The microphone stopped working.")
+    }
+
+    /** This side cannot go on: everything released, then the stop frame and, ~200 ms later, the close. */
+    private fun hangUpFromHere() {
+        val s = socket
+        phase = Phase.CLOSED
+        teardown()
+        s?.send(CallFrames.STOP)
+        s?.let { scheduler.schedule(CallFrames.CLOSE_AFTER_STOP_MS) { it.close(1000, "") } }
     }
 
     private fun schedulePing() {

@@ -3,7 +3,8 @@
     <!-- Merged into the host app. INTERNET for the engine page and the call's
          socket; RECORD_AUDIO for the agent to hear the customer;
          MODIFY_AUDIO_SETTINGS so a call can route its audio (communication
-         mode, earpiece or loudspeaker). -->
+         mode; the earpiece, the loudspeaker or a headset, Bluetooth
+         included — routing a call needs no Bluetooth permission). -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />

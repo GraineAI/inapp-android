@@ -64,7 +64,7 @@ class LiveCallE2ETest {
             while (true) ledger.wroteAgent((player.take(ledger.agentUnplayed(head.toLong())) ?: break).size)
         }
 
-        override fun startCapture(onFrame: (ShortArray) -> Unit) {
+        override fun startCapture(onFrame: (ShortArray) -> Unit, onFailed: () -> Unit) {
             running = true
             Thread({
                 var pos = 0

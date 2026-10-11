@@ -10,7 +10,8 @@ import org.junit.Test
  * THE CALL'S STATES AND OUTCOMES (sdk/NATIVE-CALLS.md "The call"), on a
  * hand-turned clock: ringing times out to missed, decline, answer → connect →
  * active → ended by either side or by a broken line, a call that never
- * connects fails, and a push while a call is live is busy — reported missed.
+ * connects fails, and a push while a call is live is busy — reported missed,
+ * unless it is the live call's own id again, which is ignored.
  */
 class CallStateTest {
     private class Clock {
@@ -100,6 +101,21 @@ class CallStateTest {
         assertEquals(GraineCallState.IDLE, machine.state)
     }
 
+    /** A session whose microphone stopped ends as FAILED with why; whether the line had connected decides the outcome. */
+    @Test fun aMicrophoneThatStopsFailsACallStillConnectingAndEndsAnActiveOneAsFailed() {
+        val why = "The microphone stopped working."
+        machine.outgoing("out-1", null, emptyMap())
+        assertTrue(machine.end(GraineCallOutcome.EndReason.FAILED, why))
+        assertEquals("out-1" to GraineCallOutcome.failed(why), outcomes.last())
+        assertEquals("failed", outcomes.last().second.wire)
+        machine.incoming(push("c1")); machine.answer(); machine.connected()
+        assertTrue(machine.end(GraineCallOutcome.EndReason.FAILED, why))
+        assertEquals("c1" to GraineCallOutcome.ended(GraineCallOutcome.EndReason.FAILED, why), outcomes.last())
+        assertEquals("ended", outcomes.last().second.wire)
+        assertEquals("failed", outcomes.last().second.endReason?.wire)
+        assertEquals(GraineCallState.IDLE, machine.state)
+    }
+
     @Test fun hangingUpWhileConnectingIsALocalEnd() {
         machine.outgoing("out-1", null, emptyMap())
         machine.end(GraineCallOutcome.EndReason.LOCAL)
@@ -125,6 +141,43 @@ class CallStateTest {
         assertNull(machine.incoming(push("c4")))
         assertEquals("c4" to GraineCallOutcome.MISSED, outcomes.last())
         assertEquals(GraineCallState.RINGING, machine.state)
+    }
+
+    /** A push can be delivered twice. The second copy of the live call is not a second call, and not a missed one. */
+    @Test fun theLiveCallPushedAgainIsIgnoredNotMissed() {
+        // Ringing: no second ring, no outcome, and the first push's timeout stands.
+        machine.incoming(push("c1"))
+        clock.advance(20_000)
+        assertNull(machine.incoming(push("c1")))
+        assertEquals(emptyList<Pair<String, GraineCallOutcome>>(), outcomes)
+        assertEquals("no second ring", listOf(GraineCallState.RINGING), states)
+        assertEquals("the ring timer is not re-armed", 1, clock.pending)
+        clock.advance(10_000)
+        assertEquals("missed once, 30 s after the first push", listOf("c1" to GraineCallOutcome.MISSED), outcomes)
+
+        // Connecting, then active: the call in progress is never reported missed.
+        outcomes.clear(); states.clear()
+        machine.incoming(push("c2")); machine.answer()
+        assertNull(machine.incoming(push("c2")))
+        machine.connected()
+        assertNull(machine.incoming(push("c2")))
+        assertEquals(listOf("c2" to GraineCallOutcome.ANSWERED), outcomes)
+        assertEquals(listOf(GraineCallState.RINGING, GraineCallState.CONNECTING, GraineCallState.ACTIVE), states)
+        assertEquals("c2", machine.call?.callId)
+
+        // A different id while it is live is still busy: missed, for that id.
+        assertNull(machine.incoming(push("c3")))
+        assertEquals("c3" to GraineCallOutcome.MISSED, outcomes.last())
+        assertEquals(listOf(GraineCallState.RINGING, GraineCallState.CONNECTING, GraineCallState.ACTIVE), states)
+        assertEquals("c2", machine.call?.callId)
+
+        // The same holds for a call the customer placed.
+        machine.end(GraineCallOutcome.EndReason.LOCAL)
+        outcomes.clear()
+        machine.outgoing("out-1", null, emptyMap())
+        assertNull(machine.incoming(push("out-1")))
+        assertEquals(emptyList<Pair<String, GraineCallOutcome>>(), outcomes)
+        assertEquals(GraineCallState.CONNECTING, machine.state)
     }
 
     @Test fun nothingAnswersACallThatIsNotRinging() {

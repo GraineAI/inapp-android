@@ -1,3 +1,10 @@
+## 0.6.1
+
+- **Calls follow the headset**, as a phone call does: a Bluetooth headset first (LE audio, hands-free, hearing aids), then a wired or USB headset, then the earpiece. Turning the loudspeaker off brings the call back to the headset, and the choice is made again whenever a headset is switched on, off, plugged in or pulled out. No new permission.
+- **A repeated push for the call in progress is ignored**, as on iOS, instead of being reported `missed` while that call goes on.
+- **A microphone that stops mid-call is rebuilt once**; if it cannot be, the call ends — `ended` with `failed` and "The microphone stopped working." — instead of staying up with the customer silent.
+- `GraineCallsHost` takes a `debug` option, so React Native and Flutter apps can turn on the SDK's debug log for calls.
+
 ## 0.6.0
 
 - **Calls like WhatsApp**: `GraineInApp.get().calls`. Your agent rings the customer — hand your FCM data message (`type: "agent_call"`, `call_id`, `reason`, `caller_name`, `variables`) to `calls.handlePush(data)`, and the phone rings with a call notification (the ringtone, Answer and Decline, CallStyle on Android 12+) and a call screen over the lock screen. Or the customer calls the agent with `calls.startCall(activity, reason, variables)`.

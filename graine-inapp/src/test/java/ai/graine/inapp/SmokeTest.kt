@@ -4,5 +4,5 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class SmokeTest {
-    @Test fun theBuildRuns() = assertEquals("0.6.0", GraineVersion.NAME)
+    @Test fun theBuildRuns() = assertEquals("0.6.1", GraineVersion.NAME)
 }

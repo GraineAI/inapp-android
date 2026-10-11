@@ -75,7 +75,7 @@ class GraineCalls internal constructor(private val graine: GraineInApp) {
     @Volatile var muted = false
         private set
 
-    /** The loudspeaker is on (else the earpiece, or a headset). */
+    /** The customer chose the loudspeaker (else the call is on a headset, if one is connected, or the earpiece). */
     @Volatile var speaker = false
         private set
 
@@ -130,8 +130,9 @@ class GraineCalls internal constructor(private val graine: GraineInApp) {
 
     /**
      * Hand every FCM data message here first. True when it was a Graine call
-     * (`type: "agent_call"`) — ringing, refused as busy, or malformed — and the
-     * app should do nothing more with it; false when it is the app's own.
+     * (`type: "agent_call"`) — ringing, refused as busy, a repeat of the call
+     * in progress, or malformed — and the app should do nothing more with it;
+     * false when it is the app's own.
      * Safe on the messaging service's thread.
      */
     fun handlePush(data: Map<String, String>): Boolean {
@@ -151,7 +152,8 @@ class GraineCalls internal constructor(private val graine: GraineInApp) {
     private fun incoming(push: AgentCallPush.Call) {
         // Masked like every variable the app hands over: nothing leaves the device unmasked.
         val masked = push.copy(variables = push.variables.mapValues { Masking.mask(it.value) })
-        val c = machine.incoming(masked) ?: return   // busy: reported missed, the live call untouched
+        // Busy: reported missed (or ignored, when it is the live call pushed again), the live call untouched.
+        val c = machine.incoming(masked) ?: return
         report { it.onIncomingCall(c) }
     }
 
@@ -211,7 +213,7 @@ class GraineCalls internal constructor(private val graine: GraineInApp) {
         report { it.onCallControls(muted, speaker) }
     }
 
-    /** The loudspeaker on or off. */
+    /** The loudspeaker on or off. Off, the call goes back to a headset if one is connected (Bluetooth first), else the earpiece. */
     fun setSpeaker(on: Boolean) = onMain {
         if (speaker == on) return@onMain
         speaker = on

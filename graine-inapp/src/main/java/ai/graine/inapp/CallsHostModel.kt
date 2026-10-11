@@ -50,6 +50,7 @@ internal enum class CallsHostCallScreen(val wire: String) { SDK("sdk"), APP("app
  *   ringTimeoutMs    number; 30000 by default, and for anything not above 0
  *   appVersion       string or null
  *   callScreen       "sdk" (the default) or "app"
+ *   debug            bool; false by default: the SDK's debug log (GraineConfig.debug)
  *   android          { smallIcon: string or null }
  *   ios              { iconTemplate: string or null, includesCallsInRecents: bool }
  *
@@ -68,6 +69,8 @@ internal data class CallsHostOptions(
     val ringTimeoutMs: Long = DEFAULT_RING_TIMEOUT_MS,
     val appVersion: String? = null,
     val callScreen: CallsHostCallScreen = CallsHostCallScreen.SDK,
+    /** Read when the SDK instance is made, like the key and the base URL. */
+    val debug: Boolean = false,
     val androidSmallIcon: String? = null,
     val iosIconTemplate: String? = null,
     val iosIncludesCallsInRecents: Boolean = false,
@@ -81,6 +84,7 @@ internal data class CallsHostOptions(
             out["baseUrl"] = baseUrl
             out["ringTimeoutMs"] = ringTimeoutMs
             out["callScreen"] = callScreen.wire
+            out["debug"] = debug
             ringtoneSound?.let { out["ringtoneSound"] = it }
             appVersion?.let { out["appVersion"] = it }
             androidSmallIcon?.let { out["android"] = linkedMapOf<String, Any?>("smallIcon" to it) }
@@ -124,6 +128,7 @@ internal data class CallsHostOptions(
                 ringTimeoutMs = ringTimeoutMs,
                 appVersion = string(map, "appVersion")?.let(::nonBlank),
                 callScreen = callScreen,
+                debug = bool(map, "debug", "debug") ?: false,
                 androidSmallIcon = android?.let { string(it, "smallIcon", "android.smallIcon") }?.let(::nonBlank),
                 iosIconTemplate = ios?.let { string(it, "iconTemplate", "ios.iconTemplate") }?.let(::nonBlank),
                 iosIncludesCallsInRecents = ios?.let { bool(it, "includesCallsInRecents", "ios.includesCallsInRecents") } ?: false,
@@ -675,10 +680,13 @@ internal class CallsHostStore(private val read: () -> String?, private val write
 
 // ── the host's rules ────────────────────────────────────────────────────────
 
+/** What the SDK instance really runs with, fixed for the life of the process: the app may have made it first. */
+internal data class CallsHostInstance(val publishableKey: String, val baseUrl: String, val debug: Boolean)
+
 /** What the host acts on: the SDK instance, its calls and the app around them. GraineCallsHost is the Android one; the tests drive a fake. */
 internal interface CallsHostPlatform {
-    /** Make the SDK instance (one per process) and say which key and base URL it really runs with: the app may have made it first. */
-    fun makeInstance(options: CallsHostOptions): Pair<String, String>
+    /** Make the SDK instance (one per process) and say which key, base URL and debug setting it really runs with. */
+    fun makeInstance(options: CallsHostOptions): CallsHostInstance
     fun configureCalls(options: CallsHostOptions)
     /** The customer calls the agent from [activity] — null when there is none in the foreground. The call's id, or null. */
     fun startCall(activity: Any?, reason: String?, variables: Map<String, Any?>): String?
@@ -706,9 +714,10 @@ internal interface CallsHostPlatform {
  * WHAT EACH OF THE HOST'S METHODS DOES. Main thread only: GraineCallsHost hops
  * there first.
  *
- * The first `configure` makes the SDK instance from the key, base URL and app
- * version; later ones update the calls' configuration, and a different key or
- * base URL is kept for the next launch (the instance is one per process).
+ * The first `configure` makes the SDK instance from the key, base URL, app
+ * version and debug setting; later ones update the calls' configuration, and a
+ * different key, base URL or debug setting is kept for the next launch (the
+ * instance is one per process).
  * `restore()` applies the kept options, without keeping them again; a push
  * handed over before anything was configured restores them first. Identity,
  * variables, the screen and actions sent before there is an instance are held
@@ -723,7 +732,7 @@ internal class CallsHostCore(private val platform: CallsHostPlatform, private va
 
     var options: CallsHostOptions? = null
         private set
-    private var instance: Pair<String, String>? = null
+    private var instance: CallsHostInstance? = null
     var error: String? = null
         private set
     private var lastState = GraineCallState.IDLE
@@ -764,12 +773,15 @@ internal class CallsHostCore(private val platform: CallsHostPlatform, private va
     private fun apply(next: CallsHostOptions) {
         if (instance == null) {
             val made = platform.makeInstance(next)
-            instance = made.first to made.second.trimEnd('/')
+            instance = made.copy(baseUrl = made.baseUrl.trimEnd('/'))
             releaseHeld()
         }
         val running = instance
-        if (running != null && (running.first != next.publishableKey || running.second != next.baseUrl)) {
+        if (running != null && (running.publishableKey != next.publishableKey || running.baseUrl != next.baseUrl)) {
             platform.log("The calls run with the publishableKey and baseUrl this launch started with; the new ones are kept and take effect at the next launch.")
+        }
+        if (running != null && running.debug != next.debug) {
+            platform.log("The calls run with the debug setting this launch started with; the new one is kept and takes effect at the next launch.")
         }
         options = next
         platform.configureCalls(next)

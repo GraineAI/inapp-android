@@ -48,8 +48,8 @@ private fun refusal(raw: Any?): String? = try {
 /** Android, as the host sees it: every call recorded, the main loop's turns and timers run by hand. */
 private class FakeCallsHostPlatform : CallsHostPlatform {
     var fields = CallsHostSnapshot()
-    /** What makeInstance reports; the options' own key and base URL when null. */
-    var runningWith: Pair<String, String>? = null
+    /** What makeInstance reports; the options' own key, base URL and debug setting when null. */
+    var runningWith: CallsHostInstance? = null
     var nextCallId: String? = "call-1"
     var pushIsACall = true
 
@@ -87,9 +87,9 @@ private class FakeCallsHostPlatform : CallsHostPlatform {
         now.forEach { it.second() }
     }
 
-    override fun makeInstance(options: CallsHostOptions): Pair<String, String> {
+    override fun makeInstance(options: CallsHostOptions): CallsHostInstance {
         made += options
-        return runningWith ?: (options.publishableKey to options.baseUrl)
+        return runningWith ?: CallsHostInstance(options.publishableKey, options.baseUrl, options.debug)
     }
 
     override fun configureCalls(options: CallsHostOptions) {
@@ -164,6 +164,7 @@ class CallsHostOptionsTest {
         assertEquals(30_000L, o.ringTimeoutMs)
         assertNull(o.appVersion)
         assertEquals(CallsHostCallScreen.SDK, o.callScreen)
+        assertFalse(o.debug)
         assertNull(o.androidSmallIcon)
         assertNull(o.iosIconTemplate)
         assertFalse(o.iosIncludesCallsInRecents)
@@ -176,6 +177,7 @@ class CallsHostOptionsTest {
             "ringTimeoutMs" to 45_000,
             "appVersion" to "2.4.0",
             "callScreen" to "app",
+            "debug" to true,
             "android" to mapOf("smallIcon" to "ic_call"),
             "ios" to mapOf("iconTemplate" to "CallIcon", "includesCallsInRecents" to true),
         ))
@@ -184,6 +186,7 @@ class CallsHostOptionsTest {
         assertEquals(45_000L, o.ringTimeoutMs)
         assertEquals("2.4.0", o.appVersion)
         assertEquals(CallsHostCallScreen.APP, o.callScreen)
+        assertTrue(o.debug)
         assertEquals("ic_call", o.androidSmallIcon)
         assertEquals("CallIcon", o.iosIconTemplate)
         assertTrue(o.iosIncludesCallsInRecents)
@@ -219,6 +222,8 @@ class CallsHostOptionsTest {
             with("callScreen" to 1) to "callScreen must be a string",
             with("callScreen" to "web") to "callScreen must be \"sdk\" or \"app\"",
             with("callScreen" to "SDK") to "callScreen must be \"sdk\" or \"app\"",
+            with("debug" to "yes") to "debug must be a boolean",
+            with("debug" to 1) to "debug must be a boolean",
             with("android" to "ic_call") to "android must be an object",
             with("android" to mapOf("smallIcon" to 7)) to "android.smallIcon must be a string",
             with("ios" to listOf(true)) to "ios must be an object",
@@ -236,10 +241,12 @@ class CallsHostOptionsTest {
         assertEquals(1_501L, CallsHostOptions.parse(with("ringTimeoutMs" to 1_500.2)).ringTimeoutMs)
         assertEquals(1_501L, CallsHostOptions.parse(with("ringTimeoutMs" to 1_500.2f)).ringTimeoutMs)
         assertFalse(CallsHostOptions.parse(with("ios" to mapOf("includesCallsInRecents" to false))).iosIncludesCallsInRecents)
+        assertTrue(CallsHostOptions.parse(with("debug" to true)).debug)
         // And the kept options come back through org.json.
-        val fromJson = JSONObject().put("publishableKey", "pk_test_1").put("displayName", "Acme")
+        val fromJson = JSONObject().put("publishableKey", "pk_test_1").put("displayName", "Acme").put("debug", true)
             .put("ios", JSONObject().put("includesCallsInRecents", true))
         assertTrue(CallsHostOptions.parse(fromJson).iosIncludesCallsInRecents)
+        assertTrue(CallsHostOptions.parse(fromJson).debug)
     }
 
     @Test fun aKeyThatIsNotAStringIsDropped() {
@@ -272,6 +279,7 @@ class CallsHostOptionsTest {
             "android" to JSONObject.NULL,
             "callScreen" to null,
             "ringTimeoutMs" to null,
+            "debug" to JSONObject.NULL,
         ))
         assertEquals(CallsHostOptions.parse(minimal), o)
     }
@@ -299,6 +307,7 @@ class CallsHostOptionsTest {
             "ringTimeoutMs" to 45_000,
             "appVersion" to "2.4.0",
             "callScreen" to "app",
+            "debug" to true,
             "android" to mapOf("smallIcon" to "ic_call"),
             "ios" to mapOf("iconTemplate" to "CallIcon", "includesCallsInRecents" to true),
         ))
@@ -833,13 +842,42 @@ class CallsHostCoreTest {
 
     @Test fun anInstanceTheAppMadeWithAnotherKeyIsSaidToo() {
         val rig = HostRig()
-        rig.platform.runningWith = "pk_test_native" to "https://www.graine.ai/"
+        rig.platform.runningWith = CallsHostInstance("pk_test_native", "https://www.graine.ai/", false)
         rig.configure()
         assertEquals(1, rig.platform.logs.size)
         val same = HostRig()
-        same.platform.runningWith = "pk_test_rig" to "https://www.graine.ai/"
+        same.platform.runningWith = CallsHostInstance("pk_test_rig", "https://www.graine.ai/", false)
         same.configure()
         assertTrue("a trailing slash is the same base URL", same.platform.logs.isEmpty())
+    }
+
+    @Test fun debugIsReadWhenTheInstanceIsMadeAndAChangeWaitsForTheNextLaunch() {
+        val rig = HostRig()
+        rig.configure(mapOf("debug" to true))
+        assertEquals("the SDK instance is made with the debug log on", true, rig.platform.made.first().debug)
+        assertTrue(rig.platform.logs.isEmpty())
+        rig.configure(mapOf("debug" to true, "displayName" to "Acme Assistant"))
+        assertTrue("the same setting again is nothing to say", rig.platform.logs.isEmpty())
+        rig.configure(mapOf("debug" to false))
+        assertEquals("one instance per process", 1, rig.platform.made.size)
+        assertEquals(1, rig.platform.logs.size)
+        assertEquals("kept for the next launch", false, rig.store.load().first?.get("debug"))
+        // The next launch: its cold start makes the instance from what was kept.
+        val next = HostRig()
+        next.kept = rig.kept
+        assertTrue(next.core.restore())
+        assertEquals(false, next.platform.made.first().debug)
+    }
+
+    @Test fun anInstanceTheAppMadeWithAnotherDebugSettingIsSaidToo() {
+        val rig = HostRig()
+        rig.platform.runningWith = CallsHostInstance("pk_test_rig", "https://www.graine.ai", true)
+        rig.configure()
+        assertEquals(1, rig.platform.logs.size)
+        val same = HostRig()
+        same.platform.runningWith = CallsHostInstance("pk_test_rig", "https://www.graine.ai", true)
+        same.configure(mapOf("debug" to true))
+        assertTrue(same.platform.logs.isEmpty())
     }
 
     @Test fun restoreAppliesTheKeptOptionsWithoutKeepingThemAgain() {

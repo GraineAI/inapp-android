@@ -62,7 +62,8 @@ internal fun interface HttpPost {
     fun post(url: String, json: String): HttpReply
 }
 
-internal data class HttpReply(val code: Int, val body: String)
+/** [retryAfterSeconds]: the `Retry-After` header in seconds, when the server sent one. */
+internal data class HttpReply(val code: Int, val body: String, val retryAfterSeconds: Long? = null)
 
 /** The platform's HTTP, as the session fetch does it: no Origin header, short timeouts. */
 internal object PlatformHttp : HttpPost {
@@ -78,7 +79,7 @@ internal object PlatformHttp : HttpPost {
             conn.outputStream.use { it.write(json.toByteArray(Charsets.UTF_8)) }
             val code = conn.responseCode
             val body = (if (code in 200..299) conn.inputStream else conn.errorStream)?.bufferedReader()?.use { it.readText() }.orEmpty()
-            return HttpReply(code, body)
+            return HttpReply(code, body, conn.getHeaderField("Retry-After")?.trim()?.toLongOrNull())
         } finally {
             conn.disconnect()
         }
@@ -105,6 +106,10 @@ internal data class CallSessionConfig(
     val callVariables: Map<String, String>,
     /** GraineInApp.currentVariables() — the dashboard's, the build's, the app's, the signed-in customer. */
     val sdkVariables: Map<String, String>,
+    /** Who is using the app, for the ticket (contract §1.3); null sends none. */
+    val identity: IdentityEnvelope? = null,
+    /** The call's id on the ticket, so its record links back to the ring and the user (contract §3.6, §3.7). */
+    val callId: String? = null,
 )
 
 /** What a session reports, on its scheduler thread. */
@@ -236,6 +241,9 @@ internal class VoiceCallSession(
     private fun fetchTicket(): Ticket? = try {
         val body = JSONObject().put("publishableKey", config.publishableKey).put("mode", "voice")
         CallVariables.ticketVariables(config.callVariables, config.sdkVariables)?.let { body.put("metadata", JSONObject(it as Map<*, *>)) }
+        // Beside the metadata, never in it: the 12-key cap must never drop who the user is or which call this is.
+        config.identity?.into(body)
+        config.callId?.let { body.put("callId", it) }
         val reply = deps.http.post("${config.baseUrl.trimEnd('/')}/api/embed/ticket", body.toString())
         if (reply.code !in 200..299) {
             CallLog.debug("no ticket (HTTP ${reply.code}); using the direct socket")

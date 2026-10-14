@@ -103,7 +103,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#F7F7F5",
+            "pattern": "none",
+            "patternColor": "#E0E0DF",
+            "headerBackground": "#FFFFFF",
+            "headerText": "#101318",
+            "headerSubtext": "#5F6672",
+            "composerBackground": "#FFFFFF",
+            "composerText": "#101318",
+            "composerPlaceholder": "#5F6672",
+            "composerBorder": "#E5E4E0",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#0E0F11",
+            "backgroundTo": null,
+            "text": "#F5F5F4",
+            "textMuted": "#A0A5AE",
+            "avatar": "logo",
+            "avatarShape": "circle",
+            "avatarFill": "#318CE7",
+            "avatarText": "#FFFFFF",
+            "buttonFill": "#333435",
+            "buttonIcon": "#F5F5F4",
+            "buttonActiveFill": "#F5F5F4",
+            "buttonActiveIcon": "#0E0F11",
+            "endFill": "#DC2626",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#16A34A",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#DC2626",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#318CE7",
+            "callbackIcon": "#FFFFFF",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         },
         "dark": {
           "v": 1,
@@ -199,7 +261,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#0E0F11",
+            "pattern": "none",
+            "patternColor": "#2E2F31",
+            "headerBackground": "#17181B",
+            "headerText": "#F5F5F4",
+            "headerSubtext": "#A0A5AE",
+            "composerBackground": "#1F2024",
+            "composerText": "#F5F5F4",
+            "composerPlaceholder": "#A0A5AE",
+            "composerBorder": "#2C2E33",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#0E0F11",
+            "backgroundTo": null,
+            "text": "#F5F5F4",
+            "textMuted": "#A0A5AE",
+            "avatar": "logo",
+            "avatarShape": "circle",
+            "avatarFill": "#318CE7",
+            "avatarText": "#FFFFFF",
+            "buttonFill": "#333435",
+            "buttonIcon": "#F5F5F4",
+            "buttonActiveFill": "#F5F5F4",
+            "buttonActiveIcon": "#0E0F11",
+            "endFill": "#DC2626",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#16A34A",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#DC2626",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#318CE7",
+            "callbackIcon": "#FFFFFF",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         }
       },
       "picks": {
@@ -311,7 +435,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#FCFCFC",
+            "pattern": "none",
+            "patternColor": "#E6E6E6",
+            "headerBackground": "#FFFFFF",
+            "headerText": "#1F1F1F",
+            "headerSubtext": "#666666",
+            "composerBackground": "#F5F5F5",
+            "composerText": "#1F1F1F",
+            "composerPlaceholder": "#666666",
+            "composerBorder": "#E6E6E6",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#141414",
+            "backgroundTo": null,
+            "text": "#F5F5F5",
+            "textMuted": "#A3A3A3",
+            "avatar": "logo",
+            "avatarShape": "circle",
+            "avatarFill": "#81A0E9",
+            "avatarText": "#11115B",
+            "buttonFill": "#383838",
+            "buttonIcon": "#F5F5F5",
+            "buttonActiveFill": "#F5F5F5",
+            "buttonActiveIcon": "#141414",
+            "endFill": "#C43D2B",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#496D21",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#C43D2B",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#81A0E9",
+            "callbackIcon": "#11115B",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         },
         "dark": {
           "v": 1,
@@ -407,7 +593,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#141414",
+            "pattern": "none",
+            "patternColor": "#343434",
+            "headerBackground": "#1C1C1C",
+            "headerText": "#F5F5F5",
+            "headerSubtext": "#A3A3A3",
+            "composerBackground": "#262626",
+            "composerText": "#F5F5F5",
+            "composerPlaceholder": "#A3A3A3",
+            "composerBorder": "#333333",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#141414",
+            "backgroundTo": null,
+            "text": "#F5F5F5",
+            "textMuted": "#A3A3A3",
+            "avatar": "logo",
+            "avatarShape": "circle",
+            "avatarFill": "#81A0E9",
+            "avatarText": "#11115B",
+            "buttonFill": "#383838",
+            "buttonIcon": "#F5F5F5",
+            "buttonActiveFill": "#F5F5F5",
+            "buttonActiveIcon": "#141414",
+            "endFill": "#C43D2B",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#496D21",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#C43D2B",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#81A0E9",
+            "callbackIcon": "#11115B",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         }
       },
       "picks": {
@@ -544,7 +792,69 @@
           },
           "glass": null,
           "bubbles": "minimal",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#FFFFFF",
+            "pattern": "none",
+            "patternColor": "#E7E7E7",
+            "headerBackground": "#F9F9F9",
+            "headerText": "#0D0D0D",
+            "headerSubtext": "#5D5D5D",
+            "composerBackground": "#FFFFFF",
+            "composerText": "#0D0D0D",
+            "composerPlaceholder": "#5D5D5D",
+            "composerBorder": "#E7E7E7",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#E8E8E8",
+            "backgroundTo": "#FFFFFF",
+            "text": "#0D0D0D",
+            "textMuted": "#5D5D5D",
+            "avatar": "logo",
+            "avatarShape": "circle",
+            "avatarFill": "#181818",
+            "avatarText": "#FFFFFF",
+            "buttonFill": "#D8D8D8",
+            "buttonIcon": "#0D0D0D",
+            "buttonActiveFill": "#0D0D0D",
+            "buttonActiveIcon": "#E8E8E8",
+            "endFill": "#911E1B",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#00692A",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#911E1B",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#181818",
+            "callbackIcon": "#FFFFFF",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         },
         "dark": {
           "v": 1,
@@ -640,7 +950,69 @@
           },
           "glass": null,
           "bubbles": "minimal",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#212121",
+            "pattern": "none",
+            "patternColor": "#404040",
+            "headerBackground": "#181818",
+            "headerText": "#FFFFFF",
+            "headerSubtext": "#AFAFAF",
+            "composerBackground": "#303030",
+            "composerText": "#FFFFFF",
+            "composerPlaceholder": "#AFAFAF",
+            "composerBorder": "#3C3C3C",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#434343",
+            "backgroundTo": "#212121",
+            "text": "#FFFFFF",
+            "textMuted": "#AFAFAF",
+            "avatar": "logo",
+            "avatarShape": "circle",
+            "avatarFill": "#F3F3F3",
+            "avatarText": "#0D0D0D",
+            "buttonFill": "#454545",
+            "buttonIcon": "#FFFFFF",
+            "buttonActiveFill": "#FFFFFF",
+            "buttonActiveIcon": "#434343",
+            "endFill": "#911E1B",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#00692A",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#911E1B",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#F3F3F3",
+            "callbackIcon": "#0D0D0D",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         }
       },
       "picks": {
@@ -752,7 +1124,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#FEF7FF",
+            "pattern": "none",
+            "patternColor": "#E8E1E9",
+            "headerBackground": "#F7F2FA",
+            "headerText": "#1D1B20",
+            "headerSubtext": "#49454F",
+            "composerBackground": "#ECE6F0",
+            "composerText": "#1D1B20",
+            "composerPlaceholder": "#49454F",
+            "composerBorder": "#CAC4D0",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#EFE6F6",
+            "backgroundTo": "#FEF7FF",
+            "text": "#1D1B20",
+            "textMuted": "#49454F",
+            "avatar": "logo",
+            "avatarShape": "rounded-square",
+            "avatarFill": "#6750A4",
+            "avatarText": "#FFFFFF",
+            "buttonFill": "#DAD4DB",
+            "buttonIcon": "#1D1B20",
+            "buttonActiveFill": "#1D1B20",
+            "buttonActiveIcon": "#EFE6F6",
+            "endFill": "#B3261E",
+            "endIcon": "#FFFFFF",
+            "endShape": "pill",
+            "acceptFill": "#287630",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#B3261E",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#6750A4",
+            "callbackIcon": "#FFFFFF",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         },
         "dark": {
           "v": 1,
@@ -848,7 +1282,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#141218",
+            "pattern": "none",
+            "patternColor": "#312F35",
+            "headerBackground": "#1D1B20",
+            "headerText": "#E6E0E9",
+            "headerSubtext": "#CAC4D0",
+            "composerBackground": "#2B2930",
+            "composerText": "#E6E0E9",
+            "composerPlaceholder": "#CAC4D0",
+            "composerBorder": "#49454F",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#322D3D",
+            "backgroundTo": "#141218",
+            "text": "#E6E0E9",
+            "textMuted": "#CAC4D0",
+            "avatar": "logo",
+            "avatarShape": "rounded-square",
+            "avatarFill": "#D0BCFF",
+            "avatarText": "#381E72",
+            "buttonFill": "#363339",
+            "buttonIcon": "#E6E0E9",
+            "buttonActiveFill": "#E6E0E9",
+            "buttonActiveIcon": "#322D3D",
+            "endFill": "#B3261E",
+            "endIcon": "#FFFFFF",
+            "endShape": "pill",
+            "acceptFill": "#287630",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#B3261E",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#D0BCFF",
+            "callbackIcon": "#381E72",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         }
       },
       "picks": {
@@ -973,7 +1469,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#FFFFFF",
+            "pattern": "none",
+            "patternColor": "#E6E6E6",
+            "headerBackground": "#F2F2F7",
+            "headerText": "#000000",
+            "headerSubtext": "#6C6C70",
+            "composerBackground": "#FFFFFF",
+            "composerText": "#000000",
+            "composerPlaceholder": "#6C6C70",
+            "composerBorder": "#C6C6C8",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#000000",
+            "backgroundTo": null,
+            "text": "#FFFFFF",
+            "textMuted": "#8D8D93",
+            "avatar": "logo",
+            "avatarShape": "circle",
+            "avatarFill": "#1E6EF4",
+            "avatarText": "#FFFFFF",
+            "buttonFill": "#292929",
+            "buttonIcon": "#FFFFFF",
+            "buttonActiveFill": "#FFFFFF",
+            "buttonActiveIcon": "#000000",
+            "endFill": "#FF383C",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#008932",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#FF383C",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#1E6EF4",
+            "callbackIcon": "#FFFFFF",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         },
         "dark": {
           "v": 1,
@@ -1069,7 +1627,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#000000",
+            "pattern": "none",
+            "patternColor": "#242424",
+            "headerBackground": "#1C1C1E",
+            "headerText": "#FFFFFF",
+            "headerSubtext": "#8D8D93",
+            "composerBackground": "#2C2C2E",
+            "composerText": "#FFFFFF",
+            "composerPlaceholder": "#98989E",
+            "composerBorder": "#323235",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#000000",
+            "backgroundTo": null,
+            "text": "#FFFFFF",
+            "textMuted": "#8D8D93",
+            "avatar": "logo",
+            "avatarShape": "circle",
+            "avatarFill": "#1E6EF4",
+            "avatarText": "#FFFFFF",
+            "buttonFill": "#292929",
+            "buttonIcon": "#FFFFFF",
+            "buttonActiveFill": "#FFFFFF",
+            "buttonActiveIcon": "#000000",
+            "endFill": "#FF383C",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#008932",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#FF383C",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#1E6EF4",
+            "callbackIcon": "#FFFFFF",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         }
       },
       "picks": {
@@ -1181,7 +1801,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#FFFFFF",
+            "pattern": "none",
+            "patternColor": "#E7E7E7",
+            "headerBackground": "#FFFFFF",
+            "headerText": "#0A0A0A",
+            "headerSubtext": "#737373",
+            "composerBackground": "#FFFFFF",
+            "composerText": "#0A0A0A",
+            "composerPlaceholder": "#737373",
+            "composerBorder": "#E5E5E5",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#E8E8E8",
+            "backgroundTo": "#FFFFFF",
+            "text": "#0A0A0A",
+            "textMuted": "#686868",
+            "avatar": "logo",
+            "avatarShape": "rounded-square",
+            "avatarFill": "#171717",
+            "avatarText": "#FAFAFA",
+            "buttonFill": "#D8D8D8",
+            "buttonIcon": "#0A0A0A",
+            "buttonActiveFill": "#0A0A0A",
+            "buttonActiveIcon": "#E8E8E8",
+            "endFill": "#E40016",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#00813A",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#E40016",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#171717",
+            "callbackIcon": "#FAFAFA",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         },
         "dark": {
           "v": 1,
@@ -1277,7 +1959,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#0A0A0A",
+            "pattern": "none",
+            "patternColor": "#2C2C2C",
+            "headerBackground": "#171717",
+            "headerText": "#FAFAFA",
+            "headerSubtext": "#A1A1A1",
+            "composerBackground": "#171717",
+            "composerText": "#FAFAFA",
+            "composerPlaceholder": "#A1A1A1",
+            "composerBorder": "#232323",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#2D2D2D",
+            "backgroundTo": "#0A0A0A",
+            "text": "#FAFAFA",
+            "textMuted": "#A1A1A1",
+            "avatar": "logo",
+            "avatarShape": "rounded-square",
+            "avatarFill": "#E5E5E5",
+            "avatarText": "#171717",
+            "buttonFill": "#303030",
+            "buttonIcon": "#FAFAFA",
+            "buttonActiveFill": "#FAFAFA",
+            "buttonActiveIcon": "#2D2D2D",
+            "endFill": "#E40016",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#00813A",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#E40016",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#E5E5E5",
+            "callbackIcon": "#171717",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         }
       },
       "picks": {
@@ -1408,7 +2152,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#FAFAFA",
+            "pattern": "none",
+            "patternColor": "#E5E5E5",
+            "headerBackground": "#FFFFFF",
+            "headerText": "#242424",
+            "headerSubtext": "#616161",
+            "composerBackground": "#FFFFFF",
+            "composerText": "#242424",
+            "composerPlaceholder": "#616161",
+            "composerBorder": "#E0E0E0",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#1F1F1F",
+            "backgroundTo": null,
+            "text": "#FFFFFF",
+            "textMuted": "#ADADAD",
+            "avatar": "logo",
+            "avatarShape": "circle",
+            "avatarFill": "#115EA3",
+            "avatarText": "#FFFFFF",
+            "buttonFill": "#434343",
+            "buttonIcon": "#FFFFFF",
+            "buttonActiveFill": "#FFFFFF",
+            "buttonActiveIcon": "#1F1F1F",
+            "endFill": "#B10E1C",
+            "endIcon": "#FFFFFF",
+            "endShape": "pill",
+            "acceptFill": "#0E700E",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#B10E1C",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#115EA3",
+            "callbackIcon": "#FFFFFF",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         },
         "dark": {
           "v": 1,
@@ -1504,7 +2310,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#1F1F1F",
+            "pattern": "none",
+            "patternColor": "#3E3E3E",
+            "headerBackground": "#292929",
+            "headerText": "#FFFFFF",
+            "headerSubtext": "#ADADAD",
+            "composerBackground": "#292929",
+            "composerText": "#FFFFFF",
+            "composerPlaceholder": "#ADADAD",
+            "composerBorder": "#525252",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#1F1F1F",
+            "backgroundTo": null,
+            "text": "#FFFFFF",
+            "textMuted": "#ADADAD",
+            "avatar": "logo",
+            "avatarShape": "circle",
+            "avatarFill": "#115EA3",
+            "avatarText": "#FFFFFF",
+            "buttonFill": "#434343",
+            "buttonIcon": "#FFFFFF",
+            "buttonActiveFill": "#FFFFFF",
+            "buttonActiveIcon": "#1F1F1F",
+            "endFill": "#B10E1C",
+            "endIcon": "#FFFFFF",
+            "endShape": "pill",
+            "acceptFill": "#0E700E",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#B10E1C",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#115EA3",
+            "callbackIcon": "#FFFFFF",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         }
       },
       "picks": {
@@ -1616,7 +2484,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#FFFFFF",
+            "pattern": "none",
+            "patternColor": "#E8E8E8",
+            "headerBackground": "#F4F4F4",
+            "headerText": "#161616",
+            "headerSubtext": "#525252",
+            "composerBackground": "#FFFFFF",
+            "composerText": "#161616",
+            "composerPlaceholder": "#525252",
+            "composerBorder": "#C6C6C6",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#161616",
+            "backgroundTo": null,
+            "text": "#F4F4F4",
+            "textMuted": "#C6C6C6",
+            "avatar": "logo",
+            "avatarShape": "rounded-square",
+            "avatarFill": "#0F62FE",
+            "avatarText": "#FFFFFF",
+            "buttonFill": "#3A3A3A",
+            "buttonIcon": "#F4F4F4",
+            "buttonActiveFill": "#F4F4F4",
+            "buttonActiveIcon": "#161616",
+            "endFill": "#DA1E28",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#24A148",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#DA1E28",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#0F62FE",
+            "callbackIcon": "#FFFFFF",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         },
         "dark": {
           "v": 1,
@@ -1712,7 +2642,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#161616",
+            "pattern": "none",
+            "patternColor": "#353535",
+            "headerBackground": "#262626",
+            "headerText": "#F4F4F4",
+            "headerSubtext": "#C6C6C6",
+            "composerBackground": "#393939",
+            "composerText": "#F4F4F4",
+            "composerPlaceholder": "#C6C6C6",
+            "composerBorder": "#525252",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#161616",
+            "backgroundTo": null,
+            "text": "#F4F4F4",
+            "textMuted": "#C6C6C6",
+            "avatar": "logo",
+            "avatarShape": "rounded-square",
+            "avatarFill": "#0F62FE",
+            "avatarText": "#FFFFFF",
+            "buttonFill": "#3A3A3A",
+            "buttonIcon": "#F4F4F4",
+            "buttonActiveFill": "#F4F4F4",
+            "buttonActiveIcon": "#161616",
+            "endFill": "#DA1E28",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#24A148",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#DA1E28",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#0F62FE",
+            "callbackIcon": "#FFFFFF",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         }
       },
       "picks": {
@@ -1837,7 +2829,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#F6F9FC",
+            "pattern": "none",
+            "patternColor": "#DEE4E9",
+            "headerBackground": "#FFFFFF",
+            "headerText": "#0A2540",
+            "headerSubtext": "#425466",
+            "composerBackground": "#FFFFFF",
+            "composerText": "#0A2540",
+            "composerPlaceholder": "#425466",
+            "composerBorder": "#E3E8EE",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#DFECEF",
+            "backgroundTo": "#F6F9FC",
+            "text": "#0A2540",
+            "textMuted": "#425466",
+            "avatar": "logo",
+            "avatarShape": "circle",
+            "avatarFill": "#0B7A75",
+            "avatarText": "#FFFFFF",
+            "buttonFill": "#D0D7DE",
+            "buttonIcon": "#0A2540",
+            "buttonActiveFill": "#0A2540",
+            "buttonActiveIcon": "#DFECEF",
+            "endFill": "#DF1B41",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#16794A",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#DF1B41",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#0B7A75",
+            "callbackIcon": "#FFFFFF",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         },
         "dark": {
           "v": 1,
@@ -1933,7 +2987,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#081624",
+            "pattern": "none",
+            "patternColor": "#293542",
+            "headerBackground": "#0E2032",
+            "headerText": "#F3F6FA",
+            "headerSubtext": "#A3B3C4",
+            "composerBackground": "#15293D",
+            "composerText": "#F3F6FA",
+            "composerPlaceholder": "#A3B3C4",
+            "composerBorder": "#22384F",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#10323C",
+            "backgroundTo": "#081624",
+            "text": "#F3F6FA",
+            "textMuted": "#A3B3C4",
+            "avatar": "logo",
+            "avatarShape": "circle",
+            "avatarFill": "#3CC2B8",
+            "avatarText": "#04211F",
+            "buttonFill": "#2E3A46",
+            "buttonIcon": "#F3F6FA",
+            "buttonActiveFill": "#F3F6FA",
+            "buttonActiveIcon": "#10323C",
+            "endFill": "#DF1B41",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#16794A",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#DF1B41",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#3CC2B8",
+            "callbackIcon": "#04211F",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         }
       },
       "picks": {
@@ -2067,7 +3183,69 @@
             "surfaceOpacity": 0.72
           },
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#F2F2F7",
+            "pattern": "none",
+            "patternColor": "#DADADE",
+            "headerBackground": "#FFFFFF",
+            "headerText": "#000000",
+            "headerSubtext": "#3C3C43",
+            "composerBackground": "#FFFFFF",
+            "composerText": "#000000",
+            "composerPlaceholder": "#3C3C43",
+            "composerBorder": "#C6C6C8",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#6155F5",
+            "backgroundTo": "#352F87",
+            "text": "#FFFFFF",
+            "textMuted": "#F7F7FF",
+            "avatar": "logo",
+            "avatarShape": "circle",
+            "avatarFill": "#FFFFFF",
+            "avatarText": "#6155F5",
+            "buttonFill": "#55509A",
+            "buttonIcon": "#FFFFFF",
+            "buttonActiveFill": "#FFFFFF",
+            "buttonActiveIcon": "#6155F5",
+            "endFill": "#FF383C",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#008932",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#FF383C",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#FFFFFF",
+            "callbackIcon": "#6155F5",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         },
         "dark": {
           "v": 1,
@@ -2166,7 +3344,69 @@
             "surfaceOpacity": 0.72
           },
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#000000",
+            "pattern": "none",
+            "patternColor": "#242424",
+            "headerBackground": "#1C1C1E",
+            "headerText": "#FFFFFF",
+            "headerSubtext": "#EBEBF5",
+            "composerBackground": "#2C2C2E",
+            "composerText": "#FFFFFF",
+            "composerPlaceholder": "#EBEBF5",
+            "composerBorder": "#38383A",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#6155F5",
+            "backgroundTo": "#352F87",
+            "text": "#FFFFFF",
+            "textMuted": "#F7F7FF",
+            "avatar": "logo",
+            "avatarShape": "circle",
+            "avatarFill": "#FFFFFF",
+            "avatarText": "#6155F5",
+            "buttonFill": "#55509A",
+            "buttonIcon": "#FFFFFF",
+            "buttonActiveFill": "#FFFFFF",
+            "buttonActiveIcon": "#6155F5",
+            "endFill": "#FF383C",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#008932",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#FF383C",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#FFFFFF",
+            "callbackIcon": "#6155F5",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         }
       },
       "picks": {
@@ -2278,7 +3518,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#FAF7F5",
+            "pattern": "none",
+            "patternColor": "#E5E0E2",
+            "headerBackground": "#EFEAE6",
+            "headerText": "#291334",
+            "headerSubtext": "#64536A",
+            "composerBackground": "#FAF7F5",
+            "composerText": "#291334",
+            "composerPlaceholder": "#64536A",
+            "composerBorder": "#E7E2DF",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#44EBD3",
+            "backgroundTo": "#98F4E7",
+            "text": "#005D58",
+            "textMuted": "#03645E",
+            "avatar": "logo",
+            "avatarShape": "circle",
+            "avatarFill": "#005D58",
+            "avatarText": "#44EBD3",
+            "buttonFill": "#80DCD0",
+            "buttonIcon": "#005D58",
+            "buttonActiveFill": "#005D58",
+            "buttonActiveIcon": "#44EBD3",
+            "endFill": "#FE1C55",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#009768",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#FE1C55",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#005D58",
+            "callbackIcon": "#44EBD3",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         },
         "dark": {
           "v": 1,
@@ -2374,7 +3676,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#262629",
+            "pattern": "none",
+            "patternColor": "#414144",
+            "headerBackground": "#303033",
+            "headerText": "#E4E4E7",
+            "headerSubtext": "#ABABAE",
+            "composerBackground": "#3A3A3E",
+            "composerText": "#E4E4E7",
+            "composerPlaceholder": "#ABABAE",
+            "composerBorder": "#47474B",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#44EBD3",
+            "backgroundTo": "#98F4E7",
+            "text": "#005D58",
+            "textMuted": "#03645E",
+            "avatar": "logo",
+            "avatarShape": "circle",
+            "avatarFill": "#005D58",
+            "avatarText": "#44EBD3",
+            "buttonFill": "#80DCD0",
+            "buttonIcon": "#005D58",
+            "buttonActiveFill": "#005D58",
+            "buttonActiveIcon": "#44EBD3",
+            "endFill": "#FE1C55",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#009768",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#FE1C55",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#005D58",
+            "callbackIcon": "#44EBD3",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         }
       },
       "picks": {
@@ -2505,7 +3869,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "window"
+          "chrome": "window",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#FBFBFB",
+            "pattern": "none",
+            "patternColor": "#E3E3E3",
+            "headerBackground": "#FFFFFF",
+            "headerText": "#0A0A0A",
+            "headerSubtext": "#626262",
+            "composerBackground": "#F5F5F5",
+            "composerText": "#0A0A0A",
+            "composerPlaceholder": "#626262",
+            "composerBorder": "#E7E7E7",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#0F7FFF",
+            "backgroundTo": null,
+            "text": "#FFFFFF",
+            "textMuted": "#FFFFFF",
+            "avatar": "logo",
+            "avatarShape": "circle",
+            "avatarFill": "#FFFFFF",
+            "avatarText": "#0F7FFF",
+            "buttonFill": "#0D6CD9",
+            "buttonIcon": "#FFFFFF",
+            "buttonActiveFill": "#FFFFFF",
+            "buttonActiveIcon": "#0E72E6",
+            "endFill": "#ED1B26",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#1F9D55",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#ED1B26",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#FFFFFF",
+            "callbackIcon": "#0F7FFF",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         },
         "dark": {
           "v": 1,
@@ -2601,7 +4027,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "window"
+          "chrome": "window",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#0B0B0C",
+            "pattern": "none",
+            "patternColor": "#2C2C2D",
+            "headerBackground": "#161618",
+            "headerText": "#F5F5F5",
+            "headerSubtext": "#A1A1A6",
+            "composerBackground": "#1F1F22",
+            "composerText": "#F5F5F5",
+            "composerPlaceholder": "#A1A1A6",
+            "composerBorder": "#2C2C30",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#3D8BFF",
+            "backgroundTo": null,
+            "text": "#FFFFFF",
+            "textMuted": "#FFFFFF",
+            "avatar": "logo",
+            "avatarShape": "circle",
+            "avatarFill": "#FFFFFF",
+            "avatarText": "#3D8BFF",
+            "buttonFill": "#2B61B3",
+            "buttonIcon": "#FFFFFF",
+            "buttonActiveFill": "#FFFFFF",
+            "buttonActiveIcon": "#316FCC",
+            "endFill": "#ED1B26",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#1F9D55",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#ED1B26",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#FFFFFF",
+            "callbackIcon": "#3D8BFF",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         }
       },
       "picks": {
@@ -2714,7 +4202,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#FFFFFF",
+            "pattern": "none",
+            "patternColor": "#E7E7E7",
+            "headerBackground": "#FFFFFF",
+            "headerText": "#111111",
+            "headerSubtext": "#545454",
+            "composerBackground": "#F3F3F3",
+            "composerText": "#111111",
+            "composerPlaceholder": "#545454",
+            "composerBorder": "#1A1A1A",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#E7E7E7",
+            "backgroundTo": "#FFFFFF",
+            "text": "#111111",
+            "textMuted": "#545454",
+            "avatar": "logo",
+            "avatarShape": "rounded-square",
+            "avatarFill": "#111111",
+            "avatarText": "#FFFFFF",
+            "buttonFill": "#D9D9D9",
+            "buttonIcon": "#111111",
+            "buttonActiveFill": "#111111",
+            "buttonActiveIcon": "#E7E7E7",
+            "endFill": "#DA291C",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#1C7C3A",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#DA291C",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#111111",
+            "callbackIcon": "#FFFFFF",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         },
         "dark": {
           "v": 1,
@@ -2798,7 +4348,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#0A0A0A",
+            "pattern": "none",
+            "patternColor": "#2B2B2B",
+            "headerBackground": "#111111",
+            "headerText": "#F5F5F5",
+            "headerSubtext": "#A8A8A8",
+            "composerBackground": "#1C1C1C",
+            "composerText": "#F5F5F5",
+            "composerPlaceholder": "#A8A8A8",
+            "composerBorder": "#D4D4D4",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#303030",
+            "backgroundTo": "#0A0A0A",
+            "text": "#F5F5F5",
+            "textMuted": "#A8A8A8",
+            "avatar": "logo",
+            "avatarShape": "rounded-square",
+            "avatarFill": "#F5F5F5",
+            "avatarText": "#0A0A0A",
+            "buttonFill": "#303030",
+            "buttonIcon": "#F5F5F5",
+            "buttonActiveFill": "#F5F5F5",
+            "buttonActiveIcon": "#303030",
+            "endFill": "#DA291C",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#1C7C3A",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#DA291C",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#F5F5F5",
+            "callbackIcon": "#0A0A0A",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         }
       },
       "picks": {
@@ -2929,7 +4541,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#F7F8F8",
+            "pattern": "none",
+            "patternColor": "#E0E1E1",
+            "headerBackground": "#FFFFFF",
+            "headerText": "#0F1011",
+            "headerSubtext": "#5C616A",
+            "composerBackground": "#FFFFFF",
+            "composerText": "#0F1011",
+            "composerPlaceholder": "#5C616A",
+            "composerBorder": "#E2E4E7",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#08090A",
+            "backgroundTo": null,
+            "text": "#F7F8F8",
+            "textMuted": "#8E939C",
+            "avatar": "logo",
+            "avatarShape": "rounded-square",
+            "avatarFill": "#5E6AD2",
+            "avatarText": "#FFFFFF",
+            "buttonFill": "#2E2F30",
+            "buttonIcon": "#F7F8F8",
+            "buttonActiveFill": "#F7F8F8",
+            "buttonActiveIcon": "#08090A",
+            "endFill": "#CF3B41",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#2E8A57",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#CF3B41",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#5E6AD2",
+            "callbackIcon": "#FFFFFF",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         },
         "dark": {
           "v": 1,
@@ -3025,7 +4699,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#08090A",
+            "pattern": "none",
+            "patternColor": "#292A2B",
+            "headerBackground": "#111214",
+            "headerText": "#F7F8F8",
+            "headerSubtext": "#8E939C",
+            "composerBackground": "#191A1D",
+            "composerText": "#F7F8F8",
+            "composerPlaceholder": "#8E939C",
+            "composerBorder": "#26282C",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#08090A",
+            "backgroundTo": null,
+            "text": "#F7F8F8",
+            "textMuted": "#8E939C",
+            "avatar": "logo",
+            "avatarShape": "rounded-square",
+            "avatarFill": "#5E6AD2",
+            "avatarText": "#FFFFFF",
+            "buttonFill": "#2E2F30",
+            "buttonIcon": "#F7F8F8",
+            "buttonActiveFill": "#F7F8F8",
+            "buttonActiveIcon": "#08090A",
+            "endFill": "#CF3B41",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#2E8A57",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#CF3B41",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#5E6AD2",
+            "callbackIcon": "#FFFFFF",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         }
       },
       "picks": {
@@ -3150,7 +4886,69 @@
           },
           "glass": null,
           "bubbles": "minimal",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#F5F1EA",
+            "pattern": "none",
+            "patternColor": "#E1DDD6",
+            "headerBackground": "#FBF8F3",
+            "headerText": "#2B2824",
+            "headerSubtext": "#625C54",
+            "composerBackground": "#FFFFFF",
+            "composerText": "#2B2824",
+            "composerPlaceholder": "#625C54",
+            "composerBorder": "#E2DBD0",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#E5E3DA",
+            "backgroundTo": "#F5F1EA",
+            "text": "#2B2824",
+            "textMuted": "#625C54",
+            "avatar": "logo",
+            "avatarShape": "circle",
+            "avatarFill": "#56654D",
+            "avatarText": "#FBF8F3",
+            "buttonFill": "#D5D1CA",
+            "buttonIcon": "#2B2824",
+            "buttonActiveFill": "#2B2824",
+            "buttonActiveIcon": "#E5E3DA",
+            "endFill": "#A5422D",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#4A7646",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#A5422D",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#56654D",
+            "callbackIcon": "#FBF8F3",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         },
         "dark": {
           "v": 1,
@@ -3240,7 +5038,69 @@
           },
           "glass": null,
           "bubbles": "minimal",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#1A1917",
+            "pattern": "none",
+            "patternColor": "#383633",
+            "headerBackground": "#22201D",
+            "headerText": "#EEE8DF",
+            "headerSubtext": "#ADA59A",
+            "composerBackground": "#2B2925",
+            "composerText": "#EEE8DF",
+            "composerPlaceholder": "#ADA59A",
+            "composerBorder": "#3A3631",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#30322B",
+            "backgroundTo": "#1A1917",
+            "text": "#EEE8DF",
+            "textMuted": "#ADA59A",
+            "avatar": "logo",
+            "avatarShape": "circle",
+            "avatarFill": "#A6B596",
+            "avatarText": "#1A1917",
+            "buttonFill": "#3C3A37",
+            "buttonIcon": "#EEE8DF",
+            "buttonActiveFill": "#EEE8DF",
+            "buttonActiveIcon": "#30322B",
+            "endFill": "#A5422D",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#4A7646",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#A5422D",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#A6B596",
+            "callbackIcon": "#1A1917",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         }
       },
       "picks": {
@@ -3380,7 +5240,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#DCEBFE",
+            "pattern": "none",
+            "patternColor": "#C6D4E5",
+            "headerBackground": "#FFFFFF",
+            "headerText": "#000000",
+            "headerSubtext": "#383838",
+            "composerBackground": "#FFFFFF",
+            "composerText": "#000000",
+            "composerPlaceholder": "#383838",
+            "composerBorder": "#000000",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#5294FF",
+            "backgroundTo": null,
+            "text": "#000000",
+            "textMuted": "#152540",
+            "avatar": "logo",
+            "avatarShape": "rounded-square",
+            "avatarFill": "#000000",
+            "avatarText": "#5294FF",
+            "buttonFill": "#457CD6",
+            "buttonIcon": "#000000",
+            "buttonActiveFill": "#000000",
+            "buttonActiveIcon": "#5294FF",
+            "endFill": "#F24045",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#009951",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#F24045",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#000000",
+            "callbackIcon": "#5294FF",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         },
         "dark": {
           "v": 1,
@@ -3479,7 +5401,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#20294B",
+            "pattern": "none",
+            "patternColor": "#3C4361",
+            "headerBackground": "#1F1F1F",
+            "headerText": "#E6E6E6",
+            "headerSubtext": "#BABCC4",
+            "composerBackground": "#1F1F1F",
+            "composerText": "#E6E6E6",
+            "composerPlaceholder": "#BABCC4",
+            "composerBorder": "#000000",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#5294FF",
+            "backgroundTo": null,
+            "text": "#000000",
+            "textMuted": "#152540",
+            "avatar": "logo",
+            "avatarShape": "rounded-square",
+            "avatarFill": "#000000",
+            "avatarText": "#5294FF",
+            "buttonFill": "#457CD6",
+            "buttonIcon": "#000000",
+            "buttonActiveFill": "#000000",
+            "buttonActiveIcon": "#5294FF",
+            "endFill": "#F24045",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#009951",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#F24045",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#000000",
+            "callbackIcon": "#5294FF",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         }
       },
       "picks": {
@@ -3604,7 +5588,69 @@
           },
           "glass": null,
           "bubbles": "minimal",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#FDFDFC",
+            "pattern": "none",
+            "patternColor": "#E7E7E6",
+            "headerBackground": "#F9F9F8",
+            "headerText": "#21201C",
+            "headerSubtext": "#63635E",
+            "composerBackground": "#FFFFFF",
+            "composerText": "#21201C",
+            "composerPlaceholder": "#63635E",
+            "composerBorder": "#DAD9D6",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#F8E7EB",
+            "backgroundTo": "#FDFDFC",
+            "text": "#21201C",
+            "textMuted": "#63635E",
+            "avatar": "logo",
+            "avatarShape": "circle",
+            "avatarFill": "#CA244D",
+            "avatarText": "#FFFFFF",
+            "buttonFill": "#DADAD8",
+            "buttonIcon": "#21201C",
+            "buttonActiveFill": "#21201C",
+            "buttonActiveIcon": "#F8E7EB",
+            "endFill": "#CE2C31",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#2A7E3B",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#CE2C31",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#CA244D",
+            "callbackIcon": "#FFFFFF",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         },
         "dark": {
           "v": 1,
@@ -3700,7 +5746,69 @@
           },
           "glass": null,
           "bubbles": "minimal",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#111110",
+            "pattern": "none",
+            "patternColor": "#30302F",
+            "headerBackground": "#191918",
+            "headerText": "#EEEEEC",
+            "headerSubtext": "#B5B3AD",
+            "composerBackground": "#222221",
+            "composerText": "#EEEEEC",
+            "composerPlaceholder": "#B5B3AD",
+            "composerBorder": "#3B3A37",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#2F141A",
+            "backgroundTo": "#111110",
+            "text": "#EEEEEC",
+            "textMuted": "#B5B3AD",
+            "avatar": "logo",
+            "avatarShape": "circle",
+            "avatarFill": "#CA244D",
+            "avatarText": "#FFFFFF",
+            "buttonFill": "#343433",
+            "buttonIcon": "#EEEEEC",
+            "buttonActiveFill": "#EEEEEC",
+            "buttonActiveIcon": "#2F141A",
+            "endFill": "#CE2C31",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#2A7E3B",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#CE2C31",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#CA244D",
+            "callbackIcon": "#FFFFFF",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         }
       },
       "picks": {
@@ -3831,7 +5939,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#FAF7EE",
+            "pattern": "none",
+            "patternColor": "#E2DFD7",
+            "headerBackground": "#F3EEE0",
+            "headerText": "#09090B",
+            "headerSubtext": "#565554",
+            "composerBackground": "#FFFFFF",
+            "composerText": "#09090B",
+            "composerPlaceholder": "#565554",
+            "composerBorder": "#E2CEB1",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#09090B",
+            "backgroundTo": null,
+            "text": "#FFE7A4",
+            "textMuted": "#A2936A",
+            "avatar": "logo",
+            "avatarShape": "circle",
+            "avatarFill": "#DCA54D",
+            "avatarText": "#09090B",
+            "buttonFill": "#302D23",
+            "buttonIcon": "#FFE7A4",
+            "buttonActiveFill": "#FFE7A4",
+            "buttonActiveIcon": "#09090B",
+            "endFill": "#E6585A",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#5A9700",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#E6585A",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#DCA54D",
+            "callbackIcon": "#09090B",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         },
         "dark": {
           "v": 1,
@@ -3927,7 +6097,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#09090B",
+            "pattern": "none",
+            "patternColor": "#2B2820",
+            "headerBackground": "#171618",
+            "headerText": "#FFE7A4",
+            "headerSubtext": "#A2936A",
+            "composerBackground": "#1E1D1F",
+            "composerText": "#FFE7A4",
+            "composerPlaceholder": "#A2936A",
+            "composerBorder": "#331800",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#09090B",
+            "backgroundTo": null,
+            "text": "#FFE7A4",
+            "textMuted": "#A2936A",
+            "avatar": "logo",
+            "avatarShape": "circle",
+            "avatarFill": "#DCA54D",
+            "avatarText": "#09090B",
+            "buttonFill": "#302D23",
+            "buttonIcon": "#FFE7A4",
+            "buttonActiveFill": "#FFE7A4",
+            "buttonActiveIcon": "#09090B",
+            "endFill": "#E6585A",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#5A9700",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#E6585A",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#DCA54D",
+            "callbackIcon": "#09090B",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         }
       },
       "picks": {
@@ -4064,7 +6296,69 @@
           },
           "glass": null,
           "bubbles": "outline",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#F2F2EC",
+            "pattern": "none",
+            "patternColor": "#DBDBD6",
+            "headerBackground": "#E7E7E1",
+            "headerText": "#101010",
+            "headerSubtext": "#65686B",
+            "composerBackground": "#F2F2EC",
+            "composerText": "#101010",
+            "composerPlaceholder": "#65686B",
+            "composerBorder": "#727578",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#000000",
+            "backgroundTo": null,
+            "text": "#0CCC68",
+            "textMuted": "#088B47",
+            "avatar": "logo",
+            "avatarShape": "rounded-square",
+            "avatarFill": "#0CCC68",
+            "avatarText": "#000000",
+            "buttonFill": "#022111",
+            "buttonIcon": "#0CCC68",
+            "buttonActiveFill": "#0CCC68",
+            "buttonActiveIcon": "#000000",
+            "endFill": "#D20962",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#00964A",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#D20962",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#0CCC68",
+            "callbackIcon": "#000000",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         },
         "dark": {
           "v": 1,
@@ -4160,7 +6454,69 @@
           },
           "glass": null,
           "bubbles": "outline",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#000000",
+            "pattern": "none",
+            "patternColor": "#021D0F",
+            "headerBackground": "#010C06",
+            "headerText": "#0CCC68",
+            "headerSubtext": "#088B47",
+            "composerBackground": "#01140A",
+            "composerText": "#0CCC68",
+            "composerPlaceholder": "#219759",
+            "composerBorder": "#055C2F",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#000000",
+            "backgroundTo": null,
+            "text": "#0CCC68",
+            "textMuted": "#088B47",
+            "avatar": "logo",
+            "avatarShape": "rounded-square",
+            "avatarFill": "#0CCC68",
+            "avatarText": "#000000",
+            "buttonFill": "#022111",
+            "buttonIcon": "#0CCC68",
+            "buttonActiveFill": "#0CCC68",
+            "buttonActiveIcon": "#000000",
+            "endFill": "#D20962",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#00964A",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#D20962",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#0CCC68",
+            "callbackIcon": "#000000",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         }
       },
       "picks": {
@@ -4291,7 +6647,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#FFF7ED",
+            "pattern": "none",
+            "patternColor": "#F2E2D6",
+            "headerBackground": "#FEECD3",
+            "headerText": "#7C2808",
+            "headerSubtext": "#99563A",
+            "composerBackground": "#FFF7ED",
+            "composerText": "#7C2808",
+            "composerPlaceholder": "#99563A",
+            "composerBorder": "#FFD6A7",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#F4E5D9",
+            "backgroundTo": "#FFF7ED",
+            "text": "#7C2808",
+            "textMuted": "#99563A",
+            "avatar": "logo",
+            "avatarShape": "squircle",
+            "avatarFill": "#8C3F27",
+            "avatarText": "#FFD6A7",
+            "buttonFill": "#EAD6C8",
+            "buttonIcon": "#7C2808",
+            "buttonActiveFill": "#7C2808",
+            "buttonActiveIcon": "#F4E5D9",
+            "endFill": "#ED5157",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#005F45",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#ED5157",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#8C3F27",
+            "callbackIcon": "#FFD6A7",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         },
         "dark": {
           "v": 1,
@@ -4387,7 +6805,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#261B25",
+            "pattern": "none",
+            "patternColor": "#3C2D2D",
+            "headerBackground": "#1E151D",
+            "headerText": "#C59F61",
+            "headerSubtext": "#A58555",
+            "composerBackground": "#30252E",
+            "composerText": "#C59F61",
+            "composerPlaceholder": "#AE9166",
+            "composerBorder": "#433330",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#432E2B",
+            "backgroundTo": "#261B25",
+            "text": "#C59F61",
+            "textMuted": "#B79D77",
+            "avatar": "logo",
+            "avatarShape": "squircle",
+            "avatarFill": "#DB924C",
+            "avatarText": "#110802",
+            "buttonFill": "#3F302F",
+            "buttonIcon": "#C59F61",
+            "buttonActiveFill": "#C59F61",
+            "buttonActiveIcon": "#432E2B",
+            "endFill": "#ED5157",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#005F45",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#ED5157",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#DB924C",
+            "callbackIcon": "#110802",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         }
       },
       "picks": {
@@ -4518,7 +6998,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#F4EFE6",
+            "pattern": "none",
+            "patternColor": "#DED9D1",
+            "headerBackground": "#FBF8F2",
+            "headerText": "#141414",
+            "headerSubtext": "#55514A",
+            "composerBackground": "#FFFFFF",
+            "composerText": "#141414",
+            "composerPlaceholder": "#55514A",
+            "composerBorder": "#D8D0C1",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#21409A",
+            "backgroundTo": null,
+            "text": "#FFFFFF",
+            "textMuted": "#C8CFE6",
+            "avatar": "logo",
+            "avatarShape": "circle",
+            "avatarFill": "#FFFFFF",
+            "avatarText": "#21409A",
+            "buttonFill": "#455FAA",
+            "buttonIcon": "#FFFFFF",
+            "buttonActiveFill": "#FFFFFF",
+            "buttonActiveIcon": "#21409A",
+            "endFill": "#C62A1F",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#2B7A3D",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#C62A1F",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#FFFFFF",
+            "callbackIcon": "#21409A",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         },
         "dark": {
           "v": 1,
@@ -4614,7 +7156,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#121212",
+            "pattern": "none",
+            "patternColor": "#323130",
+            "headerBackground": "#1B1B1B",
+            "headerText": "#F4EFE6",
+            "headerSubtext": "#B2ABA0",
+            "composerBackground": "#252525",
+            "composerText": "#F4EFE6",
+            "composerPlaceholder": "#B2ABA0",
+            "composerBorder": "#3A3733",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#F2C230",
+            "backgroundTo": null,
+            "text": "#141414",
+            "textMuted": "#4C401B",
+            "avatar": "logo",
+            "avatarShape": "circle",
+            "avatarFill": "#141414",
+            "avatarText": "#F2C230",
+            "buttonFill": "#CEA62C",
+            "buttonIcon": "#141414",
+            "buttonActiveFill": "#141414",
+            "buttonActiveIcon": "#F2C230",
+            "endFill": "#C62A1F",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#2B7A3D",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#C62A1F",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#141414",
+            "callbackIcon": "#F2C230",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         }
       },
       "picks": {
@@ -4751,7 +7355,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#FFFFFF",
+            "pattern": "none",
+            "patternColor": "#ECECEC",
+            "headerBackground": "#FFFFFF",
+            "headerText": "#3C3C3C",
+            "headerSubtext": "#646464",
+            "composerBackground": "#F7F7F7",
+            "composerText": "#3C3C3C",
+            "composerPlaceholder": "#646464",
+            "composerBorder": "#E5E5E5",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#3A8400",
+            "backgroundTo": "#204900",
+            "text": "#FFFFFF",
+            "textMuted": "#FFFFFF",
+            "avatar": "logo",
+            "avatarShape": "rounded-square",
+            "avatarFill": "#FFFFFF",
+            "avatarText": "#3A8400",
+            "buttonFill": "#446629",
+            "buttonIcon": "#FFFFFF",
+            "buttonActiveFill": "#FFFFFF",
+            "buttonActiveIcon": "#3A8400",
+            "endFill": "#D83434",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#3A8400",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#D83434",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#FFFFFF",
+            "callbackIcon": "#3A8400",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         },
         "dark": {
           "v": 1,
@@ -4847,7 +7513,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#131F24",
+            "pattern": "none",
+            "patternColor": "#323D42",
+            "headerBackground": "#1A2A31",
+            "headerText": "#F1F7FB",
+            "headerSubtext": "#A5B5BD",
+            "composerBackground": "#22343C",
+            "composerText": "#F1F7FB",
+            "composerPlaceholder": "#A5B5BD",
+            "composerBorder": "#37464F",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#58CC02",
+            "backgroundTo": "#A3E374",
+            "text": "#102B00",
+            "textMuted": "#1E4B00",
+            "avatar": "logo",
+            "avatarShape": "rounded-square",
+            "avatarFill": "#102B00",
+            "avatarText": "#58CC02",
+            "buttonFill": "#8BC661",
+            "buttonIcon": "#102B00",
+            "buttonActiveFill": "#102B00",
+            "buttonActiveIcon": "#58CC02",
+            "endFill": "#D83434",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#3A8400",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#D83434",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#102B00",
+            "callbackIcon": "#58CC02",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         }
       },
       "picks": {
@@ -4978,7 +7706,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#FFFFFF",
+            "pattern": "none",
+            "patternColor": "#E6E6E6",
+            "headerBackground": "#E6EAEF",
+            "headerText": "#010409",
+            "headerSubtext": "#454C54",
+            "composerBackground": "#FFFFFF",
+            "composerText": "#010409",
+            "composerPlaceholder": "#454C54",
+            "composerBorder": "#454C54",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#010409",
+            "backgroundTo": null,
+            "text": "#FFFFFF",
+            "textMuted": "#B7BDC8",
+            "avatar": "logo",
+            "avatarShape": "rounded-square",
+            "avatarFill": "#194FB1",
+            "avatarText": "#FFFFFF",
+            "buttonFill": "#2A2C30",
+            "buttonIcon": "#FFFFFF",
+            "buttonActiveFill": "#FFFFFF",
+            "buttonActiveIcon": "#010409",
+            "endFill": "#960D1E",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#04591F",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#960D1E",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#194FB1",
+            "callbackIcon": "#FFFFFF",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         },
         "dark": {
           "v": 1,
@@ -5074,7 +7864,69 @@
           },
           "glass": null,
           "bubbles": "filled",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#010409",
+            "pattern": "none",
+            "patternColor": "#25272B",
+            "headerBackground": "#151B23",
+            "headerText": "#FFFFFF",
+            "headerSubtext": "#B7BDC8",
+            "composerBackground": "#212830",
+            "composerText": "#FFFFFF",
+            "composerPlaceholder": "#B7BDC8",
+            "composerBorder": "#B7BDC8",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#010409",
+            "backgroundTo": null,
+            "text": "#FFFFFF",
+            "textMuted": "#B7BDC8",
+            "avatar": "logo",
+            "avatarShape": "rounded-square",
+            "avatarFill": "#194FB1",
+            "avatarText": "#FFFFFF",
+            "buttonFill": "#2A2C30",
+            "buttonIcon": "#FFFFFF",
+            "buttonActiveFill": "#FFFFFF",
+            "buttonActiveIcon": "#010409",
+            "endFill": "#960D1E",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#04591F",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#960D1E",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#194FB1",
+            "callbackIcon": "#FFFFFF",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         }
       },
       "picks": {
@@ -5215,7 +8067,69 @@
             "surfaceOpacity": 0.72
           },
           "bubbles": "outline",
-          "chrome": "window"
+          "chrome": "window",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#F6F1EB",
+            "pattern": "none",
+            "patternColor": "#DFDBD6",
+            "headerBackground": "#FDF9F4",
+            "headerText": "#101318",
+            "headerSubtext": "#5F6672",
+            "composerBackground": "#FDF9F4",
+            "composerText": "#101318",
+            "composerPlaceholder": "#5F6672",
+            "composerBorder": "#E4DFD7",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#1C1713",
+            "backgroundTo": null,
+            "text": "#F5F5F4",
+            "textMuted": "#A0A5AE",
+            "avatar": "logo",
+            "avatarShape": "circle",
+            "avatarFill": "#FFE600",
+            "avatarText": "#101318",
+            "buttonFill": "#3F3B37",
+            "buttonIcon": "#F5F5F4",
+            "buttonActiveFill": "#F5F5F4",
+            "buttonActiveIcon": "#1C1713",
+            "endFill": "#DC2626",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#16A34A",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#DC2626",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#FFE600",
+            "callbackIcon": "#101318",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         },
         "dark": {
           "v": 1,
@@ -5301,7 +8215,69 @@
             "surfaceOpacity": 0.72
           },
           "bubbles": "outline",
-          "chrome": "window"
+          "chrome": "window",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#1C1713",
+            "pattern": "none",
+            "patternColor": "#3A3633",
+            "headerBackground": "#251F1C",
+            "headerText": "#F5F5F4",
+            "headerSubtext": "#A0A5AE",
+            "composerBackground": "#2C2724",
+            "composerText": "#F5F5F4",
+            "composerPlaceholder": "#A0A5AE",
+            "composerBorder": "#383432",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#1C1713",
+            "backgroundTo": null,
+            "text": "#F5F5F4",
+            "textMuted": "#A0A5AE",
+            "avatar": "logo",
+            "avatarShape": "circle",
+            "avatarFill": "#FFE600",
+            "avatarText": "#101318",
+            "buttonFill": "#3F3B37",
+            "buttonIcon": "#F5F5F4",
+            "buttonActiveFill": "#F5F5F4",
+            "buttonActiveIcon": "#1C1713",
+            "endFill": "#DC2626",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#16A34A",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#DC2626",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#FFE600",
+            "callbackIcon": "#101318",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         }
       },
       "picks": {
@@ -5421,7 +8397,69 @@
           },
           "glass": null,
           "bubbles": "minimal",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#F5F8FD",
+            "pattern": "none",
+            "patternColor": "#DDE0E5",
+            "headerBackground": "#DDE4EE",
+            "headerText": "#010409",
+            "headerSubtext": "#454C54",
+            "composerBackground": "#F5F8FD",
+            "composerText": "#010409",
+            "composerPlaceholder": "#454C54",
+            "composerBorder": "#454E5B",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#050B18",
+            "backgroundTo": null,
+            "text": "#FFFFFF",
+            "textMuted": "#B7BDC8",
+            "avatar": "logo",
+            "avatarShape": "squircle",
+            "avatarFill": "#0B6E4F",
+            "avatarText": "#FFFFFF",
+            "buttonFill": "#2D323D",
+            "buttonIcon": "#FFFFFF",
+            "buttonActiveFill": "#FFFFFF",
+            "buttonActiveIcon": "#050B18",
+            "endFill": "#960D1E",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#04591F",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#960D1E",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#0B6E4F",
+            "callbackIcon": "#FFFFFF",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         },
         "dark": {
           "v": 1,
@@ -5505,7 +8543,69 @@
           },
           "glass": null,
           "bubbles": "minimal",
-          "chrome": "none"
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#050B18",
+            "pattern": "none",
+            "patternColor": "#282D38",
+            "headerBackground": "#182130",
+            "headerText": "#FFFFFF",
+            "headerSubtext": "#B7BDC8",
+            "composerBackground": "#232D3C",
+            "composerText": "#FFFFFF",
+            "composerPlaceholder": "#B7BDC8",
+            "composerBorder": "#AEB8C9",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#050B18",
+            "backgroundTo": null,
+            "text": "#FFFFFF",
+            "textMuted": "#B7BDC8",
+            "avatar": "logo",
+            "avatarShape": "squircle",
+            "avatarFill": "#0B6E4F",
+            "avatarText": "#FFFFFF",
+            "buttonFill": "#2D323D",
+            "buttonIcon": "#FFFFFF",
+            "buttonActiveFill": "#FFFFFF",
+            "buttonActiveIcon": "#050B18",
+            "endFill": "#960D1E",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#04591F",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#960D1E",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#0B6E4F",
+            "callbackIcon": "#FFFFFF",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
         }
       },
       "picks": {
@@ -5525,6 +8625,2257 @@
           "weight": 700,
           "name": "Graine-AtkinsonHyperlegibleNext-700",
           "url": "https://www.graine.ai/api/embed/font?f=Atkinson%20Hyperlegible%20Next&w=700&v=1"
+        }
+      ]
+    },
+    {
+      "config": {
+        "preset": "graine-classic",
+        "chat": {
+          "title": "Asha from Acme",
+          "subtitle": "Replies in seconds",
+          "avatar": "glyph",
+          "placeholder": "Ask Asha anything…",
+          "showTimestamps": true,
+          "background": "pattern",
+          "header": "accent",
+          "suggestions": [
+            "Where is my order?",
+            "Change my plan",
+            "Talk to a person",
+            "Pay a bill"
+          ],
+          "size": "large",
+          "upcomingTitle": "Your calls with Asha"
+        },
+        "call": {
+          "background": "gradient",
+          "avatar": "initials",
+          "avatarShape": "squircle",
+          "showCaptions": false,
+          "showTimer": false,
+          "controls": [
+            "speaker",
+            "mute",
+            "end"
+          ],
+          "endButton": "pill",
+          "ringtone": "graine",
+          "statusText": {
+            "ringing": "Asha is calling",
+            "scheduled": "Your call with Asha",
+            "connecting": "Putting you through…",
+            "ended": "Thanks for calling",
+            "missed": "You missed Asha"
+          }
+        }
+      },
+      "design": {
+        "config": {
+          "preset": "graine-classic",
+          "chat": {
+            "title": "Asha from Acme",
+            "subtitle": "Replies in seconds",
+            "avatar": "glyph",
+            "placeholder": "Ask Asha anything…",
+            "showTimestamps": true,
+            "background": "pattern",
+            "suggestions": [
+              "Where is my order?",
+              "Change my plan",
+              "Talk to a person",
+              "Pay a bill"
+            ],
+            "header": "accent",
+            "size": "large",
+            "upcomingTitle": "Your calls with Asha"
+          },
+          "call": {
+            "background": "gradient",
+            "avatar": "initials",
+            "avatarShape": "squircle",
+            "showCaptions": false,
+            "showTimer": false,
+            "controls": [
+              "speaker",
+              "mute",
+              "end"
+            ],
+            "endButton": "pill",
+            "ringtone": "graine",
+            "statusText": {
+              "ringing": "Asha is calling",
+              "scheduled": "Your call with Asha",
+              "connecting": "Putting you through…",
+              "ended": "Thanks for calling",
+              "missed": "You missed Asha"
+            }
+          }
+        },
+        "light": {
+          "v": 1,
+          "preset": "graine-classic",
+          "scheme": "light",
+          "colors": {
+            "background": "#F7F7F5",
+            "surface": "#FFFFFF",
+            "surfaceRaised": "#FFFFFF",
+            "text": "#101318",
+            "textMuted": "#5F6672",
+            "border": "#E5E4E0",
+            "accent": "#318CE7",
+            "onAccent": "#FFFFFF",
+            "success": "#16A34A",
+            "warning": "#B45309",
+            "danger": "#DC2626",
+            "userBubble": "#318CE7",
+            "userBubbleText": "#FFFFFF",
+            "agentBubble": "#F1F1EF",
+            "agentBubbleText": "#101318",
+            "scrim": "#000000",
+            "accentSoft": "#E6F1FC"
+          },
+          "font": {
+            "body": "system",
+            "heading": "system",
+            "scale": {
+              "caption": 12,
+              "body": 15,
+              "title": 17,
+              "display": 22
+            },
+            "weights": {
+              "body": 400,
+              "strong": 600,
+              "title": 600
+            },
+            "letterSpacing": {
+              "body": 0,
+              "title": -0.01
+            },
+            "lineHeight": {
+              "body": 1.45,
+              "title": 1.25
+            }
+          },
+          "shape": {
+            "radius": {
+              "sm": 8,
+              "md": 12,
+              "lg": 18,
+              "xl": 24
+            },
+            "borderWidth": 1,
+            "launcher": "circle"
+          },
+          "spacing": {
+            "unit": 4,
+            "cardPadding": 14,
+            "gap": 10
+          },
+          "elevation": {
+            "card": {
+              "y": 2,
+              "blur": 8,
+              "spread": 0,
+              "opacity": 0.08,
+              "color": "#000000"
+            },
+            "floating": {
+              "y": 8,
+              "blur": 24,
+              "spread": 0,
+              "opacity": 0.16,
+              "color": "#000000"
+            },
+            "hardOffset": null
+          },
+          "motion": {
+            "durationMs": 200,
+            "easing": "standard",
+            "bounce": 0
+          },
+          "icons": {
+            "style": "outline",
+            "stroke": 2,
+            "launcher": {
+              "id": "waveform",
+              "path": "M2 13a2 2 0 0 0 2 -2V7a2 2 0 0 1 4 0v13a2 2 0 0 0 4 0V4a2 2 0 0 1 4 0v13a2 2 0 0 0 4 0v-4a2 2 0 0 1 2 -2",
+              "stroke": true
+            }
+          },
+          "glass": null,
+          "bubbles": "filled",
+          "chrome": "none",
+          "chat": {
+            "title": "Asha from Acme",
+            "subtitle": "Replies in seconds",
+            "avatar": "glyph",
+            "placeholder": "Ask Asha anything…",
+            "showTimestamps": true,
+            "suggestions": [
+              "Where is my order?",
+              "Change my plan",
+              "Talk to a person",
+              "Pay a bill"
+            ],
+            "background": "#F7F7F5",
+            "pattern": "dots",
+            "patternColor": "#E0E0DF",
+            "headerBackground": "#318CE7",
+            "headerText": "#FFFFFF",
+            "headerSubtext": "#FFFFFF",
+            "composerBackground": "#FFFFFF",
+            "composerText": "#101318",
+            "composerPlaceholder": "#5F6672",
+            "composerBorder": "#E5E4E0",
+            "size": "large",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "Your calls with Asha",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#318CE7",
+            "backgroundTo": "#1B4D7F",
+            "text": "#FFFFFF",
+            "textMuted": "#FFFFFF",
+            "avatar": "initials",
+            "avatarShape": "squircle",
+            "avatarFill": "#FFFFFF",
+            "avatarText": "#318CE7",
+            "buttonFill": "#3F6993",
+            "buttonIcon": "#FFFFFF",
+            "buttonActiveFill": "#FFFFFF",
+            "buttonActiveIcon": "#2770B9",
+            "endFill": "#DC2626",
+            "endIcon": "#FFFFFF",
+            "endShape": "pill",
+            "acceptFill": "#16A34A",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#DC2626",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#FFFFFF",
+            "callbackIcon": "#318CE7",
+            "captions": false,
+            "timer": false,
+            "controls": [
+              "speaker",
+              "mute",
+              "end"
+            ],
+            "ringtone": "graine",
+            "statusText": {
+              "ringing": "Asha is calling",
+              "scheduled": "Your call with Asha",
+              "connecting": "Putting you through…",
+              "ended": "Thanks for calling",
+              "missed": "You missed Asha"
+            }
+          }
+        },
+        "dark": {
+          "v": 1,
+          "preset": "graine-classic",
+          "scheme": "dark",
+          "colors": {
+            "background": "#0E0F11",
+            "surface": "#17181B",
+            "surfaceRaised": "#1F2024",
+            "text": "#F5F5F4",
+            "textMuted": "#A0A5AE",
+            "border": "#2C2E33",
+            "accent": "#318CE7",
+            "onAccent": "#FFFFFF",
+            "success": "#22C55E",
+            "warning": "#F59E0B",
+            "danger": "#F87171",
+            "userBubble": "#318CE7",
+            "userBubbleText": "#FFFFFF",
+            "agentBubble": "#23252A",
+            "agentBubbleText": "#F5F5F4",
+            "scrim": "#000000",
+            "accentSoft": "#1D3248"
+          },
+          "font": {
+            "body": "system",
+            "heading": "system",
+            "scale": {
+              "caption": 12,
+              "body": 15,
+              "title": 17,
+              "display": 22
+            },
+            "weights": {
+              "body": 400,
+              "strong": 600,
+              "title": 600
+            },
+            "letterSpacing": {
+              "body": 0,
+              "title": -0.01
+            },
+            "lineHeight": {
+              "body": 1.45,
+              "title": 1.25
+            }
+          },
+          "shape": {
+            "radius": {
+              "sm": 8,
+              "md": 12,
+              "lg": 18,
+              "xl": 24
+            },
+            "borderWidth": 1,
+            "launcher": "circle"
+          },
+          "spacing": {
+            "unit": 4,
+            "cardPadding": 14,
+            "gap": 10
+          },
+          "elevation": {
+            "card": {
+              "y": 2,
+              "blur": 8,
+              "spread": 0,
+              "opacity": 0.16,
+              "color": "#000000"
+            },
+            "floating": {
+              "y": 8,
+              "blur": 24,
+              "spread": 0,
+              "opacity": 0.16,
+              "color": "#000000"
+            },
+            "hardOffset": null
+          },
+          "motion": {
+            "durationMs": 200,
+            "easing": "standard",
+            "bounce": 0
+          },
+          "icons": {
+            "style": "outline",
+            "stroke": 2,
+            "launcher": {
+              "id": "waveform",
+              "path": "M2 13a2 2 0 0 0 2 -2V7a2 2 0 0 1 4 0v13a2 2 0 0 0 4 0V4a2 2 0 0 1 4 0v13a2 2 0 0 0 4 0v-4a2 2 0 0 1 2 -2",
+              "stroke": true
+            }
+          },
+          "glass": null,
+          "bubbles": "filled",
+          "chrome": "none",
+          "chat": {
+            "title": "Asha from Acme",
+            "subtitle": "Replies in seconds",
+            "avatar": "glyph",
+            "placeholder": "Ask Asha anything…",
+            "showTimestamps": true,
+            "suggestions": [
+              "Where is my order?",
+              "Change my plan",
+              "Talk to a person",
+              "Pay a bill"
+            ],
+            "background": "#0E0F11",
+            "pattern": "dots",
+            "patternColor": "#2E2F31",
+            "headerBackground": "#318CE7",
+            "headerText": "#FFFFFF",
+            "headerSubtext": "#FFFFFF",
+            "composerBackground": "#1F2024",
+            "composerText": "#F5F5F4",
+            "composerPlaceholder": "#A0A5AE",
+            "composerBorder": "#2C2E33",
+            "size": "large",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "Your calls with Asha",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#318CE7",
+            "backgroundTo": "#1B4D7F",
+            "text": "#FFFFFF",
+            "textMuted": "#FFFFFF",
+            "avatar": "initials",
+            "avatarShape": "squircle",
+            "avatarFill": "#FFFFFF",
+            "avatarText": "#318CE7",
+            "buttonFill": "#3F6993",
+            "buttonIcon": "#FFFFFF",
+            "buttonActiveFill": "#FFFFFF",
+            "buttonActiveIcon": "#2770B9",
+            "endFill": "#DC2626",
+            "endIcon": "#FFFFFF",
+            "endShape": "pill",
+            "acceptFill": "#16A34A",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#DC2626",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#FFFFFF",
+            "callbackIcon": "#318CE7",
+            "captions": false,
+            "timer": false,
+            "controls": [
+              "speaker",
+              "mute",
+              "end"
+            ],
+            "ringtone": "graine",
+            "statusText": {
+              "ringing": "Asha is calling",
+              "scheduled": "Your call with Asha",
+              "connecting": "Putting you through…",
+              "ended": "Thanks for calling",
+              "missed": "You missed Asha"
+            }
+          }
+        }
+      },
+      "picks": {
+        "deviceLight": "light",
+        "deviceDark": "dark",
+        "deviceUnknown": "light"
+      },
+      "fontFaces": []
+    },
+    {
+      "config": {
+        "preset": "signature",
+        "chat": {
+          "title": "सहायता",
+          "suggestions": [
+            "मेरा ऑर्डर कहाँ है?"
+          ],
+          "background": "tint",
+          "avatar": "none",
+          "size": "full",
+          "showUpcomingCalls": false,
+          "upcomingTitle": "आपकी कॉल"
+        },
+        "call": {
+          "background": "accent",
+          "avatar": "glyph",
+          "controls": [
+            "mute",
+            "chat",
+            "end"
+          ],
+          "ringtone": "soft",
+          "statusText": {
+            "ringing": "आपको कॉल आ रही है",
+            "missed": "छूटी हुई कॉल"
+          }
+        }
+      },
+      "design": {
+        "config": {
+          "preset": "signature",
+          "chat": {
+            "title": "सहायता",
+            "avatar": "none",
+            "background": "tint",
+            "suggestions": [
+              "मेरा ऑर्डर कहाँ है?"
+            ],
+            "size": "full",
+            "showUpcomingCalls": false,
+            "upcomingTitle": "आपकी कॉल"
+          },
+          "call": {
+            "background": "accent",
+            "avatar": "glyph",
+            "controls": [
+              "mute",
+              "chat",
+              "end"
+            ],
+            "ringtone": "soft",
+            "statusText": {
+              "ringing": "आपको कॉल आ रही है",
+              "missed": "छूटी हुई कॉल"
+            }
+          }
+        },
+        "light": {
+          "v": 1,
+          "preset": "signature",
+          "scheme": "light",
+          "colors": {
+            "background": "#FCFCFC",
+            "surface": "#FFFFFF",
+            "surfaceRaised": "#F5F5F5",
+            "text": "#1F1F1F",
+            "textMuted": "#666666",
+            "border": "#E6E6E6",
+            "accent": "#4250D5",
+            "onAccent": "#FFFFFF",
+            "success": "#496D21",
+            "warning": "#8F6418",
+            "danger": "#C43D2B",
+            "userBubble": "#2A2C33",
+            "userBubbleText": "#FFFFFF",
+            "agentBubble": "#F0F0F0",
+            "agentBubbleText": "#1F1F1F",
+            "scrim": "#000000",
+            "accentSoft": "#E8EAFA"
+          },
+          "font": {
+            "body": "DM Sans",
+            "heading": "Newsreader",
+            "scale": {
+              "caption": 12,
+              "body": 15,
+              "title": 19,
+              "display": 30
+            },
+            "weights": {
+              "body": 400,
+              "strong": 500,
+              "title": 400
+            },
+            "letterSpacing": {
+              "body": 0,
+              "title": -0.015
+            },
+            "lineHeight": {
+              "body": 1.5,
+              "title": 1.2
+            }
+          },
+          "shape": {
+            "radius": {
+              "sm": 10,
+              "md": 16,
+              "lg": 24,
+              "xl": 32
+            },
+            "borderWidth": 1,
+            "launcher": "circle"
+          },
+          "spacing": {
+            "unit": 4,
+            "cardPadding": 16,
+            "gap": 10
+          },
+          "elevation": {
+            "card": {
+              "y": 0,
+              "blur": 40,
+              "spread": 0,
+              "opacity": 0.06,
+              "color": "#000000"
+            },
+            "floating": {
+              "y": 12,
+              "blur": 40,
+              "spread": -8,
+              "opacity": 0.18,
+              "color": "#000000"
+            },
+            "hardOffset": null
+          },
+          "motion": {
+            "durationMs": 350,
+            "easing": "emphasized",
+            "bounce": 0
+          },
+          "icons": {
+            "style": "outline",
+            "stroke": 1.75,
+            "launcher": {
+              "id": "grain",
+              "path": "M7.34 5.5H16.66M4.69 8.75H19.31M4 12H20M4.69 15.25H19.31M7.34 18.5H16.66",
+              "stroke": true
+            }
+          },
+          "glass": null,
+          "bubbles": "filled",
+          "chrome": "none",
+          "chat": {
+            "title": "सहायता",
+            "subtitle": "",
+            "avatar": "none",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [
+              "मेरा ऑर्डर कहाँ है?"
+            ],
+            "background": "#F1F2FA",
+            "pattern": "none",
+            "patternColor": "#DCDDE4",
+            "headerBackground": "#FFFFFF",
+            "headerText": "#1F1F1F",
+            "headerSubtext": "#666666",
+            "composerBackground": "#F5F5F5",
+            "composerText": "#1F1F1F",
+            "composerPlaceholder": "#666666",
+            "composerBorder": "#E6E6E6",
+            "size": "full",
+            "showUpcomingCalls": false,
+            "upcomingTitle": "आपकी कॉल",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#4250D5",
+            "backgroundTo": null,
+            "text": "#FFFFFF",
+            "textMuted": "#D9DCF7",
+            "avatar": "glyph",
+            "avatarShape": "circle",
+            "avatarFill": "#FFFFFF",
+            "avatarText": "#4250D5",
+            "buttonFill": "#5965DA",
+            "buttonIcon": "#FFFFFF",
+            "buttonActiveFill": "#FFFFFF",
+            "buttonActiveIcon": "#4250D5",
+            "endFill": "#C43D2B",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#496D21",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#C43D2B",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#FFFFFF",
+            "callbackIcon": "#4250D5",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "chat",
+              "end"
+            ],
+            "ringtone": "soft",
+            "statusText": {
+              "ringing": "आपको कॉल आ रही है",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "छूटी हुई कॉल"
+            }
+          }
+        },
+        "dark": {
+          "v": 1,
+          "preset": "signature",
+          "scheme": "dark",
+          "colors": {
+            "background": "#141414",
+            "surface": "#1C1C1C",
+            "surfaceRaised": "#262626",
+            "text": "#F5F5F5",
+            "textMuted": "#A3A3A3",
+            "border": "#333333",
+            "accent": "#81A0E9",
+            "onAccent": "#11115B",
+            "success": "#90C85B",
+            "warning": "#FFB94A",
+            "danger": "#EBA18F",
+            "userBubble": "#E8EFFC",
+            "userBubbleText": "#11115B",
+            "agentBubble": "#262626",
+            "agentBubbleText": "#F5F5F5",
+            "scrim": "#000000",
+            "accentSoft": "#323949"
+          },
+          "font": {
+            "body": "DM Sans",
+            "heading": "Newsreader",
+            "scale": {
+              "caption": 12,
+              "body": 15,
+              "title": 19,
+              "display": 30
+            },
+            "weights": {
+              "body": 400,
+              "strong": 500,
+              "title": 400
+            },
+            "letterSpacing": {
+              "body": 0,
+              "title": -0.015
+            },
+            "lineHeight": {
+              "body": 1.5,
+              "title": 1.2
+            }
+          },
+          "shape": {
+            "radius": {
+              "sm": 10,
+              "md": 16,
+              "lg": 24,
+              "xl": 32
+            },
+            "borderWidth": 1,
+            "launcher": "circle"
+          },
+          "spacing": {
+            "unit": 4,
+            "cardPadding": 16,
+            "gap": 10
+          },
+          "elevation": {
+            "card": {
+              "y": 0,
+              "blur": 40,
+              "spread": 0,
+              "opacity": 0.12,
+              "color": "#000000"
+            },
+            "floating": {
+              "y": 12,
+              "blur": 40,
+              "spread": -8,
+              "opacity": 0.18,
+              "color": "#000000"
+            },
+            "hardOffset": null
+          },
+          "motion": {
+            "durationMs": 350,
+            "easing": "emphasized",
+            "bounce": 0
+          },
+          "icons": {
+            "style": "outline",
+            "stroke": 1.75,
+            "launcher": {
+              "id": "grain",
+              "path": "M7.34 5.5H16.66M4.69 8.75H19.31M4 12H20M4.69 15.25H19.31M7.34 18.5H16.66",
+              "stroke": true
+            }
+          },
+          "glass": null,
+          "bubbles": "filled",
+          "chrome": "none",
+          "chat": {
+            "title": "सहायता",
+            "subtitle": "",
+            "avatar": "none",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [
+              "मेरा ऑर्डर कहाँ है?"
+            ],
+            "background": "#1F2229",
+            "pattern": "none",
+            "patternColor": "#3D4046",
+            "headerBackground": "#1C1C1C",
+            "headerText": "#F5F5F5",
+            "headerSubtext": "#A3A3A3",
+            "composerBackground": "#262626",
+            "composerText": "#F5F5F5",
+            "composerPlaceholder": "#A3A3A3",
+            "composerBorder": "#333333",
+            "size": "full",
+            "showUpcomingCalls": false,
+            "upcomingTitle": "आपकी कॉल",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#81A0E9",
+            "backgroundTo": null,
+            "text": "#11115B",
+            "textMuted": "#272E77",
+            "avatar": "glyph",
+            "avatarShape": "circle",
+            "avatarFill": "#11115B",
+            "avatarText": "#81A0E9",
+            "buttonFill": "#6F89D2",
+            "buttonIcon": "#11115B",
+            "buttonActiveFill": "#11115B",
+            "buttonActiveIcon": "#81A0E9",
+            "endFill": "#C43D2B",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#496D21",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#C43D2B",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#11115B",
+            "callbackIcon": "#81A0E9",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "chat",
+              "end"
+            ],
+            "ringtone": "soft",
+            "statusText": {
+              "ringing": "आपको कॉल आ रही है",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "छूटी हुई कॉल"
+            }
+          }
+        }
+      },
+      "picks": {
+        "deviceLight": "light",
+        "deviceDark": "dark",
+        "deviceUnknown": "light"
+      },
+      "fontFaces": [
+        {
+          "family": "DM Sans",
+          "weight": 400,
+          "name": "Graine-DMSans-400",
+          "url": "https://www.graine.ai/api/embed/font?f=DM%20Sans&w=400&v=1"
+        },
+        {
+          "family": "DM Sans",
+          "weight": 500,
+          "name": "Graine-DMSans-500",
+          "url": "https://www.graine.ai/api/embed/font?f=DM%20Sans&w=500&v=1"
+        },
+        {
+          "family": "Newsreader",
+          "weight": 400,
+          "name": "Graine-Newsreader-400",
+          "url": "https://www.graine.ai/api/embed/font?f=Newsreader&w=400&v=1"
+        },
+        {
+          "family": "Newsreader",
+          "weight": 500,
+          "name": "Graine-Newsreader-500",
+          "url": "https://www.graine.ai/api/embed/font?f=Newsreader&w=500&v=1"
+        }
+      ]
+    },
+    {
+      "config": {
+        "preset": "editorial",
+        "chat": {
+          "showHistory": false,
+          "newConversation": false
+        }
+      },
+      "design": {
+        "config": {
+          "preset": "editorial",
+          "chat": {
+            "showHistory": false,
+            "newConversation": false
+          }
+        },
+        "light": {
+          "v": 1,
+          "preset": "editorial",
+          "scheme": "light",
+          "colors": {
+            "background": "#FDFDFC",
+            "surface": "#F9F9F8",
+            "surfaceRaised": "#FFFFFF",
+            "text": "#21201C",
+            "textMuted": "#63635E",
+            "border": "#DAD9D6",
+            "accent": "#CA244D",
+            "onAccent": "#FFFFFF",
+            "success": "#2A7E3B",
+            "warning": "#AB6400",
+            "danger": "#CE2C31",
+            "userBubble": "#FEEAED",
+            "userBubbleText": "#64172B",
+            "agentBubble": "#F1F0EF",
+            "agentBubbleText": "#21201C",
+            "scrim": "#000000",
+            "accentSoft": "#F3DFE3"
+          },
+          "font": {
+            "body": "Source Serif 4",
+            "heading": "Newsreader",
+            "scale": {
+              "caption": 12,
+              "body": 16,
+              "title": 24,
+              "display": 35
+            },
+            "weights": {
+              "body": 400,
+              "strong": 700,
+              "title": 700
+            },
+            "letterSpacing": {
+              "body": 0,
+              "title": -0.00625
+            },
+            "lineHeight": {
+              "body": 1.5,
+              "title": 1.25
+            }
+          },
+          "shape": {
+            "radius": {
+              "sm": 4,
+              "md": 6,
+              "lg": 8,
+              "xl": 12
+            },
+            "borderWidth": 1,
+            "launcher": "circle"
+          },
+          "spacing": {
+            "unit": 4,
+            "cardPadding": 24,
+            "gap": 16
+          },
+          "elevation": {
+            "card": {
+              "y": 1,
+              "blur": 3,
+              "spread": 0,
+              "opacity": 0.05,
+              "color": "#000000"
+            },
+            "floating": {
+              "y": 12,
+              "blur": 60,
+              "spread": 0,
+              "opacity": 0.15,
+              "color": "#000000"
+            },
+            "hardOffset": null
+          },
+          "motion": {
+            "durationMs": 120,
+            "easing": "standard",
+            "bounce": 0
+          },
+          "icons": {
+            "style": "outline",
+            "stroke": 1.5,
+            "launcher": {
+              "id": "message-circle",
+              "path": "M2.992 16.342a2 2 0 0 1 0.094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413 -0.998a2 2 0 0 1 1.099 0.092a10 10 0 1 0 -4.777 -4.719",
+              "stroke": true
+            }
+          },
+          "glass": null,
+          "bubbles": "minimal",
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#FDFDFC",
+            "pattern": "none",
+            "patternColor": "#E7E7E6",
+            "headerBackground": "#F9F9F8",
+            "headerText": "#21201C",
+            "headerSubtext": "#63635E",
+            "composerBackground": "#FFFFFF",
+            "composerText": "#21201C",
+            "composerPlaceholder": "#63635E",
+            "composerBorder": "#DAD9D6",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": false,
+            "newConversation": false
+          },
+          "call": {
+            "background": "#F8E7EB",
+            "backgroundTo": "#FDFDFC",
+            "text": "#21201C",
+            "textMuted": "#63635E",
+            "avatar": "logo",
+            "avatarShape": "circle",
+            "avatarFill": "#CA244D",
+            "avatarText": "#FFFFFF",
+            "buttonFill": "#DADAD8",
+            "buttonIcon": "#21201C",
+            "buttonActiveFill": "#21201C",
+            "buttonActiveIcon": "#F8E7EB",
+            "endFill": "#CE2C31",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#2A7E3B",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#CE2C31",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#CA244D",
+            "callbackIcon": "#FFFFFF",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
+        },
+        "dark": {
+          "v": 1,
+          "preset": "editorial",
+          "scheme": "dark",
+          "colors": {
+            "background": "#111110",
+            "surface": "#191918",
+            "surfaceRaised": "#222221",
+            "text": "#EEEEEC",
+            "textMuted": "#B5B3AD",
+            "border": "#3B3A37",
+            "accent": "#CA244D",
+            "onAccent": "#FFFFFF",
+            "success": "#71D083",
+            "warning": "#FFCA16",
+            "danger": "#FF9592",
+            "userBubble": "#3A141E",
+            "userBubbleText": "#FED2E1",
+            "agentBubble": "#222221",
+            "agentBubbleText": "#EEEEEC",
+            "scrim": "#000000",
+            "accentSoft": "#401B24"
+          },
+          "font": {
+            "body": "Source Serif 4",
+            "heading": "Newsreader",
+            "scale": {
+              "caption": 12,
+              "body": 16,
+              "title": 24,
+              "display": 35
+            },
+            "weights": {
+              "body": 400,
+              "strong": 700,
+              "title": 700
+            },
+            "letterSpacing": {
+              "body": 0,
+              "title": -0.00625
+            },
+            "lineHeight": {
+              "body": 1.5,
+              "title": 1.25
+            }
+          },
+          "shape": {
+            "radius": {
+              "sm": 4,
+              "md": 6,
+              "lg": 8,
+              "xl": 12
+            },
+            "borderWidth": 1,
+            "launcher": "circle"
+          },
+          "spacing": {
+            "unit": 4,
+            "cardPadding": 24,
+            "gap": 16
+          },
+          "elevation": {
+            "card": {
+              "y": 1,
+              "blur": 3,
+              "spread": 0,
+              "opacity": 0.1,
+              "color": "#000000"
+            },
+            "floating": {
+              "y": 12,
+              "blur": 60,
+              "spread": 0,
+              "opacity": 0.15,
+              "color": "#000000"
+            },
+            "hardOffset": null
+          },
+          "motion": {
+            "durationMs": 120,
+            "easing": "standard",
+            "bounce": 0
+          },
+          "icons": {
+            "style": "outline",
+            "stroke": 1.5,
+            "launcher": {
+              "id": "message-circle",
+              "path": "M2.992 16.342a2 2 0 0 1 0.094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413 -0.998a2 2 0 0 1 1.099 0.092a10 10 0 1 0 -4.777 -4.719",
+              "stroke": true
+            }
+          },
+          "glass": null,
+          "bubbles": "minimal",
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#111110",
+            "pattern": "none",
+            "patternColor": "#30302F",
+            "headerBackground": "#191918",
+            "headerText": "#EEEEEC",
+            "headerSubtext": "#B5B3AD",
+            "composerBackground": "#222221",
+            "composerText": "#EEEEEC",
+            "composerPlaceholder": "#B5B3AD",
+            "composerBorder": "#3B3A37",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": false,
+            "newConversation": false
+          },
+          "call": {
+            "background": "#2F141A",
+            "backgroundTo": "#111110",
+            "text": "#EEEEEC",
+            "textMuted": "#B5B3AD",
+            "avatar": "logo",
+            "avatarShape": "circle",
+            "avatarFill": "#CA244D",
+            "avatarText": "#FFFFFF",
+            "buttonFill": "#343433",
+            "buttonIcon": "#EEEEEC",
+            "buttonActiveFill": "#EEEEEC",
+            "buttonActiveIcon": "#2F141A",
+            "endFill": "#CE2C31",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#2A7E3B",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#CE2C31",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#CA244D",
+            "callbackIcon": "#FFFFFF",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
+        }
+      },
+      "picks": {
+        "deviceLight": "light",
+        "deviceDark": "dark",
+        "deviceUnknown": "light"
+      },
+      "fontFaces": [
+        {
+          "family": "Newsreader",
+          "weight": 700,
+          "name": "Graine-Newsreader-700",
+          "url": "https://www.graine.ai/api/embed/font?f=Newsreader&w=700&v=1"
+        },
+        {
+          "family": "Source Serif 4",
+          "weight": 400,
+          "name": "Graine-SourceSerif4-400",
+          "url": "https://www.graine.ai/api/embed/font?f=Source%20Serif%204&w=400&v=1"
+        },
+        {
+          "family": "Source Serif 4",
+          "weight": 700,
+          "name": "Graine-SourceSerif4-700",
+          "url": "https://www.graine.ai/api/embed/font?f=Source%20Serif%204&w=700&v=1"
+        }
+      ]
+    },
+    {
+      "config": {
+        "preset": "neo-brutalism",
+        "accent": "#DC2626",
+        "call": {
+          "background": "accent"
+        }
+      },
+      "design": {
+        "config": {
+          "preset": "neo-brutalism",
+          "accent": "#DC2626",
+          "call": {
+            "background": "accent"
+          }
+        },
+        "light": {
+          "v": 1,
+          "preset": "neo-brutalism",
+          "scheme": "light",
+          "colors": {
+            "background": "#DCEBFE",
+            "surface": "#FFFFFF",
+            "surfaceRaised": "#FFFFFF",
+            "text": "#000000",
+            "textMuted": "#383838",
+            "border": "#000000",
+            "accent": "#DC2626",
+            "onAccent": "#000000",
+            "success": "#009951",
+            "warning": "#A08100",
+            "danger": "#F24045",
+            "userBubble": "#DC2626",
+            "userBubbleText": "#000000",
+            "agentBubble": "#FFFFFF",
+            "agentBubbleText": "#000000",
+            "scrim": "#000000",
+            "accentSoft": "#FBE5E5"
+          },
+          "font": {
+            "body": "DM Sans",
+            "heading": "DM Sans",
+            "scale": {
+              "caption": 12,
+              "body": 16,
+              "title": 20,
+              "display": 32
+            },
+            "weights": {
+              "body": 500,
+              "strong": 700,
+              "title": 700
+            },
+            "letterSpacing": {
+              "body": 0,
+              "title": 0
+            },
+            "lineHeight": {
+              "body": 1.5,
+              "title": 1.2
+            }
+          },
+          "shape": {
+            "radius": {
+              "sm": 5,
+              "md": 5,
+              "lg": 5,
+              "xl": 5
+            },
+            "borderWidth": 2,
+            "launcher": "rounded-square"
+          },
+          "spacing": {
+            "unit": 4,
+            "cardPadding": 24,
+            "gap": 24
+          },
+          "elevation": {
+            "card": {
+              "y": 0,
+              "blur": 0,
+              "spread": 0,
+              "opacity": 0,
+              "color": "#000000"
+            },
+            "floating": {
+              "y": 0,
+              "blur": 0,
+              "spread": 0,
+              "opacity": 0,
+              "color": "#000000"
+            },
+            "hardOffset": {
+              "x": 4,
+              "y": 4
+            }
+          },
+          "motion": {
+            "durationMs": 150,
+            "easing": "standard",
+            "bounce": 0
+          },
+          "icons": {
+            "style": "outline",
+            "stroke": 2,
+            "launcher": {
+              "id": "zap",
+              "path": "M15.914 4a1.5 1.5 0 0 0 -2.474 -1.561l-9 9A1.5 1.5 0 0 0 5.5 14h4.002a0.5 0.5 0 0 1 0.471 0.666L8.086 20a1.5 1.5 0 0 0 2.475 1.56l9 -9A1.5 1.5 0 0 0 18.5 10h-3.997a0.5 0.5 0 0 1 -0.472 -0.667z",
+              "stroke": true
+            }
+          },
+          "glass": null,
+          "bubbles": "filled",
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#DCEBFE",
+            "pattern": "none",
+            "patternColor": "#C6D4E5",
+            "headerBackground": "#FFFFFF",
+            "headerText": "#000000",
+            "headerSubtext": "#383838",
+            "composerBackground": "#FFFFFF",
+            "composerText": "#000000",
+            "composerPlaceholder": "#383838",
+            "composerBorder": "#000000",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#DC2626",
+            "backgroundTo": null,
+            "text": "#000000",
+            "textMuted": "#000000",
+            "avatar": "logo",
+            "avatarShape": "rounded-square",
+            "avatarFill": "#000000",
+            "avatarText": "#DC2626",
+            "buttonFill": "#E14747",
+            "buttonIcon": "#000000",
+            "buttonActiveFill": "#000000",
+            "buttonActiveIcon": "#E03C3C",
+            "endFill": "#3D1011",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#009951",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#3D1011",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#000000",
+            "callbackIcon": "#DC2626",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
+        },
+        "dark": {
+          "v": 1,
+          "preset": "neo-brutalism",
+          "scheme": "dark",
+          "colors": {
+            "background": "#20294B",
+            "surface": "#1F1F1F",
+            "surfaceRaised": "#1F1F1F",
+            "text": "#E6E6E6",
+            "textMuted": "#BABCC4",
+            "border": "#000000",
+            "accent": "#DC2626",
+            "onAccent": "#000000",
+            "success": "#05E17A",
+            "warning": "#FACC00",
+            "danger": "#FF4D50",
+            "userBubble": "#DC2626",
+            "userBubbleText": "#000000",
+            "agentBubble": "#1F1F1F",
+            "agentBubbleText": "#E6E6E6",
+            "scrim": "#000000",
+            "accentSoft": "#492121"
+          },
+          "font": {
+            "body": "DM Sans",
+            "heading": "DM Sans",
+            "scale": {
+              "caption": 12,
+              "body": 16,
+              "title": 20,
+              "display": 32
+            },
+            "weights": {
+              "body": 500,
+              "strong": 700,
+              "title": 700
+            },
+            "letterSpacing": {
+              "body": 0,
+              "title": 0
+            },
+            "lineHeight": {
+              "body": 1.5,
+              "title": 1.2
+            }
+          },
+          "shape": {
+            "radius": {
+              "sm": 5,
+              "md": 5,
+              "lg": 5,
+              "xl": 5
+            },
+            "borderWidth": 2,
+            "launcher": "rounded-square"
+          },
+          "spacing": {
+            "unit": 4,
+            "cardPadding": 24,
+            "gap": 24
+          },
+          "elevation": {
+            "card": {
+              "y": 0,
+              "blur": 0,
+              "spread": 0,
+              "opacity": 0,
+              "color": "#000000"
+            },
+            "floating": {
+              "y": 0,
+              "blur": 0,
+              "spread": 0,
+              "opacity": 0,
+              "color": "#000000"
+            },
+            "hardOffset": {
+              "x": 4,
+              "y": 4
+            }
+          },
+          "motion": {
+            "durationMs": 150,
+            "easing": "standard",
+            "bounce": 0
+          },
+          "icons": {
+            "style": "outline",
+            "stroke": 2,
+            "launcher": {
+              "id": "zap",
+              "path": "M15.914 4a1.5 1.5 0 0 0 -2.474 -1.561l-9 9A1.5 1.5 0 0 0 5.5 14h4.002a0.5 0.5 0 0 1 0.471 0.666L8.086 20a1.5 1.5 0 0 0 2.475 1.56l9 -9A1.5 1.5 0 0 0 18.5 10h-3.997a0.5 0.5 0 0 1 -0.472 -0.667z",
+              "stroke": true
+            }
+          },
+          "glass": null,
+          "bubbles": "filled",
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#20294B",
+            "pattern": "none",
+            "patternColor": "#3C4361",
+            "headerBackground": "#1F1F1F",
+            "headerText": "#E6E6E6",
+            "headerSubtext": "#BABCC4",
+            "composerBackground": "#1F1F1F",
+            "composerText": "#E6E6E6",
+            "composerPlaceholder": "#BABCC4",
+            "composerBorder": "#000000",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#DC2626",
+            "backgroundTo": null,
+            "text": "#000000",
+            "textMuted": "#000000",
+            "avatar": "logo",
+            "avatarShape": "rounded-square",
+            "avatarFill": "#000000",
+            "avatarText": "#DC2626",
+            "buttonFill": "#E14747",
+            "buttonIcon": "#000000",
+            "buttonActiveFill": "#000000",
+            "buttonActiveIcon": "#E03C3C",
+            "endFill": "#3D1011",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#009951",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#3D1011",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#000000",
+            "callbackIcon": "#DC2626",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
+        }
+      },
+      "picks": {
+        "deviceLight": "light",
+        "deviceDark": "dark",
+        "deviceUnknown": "light"
+      },
+      "fontFaces": [
+        {
+          "family": "DM Sans",
+          "weight": 500,
+          "name": "Graine-DMSans-500",
+          "url": "https://www.graine.ai/api/embed/font?f=DM%20Sans&w=500&v=1"
+        },
+        {
+          "family": "DM Sans",
+          "weight": 700,
+          "name": "Graine-DMSans-700",
+          "url": "https://www.graine.ai/api/embed/font?f=DM%20Sans&w=700&v=1"
+        }
+      ]
+    },
+    {
+      "config": {
+        "preset": "high-contrast",
+        "launcherIcon": "logo",
+        "chat": {
+          "avatar": "glyph"
+        },
+        "call": {
+          "background": "light",
+          "avatar": "glyph",
+          "avatarShape": "rounded-square",
+          "endButton": "pill"
+        }
+      },
+      "design": {
+        "config": {
+          "preset": "high-contrast",
+          "launcherIcon": "logo",
+          "chat": {
+            "avatar": "glyph"
+          },
+          "call": {
+            "background": "light",
+            "avatar": "glyph",
+            "avatarShape": "rounded-square",
+            "endButton": "pill"
+          }
+        },
+        "light": {
+          "v": 1,
+          "preset": "high-contrast",
+          "scheme": "light",
+          "colors": {
+            "background": "#FFFFFF",
+            "surface": "#E6EAEF",
+            "surfaceRaised": "#FFFFFF",
+            "text": "#010409",
+            "textMuted": "#454C54",
+            "border": "#454C54",
+            "accent": "#0349B4",
+            "onAccent": "#FFFFFF",
+            "success": "#04591F",
+            "warning": "#603700",
+            "danger": "#960D1E",
+            "userBubble": "#0349B4",
+            "userBubbleText": "#FFFFFF",
+            "agentBubble": "#E6EAEF",
+            "agentBubbleText": "#010409",
+            "scrim": "#393F46",
+            "accentSoft": "#CBD7E8"
+          },
+          "font": {
+            "body": "Atkinson Hyperlegible Next",
+            "heading": "Atkinson Hyperlegible Next",
+            "scale": {
+              "caption": 16,
+              "body": 19,
+              "title": 24,
+              "display": 36
+            },
+            "weights": {
+              "body": 400,
+              "strong": 700,
+              "title": 700
+            },
+            "letterSpacing": {
+              "body": 0,
+              "title": 0
+            },
+            "lineHeight": {
+              "body": 1.32,
+              "title": 1.25
+            }
+          },
+          "shape": {
+            "radius": {
+              "sm": 0,
+              "md": 0,
+              "lg": 0,
+              "xl": 0
+            },
+            "borderWidth": 2,
+            "launcher": "square"
+          },
+          "spacing": {
+            "unit": 5,
+            "cardPadding": 20,
+            "gap": 15
+          },
+          "elevation": {
+            "card": {
+              "y": 1,
+              "blur": 2,
+              "spread": 0,
+              "opacity": 0.03,
+              "color": "#010409"
+            },
+            "floating": {
+              "y": 6,
+              "blur": 18,
+              "spread": 0,
+              "opacity": 0.12,
+              "color": "#25292E"
+            },
+            "hardOffset": null
+          },
+          "motion": {
+            "durationMs": 0,
+            "easing": "none",
+            "bounce": 0
+          },
+          "icons": {
+            "style": "filled",
+            "stroke": 2,
+            "launcher": null
+          },
+          "glass": null,
+          "bubbles": "filled",
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#FFFFFF",
+            "pattern": "none",
+            "patternColor": "#E6E6E6",
+            "headerBackground": "#E6EAEF",
+            "headerText": "#010409",
+            "headerSubtext": "#454C54",
+            "composerBackground": "#FFFFFF",
+            "composerText": "#010409",
+            "composerPlaceholder": "#454C54",
+            "composerBorder": "#454C54",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#FFFFFF",
+            "backgroundTo": null,
+            "text": "#010409",
+            "textMuted": "#454C54",
+            "avatar": "logo",
+            "avatarShape": "rounded-square",
+            "avatarFill": "#0349B4",
+            "avatarText": "#FFFFFF",
+            "buttonFill": "#D6D7D8",
+            "buttonIcon": "#010409",
+            "buttonActiveFill": "#010409",
+            "buttonActiveIcon": "#FFFFFF",
+            "endFill": "#960D1E",
+            "endIcon": "#FFFFFF",
+            "endShape": "pill",
+            "acceptFill": "#04591F",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#960D1E",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#0349B4",
+            "callbackIcon": "#FFFFFF",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
+        },
+        "dark": {
+          "v": 1,
+          "preset": "high-contrast",
+          "scheme": "dark",
+          "colors": {
+            "background": "#010409",
+            "surface": "#151B23",
+            "surfaceRaised": "#212830",
+            "text": "#FFFFFF",
+            "textMuted": "#B7BDC8",
+            "border": "#B7BDC8",
+            "accent": "#194FB1",
+            "onAccent": "#FFFFFF",
+            "success": "#2BD853",
+            "warning": "#F0B72F",
+            "danger": "#FF9492",
+            "userBubble": "#194FB1",
+            "userBubbleText": "#FFFFFF",
+            "agentBubble": "#151B23",
+            "agentBubbleText": "#FFFFFF",
+            "scrim": "#D1D7E0",
+            "accentSoft": "#162642"
+          },
+          "font": {
+            "body": "Atkinson Hyperlegible Next",
+            "heading": "Atkinson Hyperlegible Next",
+            "scale": {
+              "caption": 16,
+              "body": 19,
+              "title": 24,
+              "display": 36
+            },
+            "weights": {
+              "body": 400,
+              "strong": 700,
+              "title": 700
+            },
+            "letterSpacing": {
+              "body": 0,
+              "title": 0
+            },
+            "lineHeight": {
+              "body": 1.32,
+              "title": 1.25
+            }
+          },
+          "shape": {
+            "radius": {
+              "sm": 0,
+              "md": 0,
+              "lg": 0,
+              "xl": 0
+            },
+            "borderWidth": 2,
+            "launcher": "square"
+          },
+          "spacing": {
+            "unit": 5,
+            "cardPadding": 20,
+            "gap": 15
+          },
+          "elevation": {
+            "card": {
+              "y": 1,
+              "blur": 2,
+              "spread": 0,
+              "opacity": 0.06,
+              "color": "#010409"
+            },
+            "floating": {
+              "y": 6,
+              "blur": 18,
+              "spread": 0,
+              "opacity": 0.12,
+              "color": "#25292E"
+            },
+            "hardOffset": null
+          },
+          "motion": {
+            "durationMs": 0,
+            "easing": "none",
+            "bounce": 0
+          },
+          "icons": {
+            "style": "filled",
+            "stroke": 2,
+            "launcher": null
+          },
+          "glass": null,
+          "bubbles": "filled",
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#010409",
+            "pattern": "none",
+            "patternColor": "#25272B",
+            "headerBackground": "#151B23",
+            "headerText": "#FFFFFF",
+            "headerSubtext": "#B7BDC8",
+            "composerBackground": "#212830",
+            "composerText": "#FFFFFF",
+            "composerPlaceholder": "#B7BDC8",
+            "composerBorder": "#B7BDC8",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#FFFFFF",
+            "backgroundTo": null,
+            "text": "#010409",
+            "textMuted": "#454C54",
+            "avatar": "logo",
+            "avatarShape": "rounded-square",
+            "avatarFill": "#0349B4",
+            "avatarText": "#FFFFFF",
+            "buttonFill": "#D6D7D8",
+            "buttonIcon": "#010409",
+            "buttonActiveFill": "#010409",
+            "buttonActiveIcon": "#FFFFFF",
+            "endFill": "#960D1E",
+            "endIcon": "#FFFFFF",
+            "endShape": "pill",
+            "acceptFill": "#04591F",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#960D1E",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#0349B4",
+            "callbackIcon": "#FFFFFF",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
+        }
+      },
+      "picks": {
+        "deviceLight": "light",
+        "deviceDark": "dark",
+        "deviceUnknown": "light"
+      },
+      "fontFaces": [
+        {
+          "family": "Atkinson Hyperlegible Next",
+          "weight": 400,
+          "name": "Graine-AtkinsonHyperlegibleNext-400",
+          "url": "https://www.graine.ai/api/embed/font?f=Atkinson%20Hyperlegible%20Next&w=400&v=1"
+        },
+        {
+          "family": "Atkinson Hyperlegible Next",
+          "weight": 700,
+          "name": "Graine-AtkinsonHyperlegibleNext-700",
+          "url": "https://www.graine.ai/api/embed/font?f=Atkinson%20Hyperlegible%20Next&w=700&v=1"
+        }
+      ]
+    },
+    {
+      "config": {
+        "preset": "carbon",
+        "call": {
+          "background": "brand"
+        }
+      },
+      "design": {
+        "config": {
+          "preset": "carbon",
+          "call": {
+            "background": "brand"
+          }
+        },
+        "light": {
+          "v": 1,
+          "preset": "carbon",
+          "scheme": "light",
+          "colors": {
+            "background": "#FFFFFF",
+            "surface": "#F4F4F4",
+            "surfaceRaised": "#FFFFFF",
+            "text": "#161616",
+            "textMuted": "#525252",
+            "border": "#C6C6C6",
+            "accent": "#0F62FE",
+            "onAccent": "#FFFFFF",
+            "success": "#24A148",
+            "warning": "#AB8800",
+            "danger": "#DA1E28",
+            "userBubble": "#E0E0E0",
+            "userBubbleText": "#161616",
+            "agentBubble": "#FFFFFF",
+            "agentBubbleText": "#161616",
+            "scrim": "#000000",
+            "accentSoft": "#D9E2F5"
+          },
+          "font": {
+            "body": "IBM Plex Sans",
+            "heading": "IBM Plex Sans",
+            "scale": {
+              "caption": 12,
+              "body": 14,
+              "title": 20,
+              "display": 28
+            },
+            "weights": {
+              "body": 400,
+              "strong": 600,
+              "title": 400
+            },
+            "letterSpacing": {
+              "body": 0.0114,
+              "title": 0
+            },
+            "lineHeight": {
+              "body": 1.43,
+              "title": 1.4
+            }
+          },
+          "shape": {
+            "radius": {
+              "sm": 0,
+              "md": 2,
+              "lg": 4,
+              "xl": 8
+            },
+            "borderWidth": 1,
+            "launcher": "square"
+          },
+          "spacing": {
+            "unit": 8,
+            "cardPadding": 16,
+            "gap": 8
+          },
+          "elevation": {
+            "card": {
+              "y": 0,
+              "blur": 0,
+              "spread": 0,
+              "opacity": 0,
+              "color": "#000000"
+            },
+            "floating": {
+              "y": 2,
+              "blur": 6,
+              "spread": 0,
+              "opacity": 0.3,
+              "color": "#000000"
+            },
+            "hardOffset": null
+          },
+          "motion": {
+            "durationMs": 150,
+            "easing": "standard",
+            "bounce": 0
+          },
+          "icons": {
+            "style": "sharp",
+            "stroke": 1.5,
+            "launcher": {
+              "id": "headset",
+              "path": "M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1 -2 2H5a2 2 0 0 1 -2 -2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1 -2 2h-1a2 2 0 0 1 -2 -2v-3a2 2 0 0 1 2 -2h3ZM21 16v2a4 4 0 0 1 -4 4h-5",
+              "stroke": true
+            }
+          },
+          "glass": null,
+          "bubbles": "filled",
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#FFFFFF",
+            "pattern": "none",
+            "patternColor": "#E8E8E8",
+            "headerBackground": "#F4F4F4",
+            "headerText": "#161616",
+            "headerSubtext": "#525252",
+            "composerBackground": "#FFFFFF",
+            "composerText": "#161616",
+            "composerPlaceholder": "#525252",
+            "composerBorder": "#C6C6C6",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#E7EFFF",
+            "backgroundTo": "#FFFFFF",
+            "text": "#161616",
+            "textMuted": "#525252",
+            "avatar": "logo",
+            "avatarShape": "rounded-square",
+            "avatarFill": "#0F62FE",
+            "avatarText": "#FFFFFF",
+            "buttonFill": "#DADADA",
+            "buttonIcon": "#161616",
+            "buttonActiveFill": "#161616",
+            "buttonActiveIcon": "#E7EFFF",
+            "endFill": "#DA1E28",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#24A148",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#DA1E28",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#0F62FE",
+            "callbackIcon": "#FFFFFF",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
+        },
+        "dark": {
+          "v": 1,
+          "preset": "carbon",
+          "scheme": "dark",
+          "colors": {
+            "background": "#161616",
+            "surface": "#262626",
+            "surfaceRaised": "#393939",
+            "text": "#F4F4F4",
+            "textMuted": "#C6C6C6",
+            "border": "#525252",
+            "accent": "#0F62FE",
+            "onAccent": "#FFFFFF",
+            "success": "#42BE65",
+            "warning": "#F1C21B",
+            "danger": "#FA4D56",
+            "userBubble": "#393939",
+            "userBubbleText": "#F4F4F4",
+            "agentBubble": "#262626",
+            "agentBubbleText": "#F4F4F4",
+            "scrim": "#000000",
+            "accentSoft": "#213356"
+          },
+          "font": {
+            "body": "IBM Plex Sans",
+            "heading": "IBM Plex Sans",
+            "scale": {
+              "caption": 12,
+              "body": 14,
+              "title": 20,
+              "display": 28
+            },
+            "weights": {
+              "body": 400,
+              "strong": 600,
+              "title": 400
+            },
+            "letterSpacing": {
+              "body": 0.0114,
+              "title": 0
+            },
+            "lineHeight": {
+              "body": 1.43,
+              "title": 1.4
+            }
+          },
+          "shape": {
+            "radius": {
+              "sm": 0,
+              "md": 2,
+              "lg": 4,
+              "xl": 8
+            },
+            "borderWidth": 1,
+            "launcher": "square"
+          },
+          "spacing": {
+            "unit": 8,
+            "cardPadding": 16,
+            "gap": 8
+          },
+          "elevation": {
+            "card": {
+              "y": 0,
+              "blur": 0,
+              "spread": 0,
+              "opacity": 0,
+              "color": "#000000"
+            },
+            "floating": {
+              "y": 2,
+              "blur": 6,
+              "spread": 0,
+              "opacity": 0.3,
+              "color": "#000000"
+            },
+            "hardOffset": null
+          },
+          "motion": {
+            "durationMs": 150,
+            "easing": "standard",
+            "bounce": 0
+          },
+          "icons": {
+            "style": "sharp",
+            "stroke": 1.5,
+            "launcher": {
+              "id": "headset",
+              "path": "M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1 -2 2H5a2 2 0 0 1 -2 -2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1 -2 2h-1a2 2 0 0 1 -2 -2v-3a2 2 0 0 1 2 -2h3ZM21 16v2a4 4 0 0 1 -4 4h-5",
+              "stroke": true
+            }
+          },
+          "glass": null,
+          "bubbles": "filled",
+          "chrome": "none",
+          "chat": {
+            "title": "",
+            "subtitle": "",
+            "avatar": "logo",
+            "placeholder": "Message…",
+            "showTimestamps": false,
+            "suggestions": [],
+            "background": "#161616",
+            "pattern": "none",
+            "patternColor": "#353535",
+            "headerBackground": "#262626",
+            "headerText": "#F4F4F4",
+            "headerSubtext": "#C6C6C6",
+            "composerBackground": "#393939",
+            "composerText": "#F4F4F4",
+            "composerPlaceholder": "#C6C6C6",
+            "composerBorder": "#525252",
+            "size": "compact",
+            "showUpcomingCalls": true,
+            "upcomingTitle": "",
+            "showHistory": true,
+            "newConversation": true
+          },
+          "call": {
+            "background": "#15223B",
+            "backgroundTo": "#161616",
+            "text": "#F4F4F4",
+            "textMuted": "#C6C6C6",
+            "avatar": "logo",
+            "avatarShape": "rounded-square",
+            "avatarFill": "#0F62FE",
+            "avatarText": "#FFFFFF",
+            "buttonFill": "#3A3A3A",
+            "buttonIcon": "#F4F4F4",
+            "buttonActiveFill": "#F4F4F4",
+            "buttonActiveIcon": "#15223B",
+            "endFill": "#DA1E28",
+            "endIcon": "#FFFFFF",
+            "endShape": "round",
+            "acceptFill": "#24A148",
+            "acceptIcon": "#FFFFFF",
+            "declineFill": "#DA1E28",
+            "declineIcon": "#FFFFFF",
+            "callbackFill": "#0F62FE",
+            "callbackIcon": "#FFFFFF",
+            "captions": true,
+            "timer": true,
+            "controls": [
+              "mute",
+              "speaker",
+              "chat",
+              "end"
+            ],
+            "ringtone": "system",
+            "statusText": {
+              "ringing": "Incoming call",
+              "scheduled": "Scheduled call",
+              "connecting": "Connecting…",
+              "ended": "Call ended",
+              "missed": "Missed call"
+            }
+          }
+        }
+      },
+      "picks": {
+        "deviceLight": "light",
+        "deviceDark": "dark",
+        "deviceUnknown": "light"
+      },
+      "fontFaces": [
+        {
+          "family": "IBM Plex Sans",
+          "weight": 400,
+          "name": "Graine-IBMPlexSans-400",
+          "url": "https://www.graine.ai/api/embed/font?f=IBM%20Plex%20Sans&w=400&v=1"
+        },
+        {
+          "family": "IBM Plex Sans",
+          "weight": 600,
+          "name": "Graine-IBMPlexSans-600",
+          "url": "https://www.graine.ai/api/embed/font?f=IBM%20Plex%20Sans&w=600&v=1"
         }
       ]
     }
@@ -5636,7 +10987,69 @@
         },
         "glass": null,
         "bubbles": "filled",
-        "chrome": "none"
+        "chrome": "none",
+        "chat": {
+          "title": "",
+          "subtitle": "",
+          "avatar": "logo",
+          "placeholder": "Message…",
+          "showTimestamps": false,
+          "suggestions": [],
+          "background": "#F7F7F5",
+          "pattern": "none",
+          "patternColor": "#E0E0DF",
+          "headerBackground": "#FFFFFF",
+          "headerText": "#101318",
+          "headerSubtext": "#5F6672",
+          "composerBackground": "#FFFFFF",
+          "composerText": "#101318",
+          "composerPlaceholder": "#5F6672",
+          "composerBorder": "#E5E4E0",
+          "size": "compact",
+          "showUpcomingCalls": true,
+          "upcomingTitle": "",
+          "showHistory": true,
+          "newConversation": true
+        },
+        "call": {
+          "background": "#0E0F11",
+          "backgroundTo": null,
+          "text": "#F5F5F4",
+          "textMuted": "#A0A5AE",
+          "avatar": "logo",
+          "avatarShape": "circle",
+          "avatarFill": "#7C3AED",
+          "avatarText": "#FFFFFF",
+          "buttonFill": "#333435",
+          "buttonIcon": "#F5F5F4",
+          "buttonActiveFill": "#F5F5F4",
+          "buttonActiveIcon": "#0E0F11",
+          "endFill": "#DC2626",
+          "endIcon": "#FFFFFF",
+          "endShape": "round",
+          "acceptFill": "#16A34A",
+          "acceptIcon": "#FFFFFF",
+          "declineFill": "#DC2626",
+          "declineIcon": "#FFFFFF",
+          "callbackFill": "#7C3AED",
+          "callbackIcon": "#FFFFFF",
+          "captions": true,
+          "timer": true,
+          "controls": [
+            "mute",
+            "speaker",
+            "chat",
+            "end"
+          ],
+          "ringtone": "system",
+          "statusText": {
+            "ringing": "Incoming call",
+            "scheduled": "Scheduled call",
+            "connecting": "Connecting…",
+            "ended": "Call ended",
+            "missed": "Missed call"
+          }
+        }
       },
       "dark": {
         "v": 1,
@@ -5732,7 +11145,69 @@
         },
         "glass": null,
         "bubbles": "filled",
-        "chrome": "none"
+        "chrome": "none",
+        "chat": {
+          "title": "",
+          "subtitle": "",
+          "avatar": "logo",
+          "placeholder": "Message…",
+          "showTimestamps": false,
+          "suggestions": [],
+          "background": "#0E0F11",
+          "pattern": "none",
+          "patternColor": "#2E2F31",
+          "headerBackground": "#17181B",
+          "headerText": "#F5F5F4",
+          "headerSubtext": "#A0A5AE",
+          "composerBackground": "#1F2024",
+          "composerText": "#F5F5F4",
+          "composerPlaceholder": "#A0A5AE",
+          "composerBorder": "#2C2E33",
+          "size": "compact",
+          "showUpcomingCalls": true,
+          "upcomingTitle": "",
+          "showHistory": true,
+          "newConversation": true
+        },
+        "call": {
+          "background": "#0E0F11",
+          "backgroundTo": null,
+          "text": "#F5F5F4",
+          "textMuted": "#A0A5AE",
+          "avatar": "logo",
+          "avatarShape": "circle",
+          "avatarFill": "#7C3AED",
+          "avatarText": "#FFFFFF",
+          "buttonFill": "#333435",
+          "buttonIcon": "#F5F5F4",
+          "buttonActiveFill": "#F5F5F4",
+          "buttonActiveIcon": "#0E0F11",
+          "endFill": "#DC2626",
+          "endIcon": "#FFFFFF",
+          "endShape": "round",
+          "acceptFill": "#16A34A",
+          "acceptIcon": "#FFFFFF",
+          "declineFill": "#DC2626",
+          "declineIcon": "#FFFFFF",
+          "callbackFill": "#7C3AED",
+          "callbackIcon": "#FFFFFF",
+          "captions": true,
+          "timer": true,
+          "controls": [
+            "mute",
+            "speaker",
+            "chat",
+            "end"
+          ],
+          "ringtone": "system",
+          "statusText": {
+            "ringing": "Incoming call",
+            "scheduled": "Scheduled call",
+            "connecting": "Connecting…",
+            "ended": "Call ended",
+            "missed": "Missed call"
+          }
+        }
       }
     }
   },
@@ -5785,6 +11260,59 @@
     },
     "close": {
       "lines": "M6 6l12 12M18 6 6 18"
+    },
+    "compose": {
+      "lines": "M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M18.4 2.6a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4z"
+    },
+    "speaker": {
+      "body": "M4 9.5h3.5L12 5.5v13l-4.5-4H4z",
+      "lines": "M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"
+    }
+  },
+  "ringtones": {
+    "graine": {
+      "label": "Graine",
+      "wave": "sine",
+      "gain": 0.5,
+      "notes": [
+        {
+          "hz": 659.25,
+          "ms": 150
+        },
+        {
+          "hz": 987.77,
+          "ms": 230
+        },
+        {
+          "hz": 0,
+          "ms": 110
+        },
+        {
+          "hz": 659.25,
+          "ms": 150
+        },
+        {
+          "hz": 987.77,
+          "ms": 230
+        }
+      ],
+      "pauseMs": 1500
+    },
+    "soft": {
+      "label": "Soft",
+      "wave": "triangle",
+      "gain": 0.35,
+      "notes": [
+        {
+          "hz": 523.25,
+          "ms": 420
+        },
+        {
+          "hz": 783.99,
+          "ms": 560
+        }
+      ],
+      "pauseMs": 2000
     }
   },
   "fontWeights": {

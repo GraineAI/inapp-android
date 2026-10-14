@@ -135,8 +135,8 @@ class IconTest {
             assertEquals("$name body", opt(w, "body"), icon.body)
             assertEquals("$name lines", opt(w, "lines"), icon.lines)
         }
-        assertEquals(listOf("mic", "micOff", "end", "send", "chat", "call", "chevron", "close"),
-            listOf(SdkIcons.MIC, SdkIcons.MIC_OFF, SdkIcons.END, SdkIcons.SEND, SdkIcons.CHAT, SdkIcons.CALL, SdkIcons.CHEVRON, SdkIcons.CLOSE))
+        assertEquals(listOf("mic", "micOff", "end", "send", "chat", "call", "chevron", "close", "compose", "speaker"),
+            listOf(SdkIcons.MIC, SdkIcons.MIC_OFF, SdkIcons.END, SdkIcons.SEND, SdkIcons.CHAT, SdkIcons.CALL, SdkIcons.CHEVRON, SdkIcons.CLOSE, SdkIcons.COMPOSE, SdkIcons.SPEAKER))
     }
 
     /** Every point a path visits, control points included. */

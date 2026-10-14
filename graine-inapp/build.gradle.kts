@@ -66,30 +66,8 @@ val verifyPackage by tasks.registering(Exec::class) {
     }
 }
 
-afterEvaluate {
-    publishing {
-        publications {
-            register<MavenPublication>("release") {
-                from(components["release"])
-                groupId = "ai.graine"
-                artifactId = "inapp-android"
-                version = project.version.toString()
-                pom {
-                    name.set("Graine in-app agent for Android")
-                    description.set("An AI agent inside your Android app: it sees the screen, acts in the app, shows components and talks.")
-                    url.set("https://www.graine.ai/docs/in-app/android")
-                    licenses { license { name.set("MIT"); url.set("https://opensource.org/licenses/MIT") } }
-                    developers { developer { id.set("graineai"); name.set("Graine.AI"); url.set("https://www.graine.ai") } }
-                    scm { url.set("https://www.graine.ai/docs/in-app/android") }
-                }
-            }
-        }
-        repositories {
-            // A local staging repository. Uploading it to Maven Central is a release step for the owner.
-            maven { name = "staging"; url = uri(layout.buildDirectory.dir("staging-repo")) }
-        }
-    }
-}
+// The publication, its POM, signing and the Maven Central bundle.
+apply(from = "publishing.gradle.kts")
 
 tasks.matching { it.name.startsWith("publish") }.configureEach { dependsOn(verifyPackage) }
 

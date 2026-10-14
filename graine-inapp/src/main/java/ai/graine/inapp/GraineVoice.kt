@@ -58,8 +58,8 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
 
     /**
      * The call cannot work as configured until something is fixed — an agent
-     * or key the gateway was never set up for (the engine reports it as a
-     * `not_configured` transport). Null otherwise. Also sent to onError.
+     * or key that was never set up for calls (the engine reports it as
+     * `not_configured`). Null otherwise. Also sent to onError.
      * Cleared when the next call is placed.
      */
     var error: String? = null; private set
@@ -185,6 +185,8 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
         unwatch = listOf(
             graine.onVariables { vars -> if (ready) post(Protocol.out(Protocol.Out.VARIABLES, "variables" to vars)) },
             graine.onContext { frame -> if (connected) postContext(frame) },
+            // A sign-in, a sign-out or a memory choice reaches the page for its next call.
+            graine.onIdentity { env -> if (ready) postIdentity(env) },
         )
         graine.foregroundWatchers.add(foregroundWatcher)
         load(idle = true)
@@ -255,6 +257,9 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
         if (graine.nativeCallLive()) {
             report { it.onError("A call is already in progress.") }; return
         }
+        // One conversation at a time, across every agent: a call starting ends the chat (its lines stay on
+        // screen), and another agent's call.
+        graine.voiceStarting()
         // A new attempt: the last call's fault, its failure to connect and its last words are not news.
         error = null
         progress.clear()
@@ -363,11 +368,18 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
         if (onMainThread()) wv.evaluateJavascript(js, null) else graine.main.post { webView?.evaluateJavascript(js, null) }
     }
 
-    /** Debug logs name what was sent without dumping a customer's variables or fields into logcat. */
+    /** Debug logs name what was sent without dumping a customer's variables, fields or identity into logcat. */
     private fun redactForLog(m: JSONObject): String = when (m.optString("type")) {
         Protocol.Out.VARIABLES -> "{${m.optJSONObject("variables")?.keys()?.asSequence()?.joinToString() ?: ""}}"
         Protocol.Out.APP_CONTEXT -> "screen=${m.optJSONObject("context")?.optString("screen")}"
+        Protocol.Out.IDENTITY -> "identity=${if (m.isNull("value")) "none" else "set"} memory=${m.optBoolean("memory")}"
         else -> m.toString().take(300)
+    }
+
+    /** Who is using the app, for the page's ticket and rtc-session (contract §1.3). */
+    private fun postIdentity(env: IdentityEnvelope) {
+        post(Protocol.out(Protocol.Out.IDENTITY,
+            "value" to env.value, "installId" to env.installId, "memory" to env.memory, "timezone" to env.timezone))
     }
 
     private fun onMainThread(): Boolean = android.os.Looper.myLooper() == android.os.Looper.getMainLooper()
@@ -410,6 +422,7 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
                 // Who the customer is, before anything else: the greeting is
                 // composed from these and nothing later can repair it.
                 post(Protocol.out(Protocol.Out.VARIABLES, "variables" to graine.currentVariables()))
+                postIdentity(graine.identityEnvelope())
                 graine.currentContextFrame()?.let { postContext(it) }
                 if (pendingStart && hasMic()) { pendingStart = false; beginCall() }
                 else if (!startedCall) post(Protocol.out(Protocol.Out.WARM))

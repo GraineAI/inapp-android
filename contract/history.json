@@ -1,0 +1,591 @@
+{
+  "comment": "Conversations continue — inapp-platform-contract.md section 2.6, CONTINUITY.md section D. A chat that passes the memory gate opens with ONE server frame, {\"type\":\"history\",\"turns\":[{id, role: \"user\"|\"assistant\", text, at: ISO-8601 UTC, channel: \"chat\"|\"voice\"}],\"continued\":true}, before any agent message. Three sections, every SDK runs all three. `frames`: the frame as it arrives → the turns it restores (role in the SDKs' words: customer | agent), or null when the frame is ignored (turns not a list). A turn that cannot be read (not an object, a role other than user/assistant, text not a string or blank, `at` missing or not an ISO-8601 time) is skipped; a channel other than \"voice\" is chat; a missing or repeated id becomes \"h<index in the list>\". `restore`: steps on a chat's transcript — {agent} a finished agent turn; {customer, delivery?} the customer's message (sent unless delivery says sending or failed); {opened} the connection opened, so what was waiting went out (sending → sent); {history} the frame arrived — then the turns. The rule: a history that restores at least one turn REPLACES every turn that was settled when the connection opened, and every turn an earlier history restored; it keeps, after the restored turns and in order, the turns still sending or failed and everything said since the connection opened (with no {opened} yet: only the turns still sending or failed). Restored turns are delivered, not live, not volunteered, restored = true, with their own time and channel. An empty or unreadable history changes nothing. In `turns`: a field absent from an expected turn means restored false, channel chat, and (customer turns) delivery sent; `at` and `id`, when given, are compared; live and proactive are false for every restored turn. React Native has no failed delivery: there a failed step is a waiting (pending) message. `rows`: what a chat window draws for the turns, at `now`, on a device whose zone is `timeZone` (a fixed offset of `utcOffsetMinutes`) — {turn: i} a bubble; {voice: [first, last]} ONE \"Voice call · {time of first}\" row for a run of consecutive voice-channel turns on one local day; {day} a separator: \"today\", \"yesterday\", or the local date YYYY-MM-DD (each SDK writes it in its own words: Today, Yesterday, a date). A separator goes before the first row when its day is not today, and wherever the local day changes between rows. Written by hand from CONTINUITY.md section D; the React Native SDK (protocol.ts readHistoryFrame / foldChat / chatRows) and every native SDK are tested against it. `display`: what the window draws of the pieces the design can leave out (DESIGN.md \"Chat window\" → Booked calls, Earlier messages, New conversation), one rule for every SDK (the React Native SDK's chatPieces): `chat` is the session's chat tokens as they arrive (absent, or a value that is not a boolean — `upcomingTitle` not a string — is the default: on, and the SDK's words); `turns` the chat's transcript (restored true for an earlier conversation); `upcoming` how many booked calls there are. Expected: `shown` the ids of the turns drawn, in order (chat.showHistory false leaves out every restored turn — the agent still has them); `rows` what those turns draw, in the `rows` notation, indices into `shown`; `starters` whether the brand's starters may show (nothing restored on screen and nothing said by the customer — so a hidden history opens like a new chat); `newConversation` whether the header's compose control shows (chat.newConversation not false, and a restored turn on screen); `card` whether the booked-calls card shows (chat.showUpcomingCalls not false, and at least one call); `cardTitle` its title (chat.upcomingTitle trimmed, else \"Upcoming call\" for one call and \"Upcoming calls\" otherwise).",
+  "frames": [
+    {
+      "name": "a history's turns, oldest first, in the SDK's words",
+      "frame": {
+        "type": "history",
+        "turns": [
+          { "id": "a1b2c3d4e5f6", "role": "user", "text": "Is my order shipped?", "at": "2026-10-13T09:30:00Z", "channel": "chat" },
+          { "id": "a1b2c3d4e5f7", "role": "assistant", "text": "Yes, it left this morning.", "at": "2026-10-13T09:30:04.120Z", "channel": "chat" }
+        ],
+        "continued": true
+      },
+      "turns": [
+        { "id": "a1b2c3d4e5f6", "role": "customer", "text": "Is my order shipped?", "at": "2026-10-13T09:30:00Z", "channel": "chat" },
+        { "id": "a1b2c3d4e5f7", "role": "agent", "text": "Yes, it left this morning.", "at": "2026-10-13T09:30:04.120Z", "channel": "chat" }
+      ]
+    },
+    {
+      "name": "a call's turns keep their voice channel",
+      "frame": {
+        "type": "history",
+        "turns": [
+          { "id": "b00000000001", "role": "assistant", "text": "Hi, this is Asha from Graine Care.", "at": "2026-10-13T11:00:00Z", "channel": "voice" },
+          { "id": "b00000000002", "role": "user", "text": "Hi Asha.", "at": "2026-10-13T11:00:03Z", "channel": "voice" }
+        ],
+        "continued": true
+      },
+      "turns": [
+        { "id": "b00000000001", "role": "agent", "text": "Hi, this is Asha from Graine Care.", "at": "2026-10-13T11:00:00Z", "channel": "voice" },
+        { "id": "b00000000002", "role": "customer", "text": "Hi Asha.", "at": "2026-10-13T11:00:03Z", "channel": "voice" }
+      ]
+    },
+    {
+      "name": "a channel the SDK does not know, or none, is chat",
+      "frame": {
+        "type": "history",
+        "turns": [
+          { "id": "c00000000001", "role": "user", "text": "Sent from somewhere new", "at": "2026-10-13T12:00:00Z", "channel": "sms" },
+          { "id": "c00000000002", "role": "assistant", "text": "Got it.", "at": "2026-10-13T12:00:02Z" }
+        ],
+        "continued": true
+      },
+      "turns": [
+        { "id": "c00000000001", "role": "customer", "text": "Sent from somewhere new", "at": "2026-10-13T12:00:00Z", "channel": "chat" },
+        { "id": "c00000000002", "role": "agent", "text": "Got it.", "at": "2026-10-13T12:00:02Z", "channel": "chat" }
+      ]
+    },
+    {
+      "name": "a turn that cannot be read is skipped and the rest are kept",
+      "frame": {
+        "type": "history",
+        "turns": [
+          null,
+          "Where is my order?",
+          { "id": "d00000000001", "role": "system", "text": "You are a helpful agent.", "at": "2026-10-13T12:00:00Z", "channel": "chat" },
+          { "id": "d00000000002", "role": "user", "text": "", "at": "2026-10-13T12:00:01Z", "channel": "chat" },
+          { "id": "d00000000003", "role": "user", "text": "   ", "at": "2026-10-13T12:00:02Z", "channel": "chat" },
+          { "id": "d00000000004", "role": "user", "text": 42, "at": "2026-10-13T12:00:03Z", "channel": "chat" },
+          { "id": "d00000000005", "role": "user", "text": "No time on this one", "channel": "chat" },
+          { "id": "d00000000006", "role": "user", "text": "A time nobody can read", "at": "yesterday", "channel": "chat" },
+          { "id": "d00000000007", "role": "assistant", "text": "This one is fine.", "at": "2026-10-13T12:00:09Z", "channel": "chat" }
+        ],
+        "continued": true
+      },
+      "turns": [
+        { "id": "d00000000007", "role": "agent", "text": "This one is fine.", "at": "2026-10-13T12:00:09Z", "channel": "chat" }
+      ]
+    },
+    {
+      "name": "a missing or repeated id is made up, so every turn has its own",
+      "frame": {
+        "type": "history",
+        "turns": [
+          { "role": "user", "text": "one", "at": "2026-10-13T12:00:00Z", "channel": "chat" },
+          { "id": "e00000000001", "role": "assistant", "text": "two", "at": "2026-10-13T12:00:01Z", "channel": "chat" },
+          { "id": "e00000000001", "role": "user", "text": "three", "at": "2026-10-13T12:00:02Z", "channel": "chat" },
+          { "id": "", "role": "assistant", "text": "four", "at": "2026-10-13T12:00:03Z", "channel": "chat" }
+        ],
+        "continued": true
+      },
+      "turns": [
+        { "id": "h0", "role": "customer", "text": "one", "at": "2026-10-13T12:00:00Z" },
+        { "id": "e00000000001", "role": "agent", "text": "two", "at": "2026-10-13T12:00:01Z" },
+        { "id": "h2", "role": "customer", "text": "three", "at": "2026-10-13T12:00:02Z" },
+        { "id": "h3", "role": "agent", "text": "four", "at": "2026-10-13T12:00:03Z" }
+      ]
+    },
+    {
+      "name": "an empty history restores nothing",
+      "frame": { "type": "history", "turns": [], "continued": true },
+      "turns": []
+    },
+    {
+      "name": "turns that are not a list: the frame is ignored",
+      "frame": { "type": "history", "turns": { "0": { "role": "user", "text": "hi", "at": "2026-10-13T12:00:00Z" } }, "continued": true },
+      "turns": null
+    },
+    {
+      "name": "no turns at all: the frame is ignored",
+      "frame": { "type": "history", "continued": true },
+      "turns": null
+    },
+    {
+      "name": "turns as a string: the frame is ignored",
+      "frame": { "type": "history", "turns": "[]", "continued": true },
+      "turns": null
+    }
+  ],
+  "restore": [
+    {
+      "name": "the history replaces what the chat showed, so nothing appears twice",
+      "steps": [
+        { "agent": "Hello! How can I help?" },
+        { "customer": "Where is my order?" },
+        { "agent": "It ships today." },
+        { "opened": true },
+        {
+          "history": {
+            "type": "history",
+            "turns": [
+              { "id": "aa0000000001", "role": "assistant", "text": "Hello! How can I help?", "at": "2026-10-13T09:29:00Z", "channel": "chat" },
+              { "id": "aa0000000002", "role": "user", "text": "Where is my order?", "at": "2026-10-13T09:30:00Z", "channel": "chat" },
+              { "id": "aa0000000003", "role": "assistant", "text": "It ships today.", "at": "2026-10-13T09:30:04Z", "channel": "chat" }
+            ],
+            "continued": true
+          }
+        }
+      ],
+      "turns": [
+        { "role": "agent", "text": "Hello! How can I help?", "restored": true, "id": "aa0000000001", "at": "2026-10-13T09:29:00Z" },
+        { "role": "customer", "text": "Where is my order?", "restored": true, "id": "aa0000000002", "at": "2026-10-13T09:30:00Z" },
+        { "role": "agent", "text": "It ships today.", "restored": true, "id": "aa0000000003", "at": "2026-10-13T09:30:04Z" }
+      ]
+    },
+    {
+      "name": "messages still waiting to be sent stay, after the history, in order",
+      "steps": [
+        { "agent": "Hi!" },
+        { "customer": "one", "delivery": "sending" },
+        { "customer": "two", "delivery": "sending" },
+        {
+          "history": {
+            "type": "history",
+            "turns": [
+              { "id": "ab0000000001", "role": "user", "text": "Is my refund through?", "at": "2026-10-12T08:00:00Z", "channel": "chat" },
+              { "id": "ab0000000002", "role": "assistant", "text": "It is, since Monday.", "at": "2026-10-12T08:00:05Z", "channel": "chat" }
+            ],
+            "continued": true
+          }
+        }
+      ],
+      "turns": [
+        { "role": "customer", "text": "Is my refund through?", "restored": true },
+        { "role": "agent", "text": "It is, since Monday.", "restored": true },
+        { "role": "customer", "text": "one", "delivery": "sending" },
+        { "role": "customer", "text": "two", "delivery": "sending" }
+      ]
+    },
+    {
+      "name": "a message that could not be sent stays, still not sent",
+      "steps": [
+        { "agent": "Hi!" },
+        { "customer": "Are you there?", "delivery": "failed" },
+        {
+          "history": {
+            "type": "history",
+            "turns": [
+              { "id": "ac0000000001", "role": "user", "text": "Is my refund through?", "at": "2026-10-12T08:00:00Z", "channel": "chat" },
+              { "id": "ac0000000002", "role": "assistant", "text": "It is, since Monday.", "at": "2026-10-12T08:00:05Z", "channel": "chat" }
+            ],
+            "continued": true
+          }
+        }
+      ],
+      "turns": [
+        { "role": "customer", "text": "Is my refund through?", "restored": true },
+        { "role": "agent", "text": "It is, since Monday.", "restored": true },
+        { "role": "customer", "text": "Are you there?", "delivery": "failed" }
+      ]
+    },
+    {
+      "name": "what went out as the connection opened is kept: the history cannot hold it yet",
+      "steps": [
+        { "agent": "Hi!" },
+        { "customer": "Typed in the tunnel", "delivery": "sending" },
+        { "opened": true },
+        { "customer": "And one more" },
+        {
+          "history": {
+            "type": "history",
+            "turns": [
+              { "id": "ad0000000001", "role": "assistant", "text": "Hi!", "at": "2026-10-14T05:00:00Z", "channel": "chat" }
+            ],
+            "continued": true
+          }
+        }
+      ],
+      "turns": [
+        { "role": "agent", "text": "Hi!", "restored": true },
+        { "role": "customer", "text": "Typed in the tunnel" },
+        { "role": "customer", "text": "And one more" }
+      ]
+    },
+    {
+      "name": "a reconnect's history replaces the last one, with nothing twice",
+      "steps": [
+        { "opened": true },
+        {
+          "history": {
+            "type": "history",
+            "turns": [
+              { "id": "ae0000000001", "role": "user", "text": "Where is my order?", "at": "2026-10-13T09:30:00Z", "channel": "chat" },
+              { "id": "ae0000000002", "role": "assistant", "text": "It ships today.", "at": "2026-10-13T09:30:04Z", "channel": "chat" }
+            ],
+            "continued": true
+          }
+        },
+        { "customer": "Can I change the address?" },
+        { "agent": "Yes, what is the new one?" },
+        { "opened": true },
+        {
+          "history": {
+            "type": "history",
+            "turns": [
+              { "id": "ae0000000001", "role": "user", "text": "Where is my order?", "at": "2026-10-13T09:30:00Z", "channel": "chat" },
+              { "id": "ae0000000002", "role": "assistant", "text": "It ships today.", "at": "2026-10-13T09:30:04Z", "channel": "chat" },
+              { "id": "ae0000000003", "role": "user", "text": "Can I change the address?", "at": "2026-10-14T05:00:00Z", "channel": "chat" },
+              { "id": "ae0000000004", "role": "assistant", "text": "Yes, what is the new one?", "at": "2026-10-14T05:00:03Z", "channel": "chat" }
+            ],
+            "continued": true
+          }
+        }
+      ],
+      "turns": [
+        { "role": "customer", "text": "Where is my order?", "restored": true },
+        { "role": "agent", "text": "It ships today.", "restored": true },
+        { "role": "customer", "text": "Can I change the address?", "restored": true },
+        { "role": "agent", "text": "Yes, what is the new one?", "restored": true }
+      ]
+    },
+    {
+      "name": "a frame whose turns are not a list changes nothing",
+      "steps": [
+        { "agent": "Hi!" },
+        { "customer": "Hello" },
+        { "opened": true },
+        { "history": { "type": "history", "turns": "none", "continued": true } }
+      ],
+      "turns": [
+        { "role": "agent", "text": "Hi!" },
+        { "role": "customer", "text": "Hello" }
+      ]
+    },
+    {
+      "name": "an empty history changes nothing",
+      "steps": [
+        { "agent": "Hi!" },
+        { "customer": "Hello" },
+        { "opened": true },
+        { "history": { "type": "history", "turns": [], "continued": true } }
+      ],
+      "turns": [
+        { "role": "agent", "text": "Hi!" },
+        { "role": "customer", "text": "Hello" }
+      ]
+    },
+    {
+      "name": "a call's turns come back on the voice channel, a stranger channel as chat",
+      "steps": [
+        { "opened": true },
+        {
+          "history": {
+            "type": "history",
+            "turns": [
+              { "id": "af0000000001", "role": "user", "text": "Call me, please", "at": "2026-10-13T10:00:00Z", "channel": "chat" },
+              { "id": "af0000000002", "role": "assistant", "text": "Hi, it's Asha.", "at": "2026-10-13T10:01:00Z", "channel": "voice" },
+              { "id": "af0000000003", "role": "user", "text": "Hi Asha", "at": "2026-10-13T10:01:04Z", "channel": "voice" },
+              { "id": "af0000000004", "role": "assistant", "text": "Anything else?", "at": "2026-10-13T10:09:00Z", "channel": "fax" }
+            ],
+            "continued": true
+          }
+        }
+      ],
+      "turns": [
+        { "role": "customer", "text": "Call me, please", "restored": true, "channel": "chat" },
+        { "role": "agent", "text": "Hi, it's Asha.", "restored": true, "channel": "voice", "at": "2026-10-13T10:01:00Z" },
+        { "role": "customer", "text": "Hi Asha", "restored": true, "channel": "voice" },
+        { "role": "agent", "text": "Anything else?", "restored": true, "channel": "chat" }
+      ]
+    }
+  ],
+  "rows": [
+    {
+      "name": "a conversation all from today has no separator",
+      "now": "2026-10-14T06:30:00Z",
+      "timeZone": "Asia/Kolkata",
+      "utcOffsetMinutes": 330,
+      "turns": [
+        { "role": "customer", "text": "Hi", "at": "2026-10-14T04:00:00Z" },
+        { "role": "agent", "text": "Hello!", "at": "2026-10-14T04:00:03Z" }
+      ],
+      "rows": [{ "turn": 0 }, { "turn": 1 }]
+    },
+    {
+      "name": "yesterday's turns sit under Yesterday and today's under Today",
+      "now": "2026-10-14T06:30:00Z",
+      "timeZone": "Asia/Kolkata",
+      "utcOffsetMinutes": 330,
+      "turns": [
+        { "role": "customer", "text": "Is my order shipped?", "at": "2026-10-13T09:30:00Z" },
+        { "role": "agent", "text": "Yes, it left this morning.", "at": "2026-10-13T09:30:04Z" },
+        { "role": "customer", "text": "Thanks! Where is it now?", "at": "2026-10-14T05:00:00Z" }
+      ],
+      "rows": [{ "day": "yesterday" }, { "turn": 0 }, { "turn": 1 }, { "day": "today" }, { "turn": 2 }]
+    },
+    {
+      "name": "an older day is named by its date",
+      "now": "2026-10-14T06:30:00Z",
+      "timeZone": "Asia/Kolkata",
+      "utcOffsetMinutes": 330,
+      "turns": [
+        { "role": "customer", "text": "I want to change my plan", "at": "2026-10-10T08:00:00Z" },
+        { "role": "agent", "text": "Sure, which one?", "at": "2026-10-10T08:00:05Z" },
+        { "role": "customer", "text": "Still thinking", "at": "2026-10-13T12:00:00Z" },
+        { "role": "customer", "text": "The bigger one", "at": "2026-10-14T06:00:00Z" }
+      ],
+      "rows": [
+        { "day": "2026-10-10" }, { "turn": 0 }, { "turn": 1 },
+        { "day": "yesterday" }, { "turn": 2 },
+        { "day": "today" }, { "turn": 3 }
+      ]
+    },
+    {
+      "name": "a run of voice turns is one row, between the chat bubbles",
+      "now": "2026-10-14T06:30:00Z",
+      "timeZone": "Asia/Kolkata",
+      "utcOffsetMinutes": 330,
+      "turns": [
+        { "role": "customer", "text": "Can you call me?", "at": "2026-10-14T03:00:00Z", "channel": "chat" },
+        { "role": "agent", "text": "Calling you now.", "at": "2026-10-14T03:00:02Z", "channel": "chat" },
+        { "role": "agent", "text": "Hi, this is Asha.", "at": "2026-10-14T03:01:00Z", "channel": "voice" },
+        { "role": "customer", "text": "Hi Asha", "at": "2026-10-14T03:01:05Z", "channel": "voice" },
+        { "role": "agent", "text": "How can I help?", "at": "2026-10-14T03:01:08Z", "channel": "voice" },
+        { "role": "customer", "text": "Thanks for the call", "at": "2026-10-14T03:10:00Z", "channel": "chat" }
+      ],
+      "rows": [{ "turn": 0 }, { "turn": 1 }, { "voice": [2, 4] }, { "turn": 5 }]
+    },
+    {
+      "name": "two calls with a message between them are two rows",
+      "now": "2026-10-14T06:30:00Z",
+      "timeZone": "Asia/Kolkata",
+      "utcOffsetMinutes": 330,
+      "turns": [
+        { "role": "agent", "text": "Hello", "at": "2026-10-14T02:00:00Z", "channel": "voice" },
+        { "role": "customer", "text": "Hi", "at": "2026-10-14T02:00:02Z", "channel": "voice" },
+        { "role": "customer", "text": "Call me again later", "at": "2026-10-14T02:30:00Z", "channel": "chat" },
+        { "role": "agent", "text": "Hello again", "at": "2026-10-14T04:00:00Z", "channel": "voice" }
+      ],
+      "rows": [{ "voice": [0, 1] }, { "turn": 2 }, { "voice": [3, 3] }]
+    },
+    {
+      "name": "a call that runs past midnight is split at the day",
+      "now": "2026-10-14T06:30:00Z",
+      "timeZone": "Asia/Kolkata",
+      "utcOffsetMinutes": 330,
+      "turns": [
+        { "role": "agent", "text": "Hello", "at": "2026-10-13T18:25:00Z", "channel": "voice" },
+        { "role": "customer", "text": "Hi", "at": "2026-10-13T18:26:00Z", "channel": "voice" },
+        { "role": "agent", "text": "Still there?", "at": "2026-10-13T18:31:00Z", "channel": "voice" }
+      ],
+      "rows": [{ "day": "yesterday" }, { "voice": [0, 1] }, { "day": "today" }, { "voice": [2, 2] }]
+    },
+    {
+      "name": "the day is the device's, not UTC's",
+      "now": "2026-10-14T06:30:00Z",
+      "timeZone": "Asia/Kolkata",
+      "utcOffsetMinutes": 330,
+      "turns": [
+        { "role": "customer", "text": "Late on the 13th", "at": "2026-10-13T18:00:00Z" },
+        { "role": "customer", "text": "Early on the 14th", "at": "2026-10-13T19:00:00Z" }
+      ],
+      "rows": [{ "day": "yesterday" }, { "turn": 0 }, { "day": "today" }, { "turn": 1 }]
+    },
+    {
+      "name": "no turns, no rows",
+      "now": "2026-10-14T06:30:00Z",
+      "timeZone": "Asia/Kolkata",
+      "utcOffsetMinutes": 330,
+      "turns": [],
+      "rows": []
+    }
+  ],
+  "display": [
+    {
+      "name": "nothing set (an older server): earlier messages under their day, New conversation offered, no starters, the card in the SDK's words",
+      "now": "2026-10-14T06:30:00Z",
+      "timeZone": "Asia/Kolkata",
+      "utcOffsetMinutes": 330,
+      "chat": {},
+      "turns": [
+        { "id": "r1", "role": "customer", "text": "Is my order shipped?", "at": "2026-10-13T04:30:00Z", "restored": true },
+        { "id": "r2", "role": "agent", "text": "Yes, it left this morning.", "at": "2026-10-13T04:30:05Z", "restored": true }
+      ],
+      "upcoming": 1,
+      "shown": ["r1", "r2"],
+      "rows": [{ "day": "yesterday" }, { "turn": 0 }, { "turn": 1 }],
+      "starters": false,
+      "newConversation": true,
+      "card": true,
+      "cardTitle": "Upcoming call"
+    },
+    {
+      "name": "earlier messages hidden: the window opens as a new chat — the starters, no New conversation",
+      "now": "2026-10-14T06:30:00Z",
+      "timeZone": "Asia/Kolkata",
+      "utcOffsetMinutes": 330,
+      "chat": { "showHistory": false },
+      "turns": [
+        { "id": "r1", "role": "customer", "text": "Is my order shipped?", "at": "2026-10-13T04:30:00Z", "restored": true },
+        { "id": "r2", "role": "agent", "text": "Yes, it left this morning.", "at": "2026-10-13T04:30:05Z", "restored": true }
+      ],
+      "upcoming": 2,
+      "shown": [],
+      "rows": [],
+      "starters": true,
+      "newConversation": false,
+      "card": true,
+      "cardTitle": "Upcoming calls"
+    },
+    {
+      "name": "hidden, once the customer has written: only what was said since, with no day line",
+      "now": "2026-10-14T06:30:00Z",
+      "timeZone": "Asia/Kolkata",
+      "utcOffsetMinutes": 330,
+      "chat": { "showHistory": false },
+      "turns": [
+        { "id": "r1", "role": "customer", "text": "Is my order shipped?", "at": "2026-10-13T04:30:00Z", "restored": true },
+        { "id": "r2", "role": "agent", "text": "Yes, it left this morning.", "at": "2026-10-13T04:30:05Z", "restored": true },
+        { "id": "l1", "role": "customer", "text": "When will it arrive?", "at": "2026-10-14T06:00:00Z" },
+        { "id": "l2", "role": "agent", "text": "Tomorrow by 6 PM.", "at": "2026-10-14T06:00:04Z" }
+      ],
+      "upcoming": 0,
+      "shown": ["l1", "l2"],
+      "rows": [{ "turn": 0 }, { "turn": 1 }],
+      "starters": false,
+      "newConversation": false,
+      "card": false,
+      "cardTitle": "Upcoming calls"
+    },
+    {
+      "name": "shown, with today's messages after them: both days, New conversation offered",
+      "now": "2026-10-14T06:30:00Z",
+      "timeZone": "Asia/Kolkata",
+      "utcOffsetMinutes": 330,
+      "chat": { "showHistory": true, "newConversation": true, "showUpcomingCalls": true, "upcomingTitle": "" },
+      "turns": [
+        { "id": "r1", "role": "customer", "text": "Is my order shipped?", "at": "2026-10-13T04:30:00Z", "restored": true },
+        { "id": "r2", "role": "agent", "text": "Yes, it left this morning.", "at": "2026-10-13T04:30:05Z", "restored": true },
+        { "id": "l1", "role": "customer", "text": "When will it arrive?", "at": "2026-10-14T06:00:00Z" },
+        { "id": "l2", "role": "agent", "text": "Tomorrow by 6 PM.", "at": "2026-10-14T06:00:04Z" }
+      ],
+      "upcoming": 3,
+      "shown": ["r1", "r2", "l1", "l2"],
+      "rows": [{ "day": "yesterday" }, { "turn": 0 }, { "turn": 1 }, { "day": "today" }, { "turn": 2 }, { "turn": 3 }],
+      "starters": false,
+      "newConversation": true,
+      "card": true,
+      "cardTitle": "Upcoming calls"
+    },
+    {
+      "name": "New conversation off: no compose control, even with earlier messages on screen",
+      "now": "2026-10-14T06:30:00Z",
+      "timeZone": "Asia/Kolkata",
+      "utcOffsetMinutes": 330,
+      "chat": { "newConversation": false },
+      "turns": [
+        { "id": "r1", "role": "customer", "text": "Is my order shipped?", "at": "2026-10-13T04:30:00Z", "restored": true },
+        { "id": "r2", "role": "agent", "text": "Yes, it left this morning.", "at": "2026-10-13T04:30:05Z", "restored": true }
+      ],
+      "upcoming": 0,
+      "shown": ["r1", "r2"],
+      "rows": [{ "day": "yesterday" }, { "turn": 0 }, { "turn": 1 }],
+      "starters": false,
+      "newConversation": false,
+      "card": false,
+      "cardTitle": "Upcoming calls"
+    },
+    {
+      "name": "a new chat, nothing restored: no New conversation",
+      "now": "2026-10-14T06:30:00Z",
+      "timeZone": "Asia/Kolkata",
+      "utcOffsetMinutes": 330,
+      "chat": { "newConversation": true },
+      "turns": [],
+      "upcoming": 0,
+      "shown": [],
+      "rows": [],
+      "starters": true,
+      "newConversation": false,
+      "card": false,
+      "cardTitle": "Upcoming calls"
+    },
+    {
+      "name": "booked calls off: no card, whatever is booked",
+      "now": "2026-10-14T06:30:00Z",
+      "timeZone": "Asia/Kolkata",
+      "utcOffsetMinutes": 330,
+      "chat": { "showUpcomingCalls": false, "upcomingTitle": "Your calls" },
+      "turns": [],
+      "upcoming": 2,
+      "shown": [],
+      "rows": [],
+      "starters": true,
+      "newConversation": false,
+      "card": false,
+      "cardTitle": "Your calls"
+    },
+    {
+      "name": "the brand's title, trimmed",
+      "now": "2026-10-14T06:30:00Z",
+      "timeZone": "Asia/Kolkata",
+      "utcOffsetMinutes": 330,
+      "chat": { "upcomingTitle": "  Your calls with Asha  " },
+      "turns": [],
+      "upcoming": 1,
+      "shown": [],
+      "rows": [],
+      "starters": true,
+      "newConversation": false,
+      "card": true,
+      "cardTitle": "Your calls with Asha"
+    },
+    {
+      "name": "a value of the wrong type is the default",
+      "now": "2026-10-14T06:30:00Z",
+      "timeZone": "Asia/Kolkata",
+      "utcOffsetMinutes": 330,
+      "chat": { "showHistory": "false", "newConversation": 0, "showUpcomingCalls": null, "upcomingTitle": 7 },
+      "turns": [
+        { "id": "r1", "role": "customer", "text": "Is my order shipped?", "at": "2026-10-13T04:30:00Z", "restored": true },
+        { "id": "r2", "role": "agent", "text": "Yes, it left this morning.", "at": "2026-10-13T04:30:05Z", "restored": true }
+      ],
+      "upcoming": 1,
+      "shown": ["r1", "r2"],
+      "rows": [{ "day": "yesterday" }, { "turn": 0 }, { "turn": 1 }],
+      "starters": false,
+      "newConversation": true,
+      "card": true,
+      "cardTitle": "Upcoming call"
+    },
+    {
+      "name": "an earlier call is hidden with the rest of the earlier conversation",
+      "now": "2026-10-14T06:30:00Z",
+      "timeZone": "Asia/Kolkata",
+      "utcOffsetMinutes": 330,
+      "chat": { "showHistory": false },
+      "turns": [
+        { "id": "r3", "role": "agent", "text": "Hi, this is Asha calling.", "at": "2026-10-13T12:35:00Z", "restored": true, "channel": "voice" },
+        { "id": "r4", "role": "customer", "text": "Hi Asha, about my order", "at": "2026-10-13T12:35:20Z", "restored": true, "channel": "voice" },
+        { "id": "l1", "role": "customer", "text": "When will it arrive?", "at": "2026-10-14T06:00:00Z" }
+      ],
+      "upcoming": 0,
+      "shown": ["l1"],
+      "rows": [{ "turn": 0 }],
+      "starters": false,
+      "newConversation": false,
+      "card": false,
+      "cardTitle": "Upcoming calls"
+    },
+    {
+      "name": "and shown with it: one row for the call, under its day",
+      "now": "2026-10-14T06:30:00Z",
+      "timeZone": "Asia/Kolkata",
+      "utcOffsetMinutes": 330,
+      "chat": { "showHistory": true },
+      "turns": [
+        { "id": "r3", "role": "agent", "text": "Hi, this is Asha calling.", "at": "2026-10-13T12:35:00Z", "restored": true, "channel": "voice" },
+        { "id": "r4", "role": "customer", "text": "Hi Asha, about my order", "at": "2026-10-13T12:35:20Z", "restored": true, "channel": "voice" },
+        { "id": "l1", "role": "customer", "text": "When will it arrive?", "at": "2026-10-14T06:00:00Z" }
+      ],
+      "upcoming": 0,
+      "shown": ["r3", "r4", "l1"],
+      "rows": [{ "day": "yesterday" }, { "voice": [0, 1] }, { "day": "today" }, { "turn": 2 }],
+      "starters": false,
+      "newConversation": true,
+      "card": false,
+      "cardTitle": "Upcoming calls"
+    }
+  ]
+}

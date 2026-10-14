@@ -87,8 +87,17 @@ internal class VariableStore(buildTime: Map<String, Any?> = emptyMap()) {
     @Volatile private var dashboard: Map<String, String> = emptyMap()
     @Volatile private var runtime: Map<String, String> = emptyMap()
     @Volatile private var identity: Map<String, String> = emptyMap()
+    /**
+     * The trait that names the user (the session's `identity.field`): it goes,
+     * raw, only to Graine's own requests, so it is left out of the variables
+     * and the context's `user` — the identifier never reaches a prompt.
+     * `user_id` until the session says otherwise.
+     */
+    @Volatile private var identityField: String = IdentityRules.DEFAULT_FIELD
 
     fun setDashboardDefaults(values: Map<String, Any?>) { dashboard = flatten(values) }
+
+    fun setIdentityField(field: String) { identityField = field }
 
     /** Merged over what is there. `null` under a key removes it; `null` for the whole map clears. */
     @Synchronized
@@ -108,10 +117,11 @@ internal class VariableStore(buildTime: Map<String, Any?> = emptyMap()) {
         identity = if (traits == null) emptyMap() else flatten(traits).mapValues { Masking.mask(it.value) }
     }
 
-    fun identity(): Map<String, String> = identity
+    /** Who is signed in, less the identifier itself. */
+    fun identity(): Map<String, String> = identity.filterKeys { it.trim().lowercase() != identityField }
 
     fun merged(): Map<String, String> = LinkedHashMap<String, String>().apply {
-        putAll(dashboard); putAll(buildTime); putAll(runtime); putAll(identity)
+        putAll(dashboard); putAll(buildTime); putAll(runtime); putAll(identity())
     }
 
     companion object {
@@ -389,6 +399,29 @@ data class GraineScreen @JvmOverloads constructor(
  * buildContextFrame(), masked on the way out.
  */
 internal object ContextFrame {
+    /**
+     * `availableActions` for the frame — present, or deliberately absent
+     * (the React Native and iOS SDKs' rule). The runtime reads an ARRAY as
+     * the complete set of what may be called here, so [] forbids everything
+     * while an ABSENT key allows everything the dashboard declared:
+     *
+     *  - a screen that STATES its actions is honoured exactly, [] included —
+     *    narrowed to the ones this build registered, since an action the
+     *    screen names but nothing implements would be offered and then
+     *    refused mid-sentence;
+     *  - otherwise every registered action is offered;
+     *  - nothing registered and nothing stated leaves the key out, so a
+     *    momentarily empty registry never disarms the agent.
+     */
+    fun availableActions(stated: List<String>?, registered: Collection<String>): List<String>? {
+        if (stated != null) return stated.filter { it in registered }
+        return if (registered.isEmpty()) null else registered.toList()
+    }
+
+    /**
+     * The frame. With [registered] (the SDK passes its handlers), the actions
+     * follow [availableActions]; without it, a screen's own list is carried as stated.
+     */
     fun build(
         screen: GraineScreen?,
         screenSinceMs: Long,
@@ -396,6 +429,7 @@ internal object ContextFrame {
         identity: Map<String, String>,
         appVersion: String?,
         recentEvents: List<JSONObject>,
+        registered: Collection<String>? = null,
     ): JSONObject? {
         if (screen == null && identity.isEmpty() && recentEvents.isEmpty()) return null
         val ctx = JSONObject()
@@ -431,9 +465,10 @@ internal object ContextFrame {
         if (identity.isNotEmpty()) ctx.put("user", JSONObject(identity as Map<*, *>))
         appVersion?.let { ctx.put("app_version", it) }
         if (recentEvents.isNotEmpty()) ctx.put("recent_events", JSONArray(recentEvents))
+        val actions = if (registered != null) availableActions(screen?.availableActions, registered) else screen?.availableActions
         return JSONObject()
             .put("context", Masking.deep(ctx))
-            .apply { screen?.availableActions?.let { put("availableActions", JSONArray(it)) } }
+            .apply { actions?.let { put("availableActions", JSONArray(it)) } }
     }
 }
 
@@ -708,12 +743,38 @@ internal object Widgets {
         return "ios"
     }
 
-    /** The sentence the agent hears when several were chosen: "Let's compare Creta and Seltos." */
-    fun manySummary(titles: List<String>, verb: String = "compare"): String {
+    /**
+     * The one button under a multi-select list. Below two it says how many
+     * more — and not "to <label>": the author's label is a button's word
+     * ("Compare", "Taken"), not always a verb, and "Pick 2 more to taken" is
+     * what reading it as one said.
+     */
+    fun manyButtonLabel(chosen: Int, selectLabel: String): String =
+        if (chosen < 2) "Pick ${2 - chosen} more" else "$selectLabel $chosen"
+
+    /**
+     * A full-screen component's footer: on a call, "STILL LISTENING" and how to
+     * answer — the agent is still there, listening. A component that arrived in
+     * the chat is on no call: no footer at all.
+     */
+    fun screenFooter(prompt: String, typed: Boolean): Pair<String, String>? =
+        if (typed) null else "STILL LISTENING" to prompt.ifEmpty { "Tap one, or just say it." }
+
+    /** The component's close control, for a screen reader: in the chat there is no talking to keep on with. */
+    fun closeLabel(typed: Boolean): String = if (typed) "Close" else "Close and keep talking"
+
+    /**
+     * The sentence the agent hears when several were chosen — and the user's
+     * own bubble in a text chat: the button's label as written, then the names
+     * ("Taken: Morning and Evening"). Never the label read as a verb. No
+     * label: the names alone.
+     */
+    fun manySummary(titles: List<String>, label: String = "Compare"): String {
         val names = titles.map { it.trim() }.filter { it.isNotEmpty() }
         if (names.isEmpty()) return ""
         val list = if (names.size == 1) names[0] else "${names.dropLast(1).joinToString(", ")} and ${names.last()}"
-        return "Let's $verb $list."
+        val lead = label.trim()
+        return if (lead.isEmpty()) list else "$lead: $list"
     }
 
     private val ACTION_NAME = Regex("^[a-z][a-z0-9_]{0,63}$")
@@ -1568,6 +1629,14 @@ data class ThemeTokens @JvmOverloads constructor(
      * "none", a plain surface, when the server says nothing (an older one).
      */
     val chrome: String = "none",
+    /**
+     * The chat window's resolved values (contract §7), as the server sent
+     * them; null from a server that predates them — [Surfaces.chatOf] then
+     * derives them from [colors].
+     */
+    val chat: ChatTokens? = null,
+    /** The call screen's resolved values (contract §7); null from an older server — [Surfaces.callOf] derives them. */
+    val call: CallTokens? = null,
 ) {
     val isDark: Boolean get() = scheme == "dark"
 
@@ -1607,6 +1676,9 @@ data class ThemeTokens @JvmOverloads constructor(
         .put("glass", glass?.let { JSONObject().put("blur", Design.n(it.blur)).put("surfaceOpacity", Design.n(it.surfaceOpacity)) } ?: JSONObject.NULL)
         .put("bubbles", bubbles)
         .put("chrome", chrome)
+        // Only what the server sent: a design from before these tokens writes back without them.
+        .apply { chat?.let { put("chat", Surfaces.json(it)) } }
+        .apply { call?.let { put("call", Surfaces.json(it)) } }
 }
 
 /**
@@ -1633,6 +1705,10 @@ data class DesignConfig @JvmOverloads constructor(
     val iconStyle: String? = null,
     /** "none" or "window" when the brand turned the knob; the tokens' [ThemeTokens.chrome] is what is drawn. */
     val chrome: String? = null,
+    /** The chat window's knobs as the brand set them (Garage → Chat window); the tokens' [ThemeTokens.chat] is what is drawn. */
+    val chat: Map<String, Any?>? = null,
+    /** The call screen's knobs as the brand set them (Garage → Call screen); the tokens' [ThemeTokens.call] is what is drawn. */
+    val call: Map<String, Any?>? = null,
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("preset", preset)
@@ -1651,6 +1727,8 @@ data class DesignConfig @JvmOverloads constructor(
         launcherShape?.let { put("launcherShape", it) }
         iconStyle?.let { put("iconStyle", it) }
         chrome?.let { put("chrome", it) }
+        chat?.let { put("chat", Protocol.toJson(it)) }
+        call?.let { put("call", Protocol.toJson(it)) }
     }
 }
 
@@ -1870,8 +1948,14 @@ object Design {
             launcherShape = s("launcherShape"),
             iconStyle = s("iconStyle"),
             chrome = s("chrome"),
+            chat = knobs(o?.opt("chat")),
+            call = knobs(o?.opt("call")),
         )
     }
+
+    /** A group of knobs, as plain values (strings, numbers, lists, maps). */
+    @Suppress("UNCHECKED_CAST")
+    private fun knobs(raw: Any?): Map<String, Any?>? = (raw as? JSONObject)?.let { Js.plain(it) as Map<String, Any?> }
 
     /** One scheme's tokens, or null when there is nothing there to read (no `colors` at all). */
     internal fun tokens(o: JSONObject?, scheme: String): ThemeTokens? {
@@ -1890,29 +1974,30 @@ object Design {
         val motion = obj(o, "motion")
         val icons = obj(o, "icons")
         fun weight(k: String, fallback: Int) = Js.finite(weights?.opt(k))?.let { Js.round(it).coerceIn(100.0, 900.0).toInt() } ?: fallback
+        val colors = ThemeColors(
+            background = hex(c, "background", dc.background),
+            surface = hex(c, "surface", dc.surface),
+            surfaceRaised = hex(c, "surfaceRaised", dc.surfaceRaised),
+            text = hex(c, "text", dc.text),
+            textMuted = hex(c, "textMuted", dc.textMuted),
+            border = hex(c, "border", dc.border),
+            accent = hex(c, "accent", dc.accent),
+            onAccent = hex(c, "onAccent", dc.onAccent),
+            accentSoft = hex(c, "accentSoft", dc.accentSoft),
+            success = hex(c, "success", dc.success),
+            warning = hex(c, "warning", dc.warning),
+            danger = hex(c, "danger", dc.danger),
+            userBubble = hex(c, "userBubble", dc.userBubble),
+            userBubbleText = hex(c, "userBubbleText", dc.userBubbleText),
+            agentBubble = hex(c, "agentBubble", dc.agentBubble),
+            agentBubbleText = hex(c, "agentBubbleText", dc.agentBubbleText),
+            scrim = hex(c, "scrim", dc.scrim),
+        )
         return ThemeTokens(
             v = Js.finite(o?.opt("v"))?.toInt() ?: 1,
             preset = text(o, "preset", d.preset),
             scheme = word(o, "scheme", listOf("light", "dark"), scheme),
-            colors = ThemeColors(
-                background = hex(c, "background", dc.background),
-                surface = hex(c, "surface", dc.surface),
-                surfaceRaised = hex(c, "surfaceRaised", dc.surfaceRaised),
-                text = hex(c, "text", dc.text),
-                textMuted = hex(c, "textMuted", dc.textMuted),
-                border = hex(c, "border", dc.border),
-                accent = hex(c, "accent", dc.accent),
-                onAccent = hex(c, "onAccent", dc.onAccent),
-                accentSoft = hex(c, "accentSoft", dc.accentSoft),
-                success = hex(c, "success", dc.success),
-                warning = hex(c, "warning", dc.warning),
-                danger = hex(c, "danger", dc.danger),
-                userBubble = hex(c, "userBubble", dc.userBubble),
-                userBubbleText = hex(c, "userBubbleText", dc.userBubbleText),
-                agentBubble = hex(c, "agentBubble", dc.agentBubble),
-                agentBubbleText = hex(c, "agentBubbleText", dc.agentBubbleText),
-                scrim = hex(c, "scrim", dc.scrim),
-            ),
+            colors = colors,
             font = ThemeFont(
                 body = text(font, "body", d.font.body),
                 heading = text(font, "heading", d.font.heading),
@@ -1974,6 +2059,8 @@ object Design {
             bubbles = word(o, "bubbles", BUBBLES, d.bubbles),
             // Absent (an older server) or a word this build does not know: a plain surface.
             chrome = word(o, "chrome", CHROMES, d.chrome),
+            chat = Surfaces.chat(o?.opt("chat"), colors),
+            call = Surfaces.call(o?.opt("call"), colors),
         )
     }
 
@@ -2005,6 +2092,7 @@ object Design {
         font = CLASSIC_FONT, shape = CLASSIC_SHAPE, spacing = CLASSIC_SPACING,
         elevation = ThemeElevation(ThemeShadow(2.0, 8.0, 0.0, 0.08, "#000000"), CLASSIC_FLOATING, null),
         motion = CLASSIC_MOTION, icons = CLASSIC_ICONS, glass = null, bubbles = "filled", chrome = "none",
+        chat = Surfaces.CLASSIC_CHAT_LIGHT, call = Surfaces.CLASSIC_CALL,
     )
 
     /** Graine Classic in dark, as the server resolves it. */
@@ -2020,5 +2108,6 @@ object Design {
         font = CLASSIC_FONT, shape = CLASSIC_SHAPE, spacing = CLASSIC_SPACING,
         elevation = ThemeElevation(ThemeShadow(2.0, 8.0, 0.0, 0.16, "#000000"), CLASSIC_FLOATING, null),
         motion = CLASSIC_MOTION, icons = CLASSIC_ICONS, glass = null, bubbles = "filled", chrome = "none",
+        chat = Surfaces.CLASSIC_CHAT_DARK, call = Surfaces.CLASSIC_CALL,
     )
 }

@@ -1,0 +1,264 @@
+{
+  "comment": "Graine identity vectors v1 - contract section 1.4. Every server implementation must reproduce these exactly.",
+  "org_id": "organization-test-1f2e3d",
+  "user_keys": [
+    {
+      "field": "user_id",
+      "value": "P-1234",
+      "normalised_field": "user_id",
+      "normalised_value": "P-1234",
+      "user_key": "u1_kmp5hfqh27x5a7nqls3nyqcltm"
+    },
+    {
+      "field": "user_id",
+      "value": "  P-1234  ",
+      "normalised_field": "user_id",
+      "normalised_value": "P-1234",
+      "user_key": "u1_kmp5hfqh27x5a7nqls3nyqcltm"
+    },
+    {
+      "field": "user_id",
+      "value": "p-1234",
+      "normalised_field": "user_id",
+      "normalised_value": "p-1234",
+      "user_key": "u1_d3ybycxe5fvrwrql7rnob64v5l"
+    },
+    {
+      "field": "user_id",
+      "value": 4242,
+      "normalised_field": "user_id",
+      "normalised_value": "4242",
+      "user_key": "u1_nnw7afhopxaoniw65zhefhexe2"
+    },
+    {
+      "field": "user_id",
+      "value": "null",
+      "normalised_field": "user_id",
+      "normalised_value": null,
+      "user_key": null
+    },
+    {
+      "field": "user_id",
+      "value": "Undefined",
+      "normalised_field": "user_id",
+      "normalised_value": null,
+      "user_key": null
+    },
+    {
+      "field": "user_id",
+      "value": "",
+      "normalised_field": "user_id",
+      "normalised_value": null,
+      "user_key": null
+    },
+    {
+      "field": "user_id",
+      "value": null,
+      "normalised_field": "user_id",
+      "normalised_value": null,
+      "user_key": null
+    },
+    {
+      "field": "user_id",
+      "value": true,
+      "normalised_field": "user_id",
+      "normalised_value": null,
+      "user_key": null
+    },
+    {
+      "field": "user_id",
+      "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "normalised_field": "user_id",
+      "normalised_value": null,
+      "user_key": null
+    },
+    {
+      "field": "email",
+      "value": "Asha.Rao@Example.com ",
+      "normalised_field": "email",
+      "normalised_value": "asha.rao@example.com",
+      "user_key": "u1_5p7zwh4v7swa3rwxdzaug4gro4"
+    },
+    {
+      "field": "email",
+      "value": "asha.rao@example.com",
+      "normalised_field": "email",
+      "normalised_value": "asha.rao@example.com",
+      "user_key": "u1_5p7zwh4v7swa3rwxdzaug4gro4"
+    },
+    {
+      "field": "email",
+      "value": "not-an-email",
+      "normalised_field": "email",
+      "normalised_value": null,
+      "user_key": null
+    },
+    {
+      "field": "email",
+      "value": "[EMAIL]",
+      "normalised_field": "email",
+      "normalised_value": null,
+      "user_key": null
+    },
+    {
+      "field": "phone",
+      "value": "+91 98765 43210",
+      "normalised_field": "phone",
+      "normalised_value": "9876543210",
+      "user_key": "u1_34lycsoddyiywq5oppgou34wor"
+    },
+    {
+      "field": "phone",
+      "value": "098765-43210",
+      "normalised_field": "phone",
+      "normalised_value": "9876543210",
+      "user_key": "u1_34lycsoddyiywq5oppgou34wor"
+    },
+    {
+      "field": "phone",
+      "value": "9876543210",
+      "normalised_field": "phone",
+      "normalised_value": "9876543210",
+      "user_key": "u1_34lycsoddyiywq5oppgou34wor"
+    },
+    {
+      "field": "phone",
+      "value": "+1 (415) 555-0123",
+      "normalised_field": "phone",
+      "normalised_value": "4155550123",
+      "user_key": "u1_2u2s4uda4bbjtihzdvcb2bss6b"
+    },
+    {
+      "field": "phone",
+      "value": "12345",
+      "normalised_field": "phone",
+      "normalised_value": null,
+      "user_key": null
+    },
+    {
+      "field": "phone",
+      "value": "[PHONE]",
+      "normalised_field": "phone",
+      "normalised_value": null,
+      "user_key": null
+    },
+    {
+      "field": "patient_id",
+      "value": "MRN-000981",
+      "normalised_field": "patient_id",
+      "normalised_value": "MRN-000981",
+      "user_key": "u1_26emnecbtm4pktqzkxl3vmw2wu"
+    },
+    {
+      "field": "Patient_ID",
+      "value": "MRN-000981",
+      "normalised_field": "patient_id",
+      "normalised_value": "MRN-000981",
+      "user_key": "u1_26emnecbtm4pktqzkxl3vmw2wu"
+    },
+    {
+      "field": "patient-id",
+      "value": "MRN-000981",
+      "normalised_field": null,
+      "normalised_value": null,
+      "user_key": null
+    },
+    {
+      "field": "user_id",
+      "value": "Café",
+      "normalised_field": "user_id",
+      "normalised_value": "Café",
+      "user_key": "u1_wi6g3lftxwniksezxzgknbcg4n"
+    },
+    {
+      "field": "user_id",
+      "value": "Café",
+      "normalised_field": "user_id",
+      "normalised_value": "Café",
+      "user_key": "u1_wi6g3lftxwniksezxzgknbcg4n"
+    },
+    {
+      "field": "user_id",
+      "value": "\ufeffP-1234",
+      "normalised_field": "user_id",
+      "normalised_value": "\ufeffP-1234",
+      "user_key": "u1_kb77xu2fif6vvmsdc6uz4vzelm"
+    },
+    {
+      "field": "user_id",
+      "value": "\u001fP-1234\u001f",
+      "normalised_field": "user_id",
+      "normalised_value": "P-1234",
+      "user_key": "u1_kmp5hfqh27x5a7nqls3nyqcltm"
+    },
+    {
+      "field": "user_id",
+      "value": "\u0085P-1234\u0085",
+      "normalised_field": "user_id",
+      "normalised_value": "P-1234",
+      "user_key": "u1_kmp5hfqh27x5a7nqls3nyqcltm"
+    },
+    {
+      "field": "user_id",
+      "value": "\u00a0P-1234\u3000",
+      "normalised_field": "user_id",
+      "normalised_value": "P-1234",
+      "user_key": "u1_kmp5hfqh27x5a7nqls3nyqcltm"
+    },
+    {
+      "field": "phone",
+      "value": "+९१ 98765 43210",
+      "normalised_field": "phone",
+      "normalised_value": "9876543210",
+      "user_key": "u1_34lycsoddyiywq5oppgou34wor"
+    },
+    {
+      "field": "phone",
+      "value": "९८७६५४३२१०",
+      "normalised_field": "phone",
+      "normalised_value": null,
+      "user_key": null
+    },
+    {
+      "field": "email",
+      "value": "İLKAY.ΟΔΟΣ@Example.com",
+      "normalised_field": "email",
+      "normalised_value": "i̇lkay.οδος@example.com",
+      "user_key": "u1_jqams6b36cqhtzixhk3ncg4ymo"
+    },
+    {
+      "field": "user_id",
+      "value": "P-1234",
+      "org_id": "organization-other-9a8b7c",
+      "normalised_field": "user_id",
+      "normalised_value": "P-1234",
+      "user_key": "u1_tm4ktrvx23ajsalbhj7fnzqhdy"
+    }
+  ],
+  "install_refs": [
+    {
+      "install_id": "3F2504E0-4F89-11D3-9A0C-0305E82C3301",
+      "install_ref": "i1_mlfsw5fcughg63osixkcpk4yoq"
+    },
+    {
+      "install_id": "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+      "install_ref": "i1_mlfsw5fcughg63osixkcpk4yoq"
+    },
+    {
+      "install_id": "short",
+      "install_ref": null
+    },
+    {
+      "install_id": "",
+      "install_ref": null
+    },
+    {
+      "install_id": null,
+      "install_ref": null
+    },
+    {
+      "install_id": "zzzz-not-hex-zzzz-zzzz",
+      "install_ref": null
+    }
+  ]
+}

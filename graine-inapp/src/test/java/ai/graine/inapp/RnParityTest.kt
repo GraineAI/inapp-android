@@ -128,7 +128,7 @@ class RnParityTest {
     @Test fun namesSeveralChoicesInTheSameSentence() {
         for (c in cases("manySummary")) {
             val titles = c.getJSONArray("titles").let { a -> (0 until a.length()).map { a.getString(it) } }
-            assertEquals(c.getString("output"), Widgets.manySummary(titles, c.getString("verb")))
+            assertEquals(c.getString("output"), Widgets.manySummary(titles, c.getString("label")))
         }
     }
 

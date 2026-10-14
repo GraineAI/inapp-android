@@ -134,7 +134,10 @@ class WidgetContentTest {
         assertEquals("creta,seltos", a.data["ids"])
         assertEquals("Creta, Seltos", a.data["titles"])
         assertEquals(2, (a.data["items"] as List<*>).size)
-        assertEquals("Let's compare Creta and Seltos.", a.summary)
+        // The button's label, then the names — the label never read as a verb.
+        assertEquals("Compare: Creta and Seltos", a.summary)
+        assertEquals("Taken: Morning and Evening", Widgets.manySummary(listOf("Morning", "Evening"), "Taken"))
+        assertEquals("Morning", Widgets.manySummary(listOf("Morning"), "  "))
     }
 
     @Test fun aPlanComparisonIsRowsTooWithItsOwnPayload() {

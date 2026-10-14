@@ -53,6 +53,11 @@ internal enum class CallsHostCallScreen(val wire: String) { SDK("sdk"), APP("app
  *   debug            bool; false by default: the SDK's debug log (GraineConfig.debug)
  *   android          { smallIcon: string or null }
  *   ios              { iconTemplate: string or null, includesCallsInRecents: bool }
+ *   agents           { <name>: { publishableKey: string, baseUrl?: string } }: the
+ *                    app's other agents, each with its own key;
+ *                    the top-level key is the default agent's. A call is placed
+ *                    with one by `startCall({agent: name})`, and a ring Graine
+ *                    sends rings with the agent it is for
  *
  * Unknown keys are ignored, so an older SDK reads a newer package's options,
  * and null is the same as absent. A known key of the wrong type is refused,
@@ -74,6 +79,8 @@ internal data class CallsHostOptions(
     val androidSmallIcon: String? = null,
     val iosIconTemplate: String? = null,
     val iosIncludesCallsInRecents: Boolean = false,
+    /** The app's other agents by name, in the order given; never the default one. */
+    val agents: Map<String, CallsHostAgent> = emptyMap(),
 ) {
     /** What is kept for a cold start: every key, normalised, so that `parse(json)` gives these options back. */
     val json: Map<String, Any?>
@@ -91,6 +98,11 @@ internal data class CallsHostOptions(
             val ios = linkedMapOf<String, Any?>("includesCallsInRecents" to iosIncludesCallsInRecents)
             iosIconTemplate?.let { ios["iconTemplate"] = it }
             out["ios"] = ios
+            if (agents.isNotEmpty()) {
+                out["agents"] = LinkedHashMap<String, Any?>().also { all ->
+                    agents.forEach { (name, a) -> all[name] = linkedMapOf<String, Any?>("publishableKey" to a.publishableKey, "baseUrl" to a.baseUrl) }
+                }
+            }
             return out
         }
 
@@ -120,6 +132,20 @@ internal data class CallsHostOptions(
             }
             val android = obj(map, "android")
             val ios = obj(map, "ios")
+            val agents = LinkedHashMap<String, CallsHostAgent>()
+            obj(map, "agents")?.forEach { (raw, value) ->
+                val name = raw.trim()
+                if (name.isEmpty()) throw GraineCallsHostException.invalidOptions("agents: an agent's name must not be empty")
+                if (name == GraineInApp.DEFAULT) {
+                    throw GraineCallsHostException.invalidOptions("agents.${GraineInApp.DEFAULT}: the default agent is the top-level publishableKey")
+                }
+                val agent = (if (CallsHostValues.isNull(value)) null else CallsHostValues.map(value))
+                    ?: throw GraineCallsHostException.invalidOptions("agents.$name must be an object")
+                val agentKey = string(agent, "publishableKey", "agents.$name.publishableKey")?.trim()
+                if (agentKey.isNullOrEmpty()) throw GraineCallsHostException.invalidOptions("agents.$name.publishableKey is required")
+                val agentUrl = string(agent, "baseUrl", "agents.$name.baseUrl")?.let(::nonBlank)?.trimEnd('/')?.takeIf { it.isNotEmpty() } ?: baseUrl
+                agents[name] = CallsHostAgent(agentKey, agentUrl)
+            }
             return CallsHostOptions(
                 publishableKey = key,
                 displayName = name,
@@ -132,6 +158,7 @@ internal data class CallsHostOptions(
                 androidSmallIcon = android?.let { string(it, "smallIcon", "android.smallIcon") }?.let(::nonBlank),
                 iosIconTemplate = ios?.let { string(it, "iconTemplate", "ios.iconTemplate") }?.let(::nonBlank),
                 iosIncludesCallsInRecents = ios?.let { bool(it, "includesCallsInRecents", "ios.includesCallsInRecents") } ?: false,
+                agents = agents,
             )
         }
 
@@ -161,6 +188,9 @@ internal data class CallsHostOptions(
         private fun nonBlank(text: String): String? = text.trim().ifEmpty { null }
     }
 }
+
+/** One of the app's other agents, as the options name it: its own key, and where its Graine is. */
+internal data class CallsHostAgent(val publishableKey: String, val baseUrl: String)
 
 // ── values from a wrapper ───────────────────────────────────────────────────
 
@@ -250,11 +280,15 @@ internal object CallsHostValues {
         return ActionResult(status, message, data)
     }
 
-    /** `startCall`'s options: `{reason?, variables?}`. */
+    /** `startCall`'s options: `{reason?, variables?, agent?}`. */
     fun callRequest(raw: Any?): Pair<String?, Map<String, Any?>> {
         val o = map(raw) ?: emptyMap()
         return text(o["reason"])?.trim() to (map(o["variables"]) ?: emptyMap())
     }
+
+    /** The agent `startCall`'s options name (`agent`, GraineInApp.init's name): the default one unless named. */
+    fun callAgent(raw: Any?): String =
+        (map(raw)?.get("agent") as? String)?.trim()?.takeIf { it.isNotEmpty() } ?: GraineInApp.DEFAULT
 
     /**
      * A push's data, as the messaging service hands it over: every value a
@@ -379,13 +413,20 @@ internal data class CallsHostSnapshot(
     val connectedAt: Long? = null,
     /** Why the last call failed; cleared when the next call starts. */
     val error: String? = null,
+    /**
+     * The name of the agent the call is with (GraineInApp.init's name;
+     * "default" for the default agent): the one it was placed with, or the one
+     * its ring was routed to by the push's `agent_id`.
+     */
+    val agent: String? = null,
 ) {
     data class Caption(val role: Role, val text: String, val live: Boolean)
 
     /** The idle rule applied and blanks made null: what is shown, and what is compared. */
     val settled: CallsHostSnapshot
         get() = if (state == GraineCallState.IDLE) CallsHostSnapshot(error = present(error))
-            else copy(callId = present(callId), reason = present(reason), callerName = present(callerName), error = present(error))
+            else copy(callId = present(callId), reason = present(reason), callerName = present(callerName), error = present(error),
+                agent = present(agent))
 
     val json: Map<String, Any?>
         get() {
@@ -402,6 +443,7 @@ internal data class CallsHostSnapshot(
                 "caption" to s.caption?.let { linkedMapOf<String, Any?>("role" to it.role.name.lowercase(), "text" to it.text, "live" to it.live) },
                 "connectedAt" to s.connectedAt,
                 "error" to s.error,
+                "agent" to s.agent,
             )
         }
 
@@ -484,20 +526,43 @@ internal object CallsHostEvent {
     const val VOIP_TOKEN = "voipToken"
     const val ACTION = "action"
 
-    /** `{callId, outcome, reason?, error?}`: `reason` (local, remote, failed) only with `ended`, `error` only with `failed`. */
-    fun outcomePayload(outcome: GraineCallOutcome, callId: String): Map<String, Any?> {
+    /**
+     * `{callId, outcome, reason?, error?, durationSeconds?, hosted?, agent?}`: `reason` (local, remote, failed)
+     * only with `ended`, `error` only with `failed`, `durationSeconds` with an `ended` call whose length the
+     * engine measured, `hosted: true` for a call Graine rang (its outcomes reach Graine too), and `agent` — the
+     * name of the agent the call was with — when it is known. The keys React Native's and Flutter's
+     * GraineCallOutcome read.
+     */
+    fun outcomePayload(outcome: GraineCallOutcome, callId: String, agent: String? = null): Map<String, Any?> {
         val out = linkedMapOf<String, Any?>("callId" to callId, "outcome" to outcome.wire)
         if (outcome.kind == GraineCallOutcome.Kind.ENDED) outcome.endReason?.let { out["reason"] = it.wire }
         if (outcome.kind == GraineCallOutcome.Kind.FAILED) outcome.error?.let { out["error"] = it }
+        if (outcome.kind == GraineCallOutcome.Kind.ENDED) outcome.durationSeconds?.let { out["durationSeconds"] = it.coerceAtLeast(0) }
+        if (outcome.hosted) out["hosted"] = true
+        agent?.let { out["agent"] = it }
         return out
     }
 
-    /** `{callId, reason, callerName}`, as the push said them. */
-    fun incomingPayload(call: GraineCall): Map<String, Any?> =
-        linkedMapOf("callId" to call.callId, "reason" to call.reason, "callerName" to call.callerName)
+    /**
+     * `{callId, outcome: "ringing", hosted: true, agent?}`: a call Graine rang is ringing on this device — what
+     * the engine tells Graine as it starts to ring, told to the app as well.
+     */
+    fun ringingPayload(callId: String, agent: String? = null): Map<String, Any?> =
+        linkedMapOf<String, Any?>("callId" to callId, "outcome" to "ringing", "hosted" to true)
+            .also { out -> agent?.let { out["agent"] = it } }
 
-    fun actionPayload(requestId: String, name: String, arguments: Map<String, Any?>): Map<String, Any?> =
-        linkedMapOf("requestId" to requestId, "name" to name, "arguments" to CallsHostValues.normalize(arguments))
+    /** `{callId, reason, callerName, hosted?, agent?}`: as the push said them, `hosted: true` when Graine rang it, and the agent the ring was routed to. */
+    fun incomingPayload(call: GraineCall, agent: String? = null): Map<String, Any?> =
+        linkedMapOf<String, Any?>("callId" to call.callId, "reason" to call.reason, "callerName" to call.callerName)
+            .also { out ->
+                if (call.hosted) out["hosted"] = true
+                agent?.let { out["agent"] = it }
+            }
+
+    /** `{requestId, name, arguments, agent?}`: `agent` is the agent whose call asked. */
+    fun actionPayload(requestId: String, name: String, arguments: Map<String, Any?>, agent: String? = null): Map<String, Any?> =
+        linkedMapOf<String, Any?>("requestId" to requestId, "name" to name, "arguments" to CallsHostValues.normalize(arguments))
+            .also { out -> agent?.let { out["agent"] = it } }
 }
 
 /** Receives one event: its name and its payload. Main thread. */
@@ -690,6 +755,11 @@ internal interface CallsHostPlatform {
     fun configureCalls(options: CallsHostOptions)
     /** The customer calls the agent from [activity] — null when there is none in the foreground. The call's id, or null. */
     fun startCall(activity: Any?, reason: String?, variables: Map<String, Any?>): String?
+    /** startCall(), with the app's agent [agent] (GraineInApp.init's name). */
+    fun startCall(activity: Any?, reason: String?, variables: Map<String, Any?>, agent: String): String? =
+        if (agent == GraineInApp.DEFAULT) startCall(activity, reason, variables) else null
+    /** Make the app's other agents the options name — those not made already. */
+    fun makeAgents(agents: Map<String, CallsHostAgent>, options: CallsHostOptions) {}
     fun answer()
     fun decline()
     fun end()
@@ -701,6 +771,11 @@ internal interface CallsHostPlatform {
     fun registerAction(name: String, handler: (JSONObject, (ActionResult) -> Unit) -> Unit): () -> Unit
     /** A push's data, to the calls; false when it is not a call. */
     fun handlePush(data: Map<String, String>): Boolean
+    /**
+     * The name of the agent the call [callId] is with — the one it was placed
+     * with, or the one its ring was routed to — or null when nobody knows.
+     */
+    fun agentOf(callId: String): String? = null
     /** The engine's half of the snapshot: everything but `error`, which is the host's own. */
     fun callFields(): CallsHostSnapshot
     /** Run [block] on the next turn of the main loop. */
@@ -784,6 +859,8 @@ internal class CallsHostCore(private val platform: CallsHostPlatform, private va
             platform.log("The calls run with the debug setting this launch started with; the new one is kept and takes effect at the next launch.")
         }
         options = next
+        // The app's other agents: made once, each with its own key (a changed key takes effect at the next launch).
+        if (next.agents.isNotEmpty()) platform.makeAgents(next.agents, next)
         platform.configureCalls(next)
         changed()
     }
@@ -802,7 +879,7 @@ internal class CallsHostCore(private val platform: CallsHostPlatform, private va
         val request = CallsHostValues.callRequest(raw)
         val before = error
         error = null
-        val id = platform.startCall(activity, request.first, request.second)
+        val id = platform.startCall(activity, request.first, request.second, CallsHostValues.callAgent(raw))
         if (id == null) {
             error = before
             return null
@@ -888,7 +965,10 @@ internal class CallsHostCore(private val platform: CallsHostPlatform, private va
     /** The agent asked for an action: to the sink that answers actions, or refused at once when it is gone. */
     private fun ask(name: String, arguments: JSONObject, answer: (ActionResult) -> Unit) {
         val id = actions.begin(sinks.actionSink, answer)
-        val payload = CallsHostEvent.actionPayload(id, name, CallsHostValues.map(arguments) ?: emptyMap())
+        // The agent on the call asked: the app runs it in that agent's own handlers.
+        val live = platform.callFields()
+        val agent = live.agent ?: live.callId?.let { platform.agentOf(it) }
+        val payload = CallsHostEvent.actionPayload(id, name, CallsHostValues.map(arguments) ?: emptyMap(), agent)
         if (!sinks.emitAction(payload)) {
             actions.resolve(id, ActionResult.refused("The app is not listening for \"$name\" right now."))
             return
@@ -925,7 +1005,10 @@ internal class CallsHostCore(private val platform: CallsHostPlatform, private va
 
     fun incoming(call: GraineCall) {
         error = null
-        sinks.emit(CallsHostEvent.INCOMING, CallsHostEvent.incomingPayload(call))
+        val agent = platform.agentOf(call.callId)
+        sinks.emit(CallsHostEvent.INCOMING, CallsHostEvent.incomingPayload(call, agent))
+        // Graine rang it: the engine has told Graine it is ringing, and the app hears the same.
+        if (call.hosted) sinks.emit(CallsHostEvent.OUTCOME, CallsHostEvent.ringingPayload(call.callId, agent))
         changed()
     }
 
@@ -937,7 +1020,7 @@ internal class CallsHostCore(private val platform: CallsHostPlatform, private va
             val live = platform.callFields()
             if (live.state == GraineCallState.IDLE || live.state == GraineCallState.ENDED || live.callId == callId) error = why
         }
-        sinks.emit(CallsHostEvent.OUTCOME, CallsHostEvent.outcomePayload(outcome, callId))
+        sinks.emit(CallsHostEvent.OUTCOME, CallsHostEvent.outcomePayload(outcome, callId, platform.agentOf(callId)))
         changed()
     }
 

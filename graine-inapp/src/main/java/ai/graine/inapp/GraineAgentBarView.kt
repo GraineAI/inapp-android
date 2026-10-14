@@ -147,19 +147,70 @@ class GraineAgentBarView @JvmOverloads constructor(
     val widgetView: GraineWidgetView = GraineWidgetView(context)
 
     /**
-     * A text conversation to open beside the call, with the switch between
-     * them, when the dashboard offers both (contract/DESIGN.md → Chat window).
-     * This SDK carries calls, not chats, so nothing sets it yet: until a chat
-     * is attached the bar offers the call alone.
+     * The agent this bar talks to — the default one unless set:
+     * `bar.graine = GraineInApp.get("sales")` for another of the app's agents
+     * (GraineInApp.init's name). Its voice (attach it once, as the default
+     * agent's: `GraineInApp.get("sales").voice.attach(activity)`), its design
+     * and, unless [chat] was set to a conversation of the app's own, its chat.
+     * Set it on a screen's way in; a call already live stays with its own agent.
      */
-    internal var chat: ChatSource? = null
-        set(v) { field = v; chosenSurface = null; refresh() }
-
-    /** The attached chat changed — a message arrived, it came online. */
-    internal fun chatChanged() = refresh()
-
-    private val graine = GraineInApp.get()
+    var graine: GraineInApp = GraineInApp.primary()
+        set(v) {
+            if (field === v) return
+            val old = field
+            val attached = isAttachedToWindow
+            if (attached) {
+                old.voice.barShown(this, false)
+                old.removeListener(this)
+                unwatch?.invoke()
+                unwatch = null
+            }
+            field = v
+            widgetView.graine = v
+            // The chat window is drawn for one agent: the next one is made for this one.
+            chatWindow?.let { chatSlot.removeView(it) }
+            chatWindow = null
+            dismissBigChat()
+            if (attached) {
+                old.chatScreenWatchers.remove(screenClosed)
+                v.chatScreenWatchers.add(screenClosed)
+            }
+            // The chat follows the agent, unless the app draws a conversation of its own.
+            if (chat === old.chat) chat = v.chat
+            if (attached) {
+                v.addListener(this)
+                v.voice.barShown(this, isShown)
+                unwatch = v.onDesignChange { applyLook() }
+            }
+            chosenSurface = null
+            applyLook()
+        }
     private val voice get() = graine.voice
+
+    /** Redraw when the chat changes — a line arrived or grew, it came online, it dropped. */
+    private val chatWatcher = Runnable { if (isAttachedToWindow) refresh() }
+
+    /**
+     * The text conversation the bar opens beside the call, with the switch
+     * between them, as the dashboard decides (Appearance → mode and start:
+     * voice, chat, or both — contract/DESIGN.md → Chat window). The SDK's own
+     * chat ([GraineChat], `GraineInApp.get().chat`) by default; set your own
+     * [ChatSource] to draw a conversation the app runs itself, or null for the
+     * call alone whatever the dashboard offers.
+     */
+    var chat: ChatSource? = graine.chat
+        set(v) {
+            if (field === v) return
+            field?.let { old -> old.removeChangeListener(chatWatcher); if (chatOnScreen) old.shown(false) }
+            chatOnScreen = false
+            field = v
+            if (isAttachedToWindow) v?.addChangeListener(chatWatcher)
+            chosenSurface = null
+            refresh()
+        }
+
+    /** The chat is the surface on screen now — what [ChatSource.shown] was last told. */
+    private var chatOnScreen = false
 
     private var lastCaption: String? = null
     private var captionRole = Role.AGENT
@@ -174,6 +225,14 @@ class GraineAgentBarView @JvmOverloads constructor(
     /** The customer's last switch between the call and the chat; null follows the dashboard. */
     private var chosenSurface: String? = null
     private var chatWindow: ChatWindowView? = null
+    /** A bigger chat window — a phone's sheet, a tablet's panel — in its own window over the app. */
+    private var bigChat: ChatWindowDialog? = null
+    /** The full-screen chat this bar opened ([GraineChatActivity]) is up. */
+    private var screenOpen = false
+    /** The app's opens of the chat ([GraineChat.open]) this bar has seen: a new one moves it to the chat. */
+    private var seenOpens = 0
+    /** That full-screen chat was closed: do what the chevron does. */
+    private val screenClosed: () -> Unit = { post { if (screenOpen) { screenOpen = false; closeChat() } } }
     /** Icons drawn for this look, by name and colour: a caption arriving redraws the buttons, not the drawings. */
     private val icons = HashMap<String, Drawable>()
     /** The bar's corners and whether its face is opaque, for the outline this view casts its shadow in. */
@@ -276,6 +335,9 @@ class GraineAgentBarView @JvmOverloads constructor(
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         graine.addListener(this)
+        graine.chatScreenWatchers.add(screenClosed)
+        seenOpens = (chat as? GraineChat)?.opens ?: 0
+        chat?.addChangeListener(chatWatcher)
         voice.barShown(this, isShown)
         unwatch = graine.onDesignChange { applyLook() }
         viewTreeObserver.addOnGlobalLayoutListener(layoutWatcher)
@@ -287,6 +349,10 @@ class GraineAgentBarView @JvmOverloads constructor(
     override fun onDetachedFromWindow() {
         voice.barShown(this, false)
         graine.removeListener(this)
+        graine.chatScreenWatchers.remove(screenClosed)
+        chat?.removeChangeListener(chatWatcher)
+        dismissBigChat()
+        showChat(false)
         unwatch?.invoke()
         unwatch = null
         viewTreeObserver.removeOnGlobalLayoutListener(layoutWatcher)
@@ -298,6 +364,8 @@ class GraineAgentBarView @JvmOverloads constructor(
     override fun onConfigurationChanged(newConfig: Configuration?) {
         super.onConfigurationChanged(newConfig)
         applyLook()
+        // Turned: a sheet or a panel takes its size again.
+        bigChat?.takeIf { it.isShowing }?.place()
     }
 
     /**
@@ -310,6 +378,14 @@ class GraineAgentBarView @JvmOverloads constructor(
     override fun onVisibilityChanged(changedView: View, visibility: Int) {
         super.onVisibilityChanged(changedView, visibility)
         voice.barShown(this, isShown)
+        if (isAttachedToWindow) refresh()
+    }
+
+    /** Tell the chat whether this bar shows it: on screen it connects; off every screen it closes after a moment. */
+    private fun showChat(on: Boolean) {
+        if (on == chatOnScreen) return
+        chatOnScreen = on
+        chat?.shown(on)
     }
 
     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
@@ -352,7 +428,7 @@ class GraineAgentBarView @JvmOverloads constructor(
 
         companion object {
             fun resolve(v: GraineAgentBarView): Look {
-                val g = GraineInApp.get()
+                val g = v.graine
                 val appearance: JSONObject? = g.session?.appearance
                 val dash = Appearance.resolve(appearance, Appearance.DEFAULT_ACCENT, "Assistant", origin = g.config.baseUrl)
                 val designed = g.themeTokens(v.context, v.scheme)
@@ -472,6 +548,7 @@ class GraineAgentBarView @JvmOverloads constructor(
     override fun onConnectivity(state: Connectivity, attempt: Int, reason: String?) = refresh()
     override fun onTransport(transport: Transport, requested: Transport, reason: String?, message: String?) = refresh()
     override fun onError(message: String) = refresh()
+    override fun onChatState(connected: Boolean, connecting: Boolean) = refresh()
     override fun onEnded() { lastCaption = null; captionLive = false; refresh() }
     override fun onMicDenied(reason: String) { micDenied = true; refresh() }
 
@@ -487,6 +564,13 @@ class GraineAgentBarView @JvmOverloads constructor(
         val l = look
         val t = l.t
         val source = chat
+        // The app opened the chat (GraineChat.open): the bar moves to it, where the agent offers one.
+        (source as? GraineChat)?.let { g ->
+            if (g.opens != seenOpens) {
+                seenOpens = g.opens
+                if (surfaces()?.allowed?.contains("chat") == true) chosenSurface = "chat"
+            }
+        }
         val s = surfaces()
         val inChat = source != null && s?.start == "chat"
         val canSwitch = source != null && s?.canSwitch == true
@@ -497,6 +581,7 @@ class GraineAgentBarView @JvmOverloads constructor(
             error = voice.error != null,
             chat = inChat,
             chatOnline = source?.online == true,
+            chatFailed = source?.failed == true,
             online = voice.online,
             reconnecting = voice.reconnecting,
             connectivity = voice.connectivity,
@@ -540,8 +625,15 @@ class GraineAgentBarView @JvmOverloads constructor(
         }
         // "Couldn’t load · tap to retry" and "Couldn’t connect · tap to retry" mean the words too, not only
         // the microphone: a failed load reloads the page, a call nothing could carry is placed again.
-        val retries = (failed || callFailed) && !inChat
-        words.setOnClickListener(if (retries) OnClickListener { if (voice.connectivity == Connectivity.FAILED) voice.retry() else voice.start() } else null)
+        val chatRetries = inChat && source?.failed == true && source.online.not()
+        val retries = ((failed || callFailed) && !inChat) || chatRetries
+        words.setOnClickListener(if (retries) OnClickListener {
+            when {
+                chatRetries -> retryChat()
+                voice.connectivity == Connectivity.FAILED -> voice.retry()
+                else -> voice.start()
+            }
+        } else null)
         words.isClickable = retries
 
         // The way to the other surface, only when both are offered.
@@ -568,21 +660,40 @@ class GraineAgentBarView @JvmOverloads constructor(
             if (live) "End call" else "Close",
         )
 
-        // Above the bar: the chat window in the chat, else the line being said on a call.
-        if (source != null && inChat) {
+        // How big the chat is (contract/DESIGN.md "Chat window" → Size): above the bar, a phone's sheet or a
+        // tablet's panel, or the whole screen — the open's size, then the app's, then the design's.
+        val metrics = resources.displayMetrics
+        val decided = ChatWindowLayout.barPresentation(
+            source != null && inChat, (source as? GraineChat)?.openedSize, graine.config.chatSize, t.chat?.size,
+            metrics.widthPixels / metrics.density.toDouble(), metrics.heightPixels / metrics.density.toDouble(),
+        )
+        // A sheet or a panel needs an activity to open its window from; a bar made without one keeps the compact window.
+        val presentation = if ((decided == ChatWindowLayout.Presentation.SHEET || decided == ChatWindowLayout.Presentation.PANEL) &&
+            Ui.activity(context) == null) ChatWindowLayout.Presentation.WINDOW else decided
+        showBigChat(source, presentation)
+
+        // Above the bar: the compact chat window in the chat, else the line being said on a call.
+        if (source != null && presentation == ChatWindowLayout.Presentation.WINDOW) {
             val w = chatWindow ?: ChatWindowView(context, graine).also { cw ->
                 chatWindow = cw
                 cw.onSend = { text -> chat?.send(text) }
-                cw.onCollapse = { if (surfaces()?.canSwitch == true) setSurface("voice") else pressEnd() }
+                cw.onRetry = { retryChat() }
+                cw.onCancelCall = { id -> (chat as? GraineChat)?.cancelUpcomingCall(id) }
+                cw.onNewConversation = { (chat as? GraineChat)?.newConversation() }
+                cw.onCollapse = { closeChat() }
                 chatSlot.addView(cw, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
             }
-            w.render(t, l.accent, l.onAccent, l.name, l.hostImage, l.logoUrl, l.logoPlate, source.messages, source.online, typing = imeLiftPx > 0)
+            w.render(t, l.accent, l.onAccent, l.name, l.hostImage, l.logoUrl, l.logoPlate, source.messages, source.online,
+                replying = source.typing, failed = source.failed, keyboardUp = imeLiftPx > 0, loader = l.loader, loaderColor = l.loaderColor,
+                upcoming = (source as? GraineChat)?.upcomingRows() ?: emptyList(), callName = graine.schedulingRules.callName ?: l.name)
             chatSlot.visibility = VISIBLE
             if (!chatShown) Themed.enter(chatSlot, t, px(VoiceBar.RISE).toFloat())
         } else {
             chatSlot.visibility = GONE
         }
-        chatShown = inChat
+        chatShown = presentation == ChatWindowLayout.Presentation.WINDOW
+        // The chat connects while this bar shows it, and only then.
+        showChat(inChat && isAttachedToWindow && isShown)
 
         val showCaption = !inChat && voice.connected && !lastCaption.isNullOrBlank()
         captionText.text = lastCaption
@@ -606,6 +717,8 @@ class GraineAgentBarView @JvmOverloads constructor(
     private fun pressEnd() {
         val live = voice.connected || voice.connecting
         if (live) voice.end()
+        // Closing a chat-only bar ends the chat, as hanging up ends a call.
+        if (surfaces()?.start == "chat") (chat as? GraineChat)?.close()
         val close = onClose ?: return
         if (live) postDelayed({ close() }, VoiceBar.CLOSE_AFTER_END_MS) else close()
     }
@@ -619,7 +732,71 @@ class GraineAgentBarView @JvmOverloads constructor(
         val next = if (surfaces()?.start == "chat") "voice" else "chat"
         // Into the chat, the call ends: two conversations with one agent is the agent answering twice.
         if (next == "chat" && (voice.connected || voice.connecting)) voice.end()
+        // Back to the call, the chat ends — at once, not when it is next unseen. The size an open asked for stays,
+        // for the way back.
+        if (next == "voice") { showChat(false); (chat as? GraineChat)?.hangUp() }
         setSurface(next)
+    }
+
+    /** The chevron, and closing a sheet, a panel or the full screen: back to the call where there is one, else close. */
+    private fun closeChat() {
+        when (ChatWindowLayout.close(surfaces()?.canSwitch == true)) {
+            ChatWindowLayout.Close.BACK_TO_CALL -> switchSurface()
+            ChatWindowLayout.Close.CLOSE_BAR -> pressEnd()
+        }
+    }
+
+    /**
+     * A bigger chat window: a phone's sheet or a tablet's panel in a window of
+     * its own ([ChatWindowDialog]), the agent's components above its composer;
+     * the whole screen in the chat's own activity, opened once. Anything else
+     * takes them away.
+     */
+    private fun showBigChat(source: ChatSource?, presentation: ChatWindowLayout.Presentation?) {
+        val l = look
+        val inDialog = presentation == ChatWindowLayout.Presentation.SHEET || presentation == ChatWindowLayout.Presentation.PANEL
+        if (source != null && presentation != null && inDialog) {
+            val d = bigChat?.takeIf { it.presentation == presentation } ?: run {
+                dismissBigChat()
+                ChatWindowDialog(context, graine, presentation) { post { closeChat() } }.also { dialog ->
+                    dialog.chat.onSend = { text -> chat?.send(text) }
+                    dialog.chat.onRetry = { retryChat() }
+                    dialog.chat.onCancelCall = { id -> (chat as? GraineChat)?.cancelUpcomingCall(id) }
+                    // A sheet and a panel offer New conversation like the window above the bar.
+                    dialog.chat.onNewConversation = { (chat as? GraineChat)?.newConversation() }
+                    dialog.chat.onCollapse = { closeChat() }
+                    dialog.chat.setAccessory(GraineWidgetView(context).also { it.graine = graine; it.scheme = scheme })
+                    bigChat = dialog
+                }
+            }
+            d.chat.collapseLabel = if (surfaces()?.canSwitch == true) "Collapse" else "Close"
+            d.paint(l.t)
+            d.chat.render(l.t, l.accent, l.onAccent, l.name, l.hostImage, l.logoUrl, l.logoPlate, source.messages, source.online,
+                replying = source.typing, failed = source.failed, loader = l.loader, loaderColor = l.loaderColor,
+                upcoming = (source as? GraineChat)?.upcomingRows() ?: emptyList(), callName = graine.schedulingRules.callName ?: l.name)
+            val host = Ui.activity(context)
+            if (!d.isShowing && isAttachedToWindow && host != null && !host.isFinishing) d.show()
+        } else {
+            dismissBigChat()
+        }
+        // The bar's own components step aside while a bigger window carries them.
+        widgetView.visibility = if (inDialog) GONE else VISIBLE
+        if (source != null && presentation == ChatWindowLayout.Presentation.SCREEN && !screenOpen && isAttachedToWindow) {
+            screenOpen = true
+            GraineChatActivity.openFromBar(context, graine.name)
+        }
+    }
+
+    private fun dismissBigChat() {
+        val d = bigChat ?: return
+        bigChat = null
+        if (d.isShowing) d.dismiss()
+    }
+
+    /** Nothing could connect the chat: the customer asked to try again. */
+    private fun retryChat() {
+        val c = chat ?: return
+        if (c is GraineChat) c.connect() else { c.shown(false); c.shown(true) }
     }
 
     private fun px(dp: Double): Int = Ui.dp(context, dp.toFloat())

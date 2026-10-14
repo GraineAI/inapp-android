@@ -102,6 +102,21 @@ private class FakeCallsHostPlatform : CallsHostPlatform {
         return nextCallId
     }
 
+    /** The agent each call was placed with. */
+    val placedWith = mutableListOf<String>()
+    val agentsMade = mutableListOf<Map<String, CallsHostAgent>>()
+
+    override fun startCall(activity: Any?, reason: String?, variables: Map<String, Any?>, agent: String): String? {
+        placedWith += agent
+        return startCall(activity, reason, variables)
+    }
+
+    override fun makeAgents(agents: Map<String, CallsHostAgent>, options: CallsHostOptions) { agentsMade += agents }
+
+    /** The agent each call (by id) is with, as GraineCalls knows it. */
+    val callAgents = HashMap<String, String>()
+    override fun agentOf(callId: String): String? = callAgents[callId]
+
     override fun answer() { answers++ }
     override fun decline() { declines++ }
     override fun end() { ends++ }
@@ -318,6 +333,46 @@ class CallsHostOptionsTest {
         assertEquals(full, CallsHostOptions.parse(JSONObject(Protocol.toJson(full.json).toString())))
         assertFalse("android is only kept when it says something", plain.json.containsKey("android"))
     }
+
+    @Test fun theAppsOtherAgentsAreNamedWithTheirOwnKeys() {
+        val o = CallsHostOptions.parse(with(
+            "baseUrl" to "https://graine.example.com/",
+            "agents" to mapOf(
+                " sales " to mapOf("publishableKey" to " pk_test_sales "),
+                "care" to mapOf("publishableKey" to "pk_test_care", "baseUrl" to "https://care.example.com/"),
+            ),
+        ))
+        assertEquals(listOf("sales", "care"), o.agents.keys.toList())
+        assertEquals(CallsHostAgent("pk_test_sales", "https://graine.example.com"), o.agents["sales"])
+        assertEquals(CallsHostAgent("pk_test_care", "https://care.example.com"), o.agents["care"])
+        // Kept for a cold start, and read back the same.
+        assertEquals(o, CallsHostOptions.parse(o.json))
+        assertEquals(o, CallsHostOptions.parse(JSONObject(Protocol.toJson(o.json).toString())))
+        assertFalse("agents are only kept when there are some", CallsHostOptions.parse(minimal).json.containsKey("agents"))
+        assertTrue(CallsHostOptions.parse(with("agents" to null)).agents.isEmpty())
+    }
+
+    @Test fun anAgentThatCannotBeMadeIsRefusedByName() {
+        val cases = listOf(
+            "agents" to "sales" to "agents must be an object",
+            "agents" to mapOf("sales" to "pk_test_sales") to "agents.sales must be an object",
+            "agents" to mapOf("sales" to emptyMap<String, Any?>()) to "agents.sales.publishableKey is required",
+            "agents" to mapOf("sales" to mapOf("publishableKey" to " ")) to "agents.sales.publishableKey is required",
+            "agents" to mapOf("sales" to mapOf("publishableKey" to 7)) to "agents.sales.publishableKey must be a string",
+            "agents" to mapOf("sales" to mapOf("publishableKey" to "pk", "baseUrl" to 7)) to "agents.sales.baseUrl must be a string",
+            "agents" to mapOf("default" to mapOf("publishableKey" to "pk")) to "agents.default: the default agent is the top-level publishableKey",
+            "agents" to mapOf(" " to mapOf("publishableKey" to "pk")) to "agents: an agent's name must not be empty",
+        )
+        for ((option, message) in cases) {
+            try {
+                CallsHostOptions.parse(with(option))
+                fail("accepted $option")
+            } catch (e: GraineCallsHostException) {
+                assertEquals("invalid_options", e.code)
+                assertEquals(message, e.message)
+            }
+        }
+    }
 }
 
 // ── the screen, an action's answer, a call's request, a push ────────────────
@@ -473,13 +528,13 @@ class CallsHostValuesTest {
 
 class CallsHostSnapshotTest {
     private val keys = setOf("state", "callId", "direction", "reason", "callerName", "muted", "speakerOn", "agentSpeaking",
-        "caption", "connectedAt", "error")
+        "caption", "connectedAt", "error", "agent")
 
     @Test fun everyKeyIsAlwaysThereAndIdleIsNullsAndFalses() {
         val json = CallsHostSnapshot().json
         assertEquals(keys, json.keys)
         assertEquals("idle", json["state"])
-        for (key in listOf("callId", "direction", "reason", "callerName", "caption", "connectedAt", "error")) {
+        for (key in listOf("callId", "direction", "reason", "callerName", "caption", "connectedAt", "error", "agent")) {
             assertTrue(key, json.containsKey(key) && json[key] == null)
         }
         for (key in listOf("muted", "speakerOn", "agentSpeaking")) assertEquals(key, false, json[key])
@@ -489,9 +544,10 @@ class CallsHostSnapshotTest {
         val json = CallsHostSnapshot(
             state = GraineCallState.ACTIVE, callId = "c1", direction = GraineCall.Direction.INCOMING, reason = "payment_due",
             callerName = "Acme", muted = true, speakerOn = true, agentSpeaking = true,
-            caption = CallsHostSnapshot.Caption(Role.AGENT, "Hi Asha", true), connectedAt = 1_760_000_000_123L,
+            caption = CallsHostSnapshot.Caption(Role.AGENT, "Hi Asha", true), connectedAt = 1_760_000_000_123L, agent = "sales",
         ).json
         assertEquals(keys, json.keys)
+        assertEquals("the call's agent, by name", "sales", json["agent"])
         assertEquals("active", json["state"])
         assertEquals("c1", json["callId"])
         assertEquals("incoming", json["direction"])
@@ -510,9 +566,10 @@ class CallsHostSnapshotTest {
             state = GraineCallState.IDLE, callId = "c1", direction = GraineCall.Direction.OUTGOING, reason = "support",
             callerName = "Acme", muted = true, speakerOn = true, agentSpeaking = true,
             caption = CallsHostSnapshot.Caption(Role.CUSTOMER, "hello", false), connectedAt = 5L,
-            error = "The microphone permission was not granted.",
+            error = "The microphone permission was not granted.", agent = "sales",
         )
         assertEquals(CallsHostSnapshot(error = "The microphone permission was not granted."), stale.settled)
+        assertNull("no call, no agent", stale.json["agent"])
         val json = stale.json
         assertNull(json["callId"])
         assertNull(json["caption"])
@@ -585,9 +642,33 @@ class CallsHostEventTest {
         assertEquals(mapOf("callId" to "c9", "reason" to null, "callerName" to "Acme"), named)
     }
 
+    @Test fun aCallGraineRangSaysSoAndAnEndedCallSaysHowLongItLasted() {
+        // The engine's outcome carries both; the event carries them on, in the keys React Native and Flutter read.
+        val ended = GraineCallOutcome.ended(GraineCallOutcome.EndReason.REMOTE).copy(durationSeconds = 95, hosted = true)
+        assertEquals(mapOf("callId" to "h1", "outcome" to "ended", "reason" to "remote", "durationSeconds" to 95, "hosted" to true),
+            CallsHostEvent.outcomePayload(ended, "h1"))
+        assertEquals("a length only on an ended call", mapOf("callId" to "h1", "outcome" to "answered", "hosted" to true),
+            CallsHostEvent.outcomePayload(GraineCallOutcome.ANSWERED.copy(durationSeconds = 3, hosted = true), "h1"))
+        assertEquals("not hosted: no key", mapOf("callId" to "c1", "outcome" to "ended", "reason" to "local", "durationSeconds" to 12),
+            CallsHostEvent.outcomePayload(GraineCallOutcome.ended(GraineCallOutcome.EndReason.LOCAL).copy(durationSeconds = 12), "c1"))
+        assertEquals(mapOf("callId" to "h1", "outcome" to "ringing", "hosted" to true, "agent" to "sales"), CallsHostEvent.ringingPayload("h1", "sales"))
+        assertEquals(mapOf("callId" to "h1", "reason" to null, "callerName" to "Acme", "hosted" to true),
+            CallsHostEvent.incomingPayload(GraineCall("h1", GraineCall.Direction.INCOMING, "Acme", null, emptyMap(), hosted = true)))
+    }
+
     @Test fun anActionRequestCarriesJSONArguments() {
         val payload = CallsHostEvent.actionPayload("r1", "open_screen", mapOf("page" to "billing", "count" to 2, "when" to null))
         assertEquals(mapOf("requestId" to "r1", "name" to "open_screen", "arguments" to mapOf("page" to "billing", "count" to 2, "when" to null)), payload)
+    }
+
+    @Test fun anOutcomeARingAndAnActionNameTheirAgentWhenItIsKnown() {
+        assertEquals(mapOf("callId" to "c1", "outcome" to "missed", "agent" to "sales"),
+            CallsHostEvent.outcomePayload(GraineCallOutcome.MISSED, "c1", "sales"))
+        assertEquals(mapOf("callId" to "c9", "reason" to null, "callerName" to null, "agent" to "default"),
+            CallsHostEvent.incomingPayload(GraineCall("c9", GraineCall.Direction.INCOMING, null, null, emptyMap()), "default"))
+        assertEquals(mapOf("requestId" to "r1", "name" to "raise_ticket", "arguments" to emptyMap<String, Any?>(), "agent" to "sales"),
+            CallsHostEvent.actionPayload("r1", "raise_ticket", emptyMap(), "sales"))
+        assertFalse("unknown: no key at all", CallsHostEvent.outcomePayload(GraineCallOutcome.MISSED, "c1").containsKey("agent"))
     }
 }
 
@@ -948,6 +1029,53 @@ class CallsHostCoreTest {
         assertEquals("connecting", state["state"])
         assertEquals("card_blocked", state["reason"])
         assertNull(state["error"])
+    }
+
+    @Test fun theSnapshotTheRingTheOutcomeAndTheActionNameTheCallsAgent() {
+        val rig = HostRig()
+        rig.configure(mapOf("agents" to mapOf("sales" to mapOf("publishableKey" to "pk_test_sales"))))
+        rig.core.setActions(listOf("raise_ticket"), rig.sink)
+        // A ring Graine routed to the sales agent by the push's agent_id.
+        rig.platform.callAgents["h1"] = "sales"
+        rig.platform.fields = CallsHostSnapshot(GraineCallState.RINGING, "h1", GraineCall.Direction.INCOMING, agent = "sales")
+        rig.core.incoming(GraineCall("h1", GraineCall.Direction.INCOMING, "Sales", "renewal", emptyMap(), hosted = true))
+        rig.platform.runTurns()
+        assertEquals("sales", rig.events.payloads("incoming").single()["agent"])
+        assertEquals("sales", rig.events.payloads("state").last()["agent"])
+        assertEquals("sales", rig.core.snapshot()["agent"])
+        rig.handler("raise_ticket")(JSONObject()) { }
+        assertEquals("the agent on the call asked", "sales", rig.events.payloads("action").single()["agent"])
+        rig.core.outcome(GraineCallOutcome.ANSWERED, "h1")
+        // A ring refused while that call is live is its own agent's: the default one here.
+        rig.platform.callAgents["h2"] = "default"
+        rig.core.outcome(GraineCallOutcome.MISSED, "h2")
+        // An outcome nobody can place says nothing about an agent.
+        rig.core.outcome(GraineCallOutcome.MISSED, "unknown")
+        // First the ring itself: Graine rang it, so the app hears it ringing — then what became of it, and of the others.
+        assertEquals(listOf("ringing", "answered", "missed", "missed"), rig.events.payloads("outcome").map { it["outcome"] })
+        assertEquals(listOf("sales", "sales", "default", null), rig.events.payloads("outcome").map { it["agent"] })
+        assertFalse(rig.events.payloads("outcome").last().containsKey("agent"))
+        rig.platform.fields = CallsHostSnapshot()
+        rig.core.callStateChanged(GraineCallState.IDLE)
+        rig.platform.runTurns()
+        assertNull("idle: no agent", rig.events.payloads("state").last()["agent"])
+    }
+
+    @Test fun aCallIsPlacedWithTheAgentItsOptionsName() {
+        val rig = HostRig()
+        rig.configure(mapOf("agents" to mapOf("sales" to mapOf("publishableKey" to "pk_test_sales"))))
+        assertEquals(listOf(mapOf("sales" to CallsHostAgent("pk_test_sales", "https://www.graine.ai"))), rig.platform.agentsMade)
+        rig.core.startCall(mapOf("reason" to "upgrade", "agent" to " sales "), "activity")
+        rig.platform.fields = CallsHostSnapshot()
+        rig.core.startCall(mapOf("reason" to "help"), "activity")
+        rig.platform.fields = CallsHostSnapshot()
+        rig.core.startCall(mapOf("reason" to "help", "agent" to 7), "activity")
+        assertEquals(listOf("sales", "default", "default"), rig.platform.placedWith)
+        // A cold start makes them again from what was kept, so a ring for any of them rings with its own.
+        val next = HostRig()
+        next.kept = rig.kept
+        assertTrue(next.core.restore())
+        assertEquals(rig.platform.agentsMade, next.platform.agentsMade)
     }
 
     @Test fun noSecondCallWhileOneIsLive() {

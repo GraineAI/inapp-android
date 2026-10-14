@@ -52,7 +52,16 @@ class GraineLauncherView @JvmOverloads constructor(
     var scheme: String? = null
         set(v) { field = v; applyLook() }
 
-    private val graine: GraineInApp? = if (isInEditMode) null else GraineInApp.get()
+    /** The agent this launcher calls, and whose design it wears — the default one unless set (`GraineInApp.get("sales")`). */
+    var graine: GraineInApp? = if (isInEditMode) null else GraineInApp.primary()
+        set(v) {
+            if (field === v) return
+            val attached = isAttachedToWindow
+            if (attached) { field?.removeListener(this); unwatch?.invoke(); unwatch = null }
+            field = v
+            if (attached && v != null) { v.addListener(this); unwatch = v.onDesignChange { applyLook() } }
+            applyLook()
+        }
     private var unwatch: (() -> Unit)? = null
     private var ownClick = true
     private var entered = false

@@ -35,6 +35,12 @@ internal object Protocol {
         const val APP_ACTION_RESULT = "graine:app-action-result"
         const val APP_EVENT = "graine:app-event"
         const val WIDGET_RESULT = "graine:widget-result"
+        /**
+         * Who is using the app — `{value, installId, memory, timezone}` — for
+         * the page's own ticket and rtc-session requests (contract §1.3). The
+         * value never becomes a variable, and is never logged.
+         */
+        const val IDENTITY = "graine:identity"
     }
 
     /** Messages the page sends out. */
@@ -243,7 +249,7 @@ internal sealed class PageMessage {
 }
 
 /**
- * The connection, in one word — the way LiveKit reports it.
+ * The connection, in one word: excellent, good, poor or lost (unknown before any sample).
  *
  * Same thresholds as the React Native SDK and the website (the classic VoIP
  * edges: 150ms / 30ms / 2% leaves "excellent", 400ms / 80ms / 8% is "poor"),

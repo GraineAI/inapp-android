@@ -206,7 +206,7 @@ internal class WidgetContent(val widget: GraineWidget) {
                 "titles" to titles.joinToString(", "),
                 "count" to chosen.size,
             ),
-            Widgets.manySummary(titles, selectLabel.lowercase()),
+            Widgets.manySummary(titles, selectLabel),
         )
     }
 

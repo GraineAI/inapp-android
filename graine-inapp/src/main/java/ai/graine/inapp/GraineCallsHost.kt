@@ -33,6 +33,12 @@ import java.util.concurrent.FutureTask
  *     GraineCallsHost.configure(context, mapOf("publishableKey" to "pk_…", "displayName" to "Acme"))
  *     val sink = GraineCallsHost.addSink { event, payload -> … }
  *
+ * Several agents in one app: `configure` names the others under
+ * `agents` (`{"sales": {"publishableKey": "pk_…"}}`), `startCall` takes
+ * `{agent: "sales"}`, and a ring Graine sends rings with the agent it is for.
+ * The snapshot, `incoming`, `outcome` and `action` say which: `agent` is the
+ * call's agent by name ("default" for the default one).
+ *
  * Events: `state` (the snapshot, at most once per turn of the main loop),
  * `outcome`, `incoming` and `action` (`voipToken` is iOS's). Main thread: a
  * call from another thread hops there first (`configure`, `restore`,
@@ -46,6 +52,8 @@ object GraineCallsHost {
     }
 
     private const val PREFS = "ai.graine.inapp.calls"
+    /** What opens the call screen: answer, show, the missed call, call back. */
+    private val CALL_SCREEN_ACTIONS = setOf(GraineCalls.ACTION_ANSWER, GraineCalls.ACTION_SHOW, GraineCalls.ACTION_MISSED, GraineCalls.ACTION_CALL_BACK)
     private const val KEY = "host"
 
     private val main = Handler(Looper.getMainLooper())
@@ -103,12 +111,25 @@ object GraineCallsHost {
         return onMainSync { core.handlePush(data) }
     }
 
+    /**
+     * FCM's new token for this install, from the app's messaging service:
+     * kept, and registered with Graine when the workspace has Graine ring its
+     * users ([GraineCalls.onNewToken]). Safe before anything is configured.
+     */
+    @JvmStatic
+    fun onNewToken(context: Context, token: String) {
+        remember(context)
+        GraineCalls.onNewToken(context, token)
+    }
+
     // ── the call ────────────────────────────────────────────────────────────
 
     /**
-     * The customer calls the agent: `{reason?, variables?}`, from [activity],
-     * which must be in the foreground. The call's id, or null when the calls
-     * are not configured, a call is live, or there is no activity.
+     * The customer calls the agent: `{reason?, variables?, agent?}`, from
+     * [activity], which must be in the foreground; `agent` names one of the
+     * agents `configure` set up (the default one unless named). The call's
+     * id, or null when the calls are not configured, a call is live, there is
+     * no activity, or no agent has that name.
      */
     @JvmStatic
     fun startCall(activity: Activity?, options: Map<*, *>?): String? = onMainSync { core.startCall(options, activity) }
@@ -131,9 +152,31 @@ object GraineCallsHost {
 
     // ── what the agent knows ────────────────────────────────────────────────
 
-    /** Who is signed in (GraineInApp.identify); null on sign-out. */
+    /** Who is signed in (GraineInApp.identify), the RAW traits: the SDK masks them and reads the identity itself. Null on sign-out. */
     @JvmStatic
     fun setIdentity(traits: Map<*, *>?) = onMain { core.setIdentity(traits) }
+
+    /**
+     * Remember the signed-in user's conversations, or stop (GraineInApp.setMemory).
+     * Before there is an instance the choice is held and applied when it is made.
+     */
+    @JvmStatic
+    fun setMemory(enabled: Boolean) = onMain {
+        val g = GraineInApp.peek()
+        if (g != null) g.setMemory(enabled) else heldMemory = enabled
+    }
+
+    /**
+     * This install's id (GraineInApp.installId) — the one id the native SDK,
+     * React Native and Flutter share on a device. Safe before anything is configured.
+     */
+    @JvmStatic
+    fun installId(context: Context): String {
+        remember(context)
+        return DeviceStore.of(context).installId()
+    }
+
+    @Volatile private var heldMemory: Boolean? = null
 
     /** The runtime variables become exactly this map: a key the last map set and this one leaves out is removed. */
     @JvmStatic
@@ -197,7 +240,7 @@ object GraineCallsHost {
     @JvmStatic
     fun onNewIntent(activity: Activity, intent: Intent?): Boolean {
         val action = intent?.action
-        if (action != GraineCalls.ACTION_ANSWER && action != GraineCalls.ACTION_SHOW) return false
+        if (action !in CALL_SCREEN_ACTIONS) return false
         activity.intent = intent
         return true
     }
@@ -270,10 +313,19 @@ object GraineCallsHost {
         }
     }
 
-    /** The host's hands on Android: the SDK instance and its calls, the app's resources, the main loop. Main thread. */
+    /** The host's hands on Android: the SDK's agents and their calls, the app's resources, the main loop. Main thread. */
     private class Device : CallsHostPlatform, GraineCallListener {
         @Volatile private var graine: GraineInApp? = null
+        /** The other agents the options named, by name: they run the wrapper's actions and variables too. */
+        private val others = LinkedHashMap<String, GraineInApp>()
+        /** The wrapper's actions, so an agent made later answers them too. */
+        private val actionHandlers = LinkedHashMap<String, (JSONObject, (ActionResult) -> Unit) -> Unit>()
+        /** The wrapper's runtime variables as they stand, so an agent made later has them too. */
+        private val runtime = LinkedHashMap<String, Any?>()
         private val connected = CallsHostConnectedAt()
+
+        /** The default agent and every other one the options named. */
+        private fun agents(): List<GraineInApp> = (listOfNotNull(graine) + others.values).distinct()
 
         val calls: GraineCalls? get() = graine?.calls
 
@@ -288,7 +340,31 @@ object GraineCallsHost {
             ))
             graine = g
             g.calls.addListener(this)
+            heldMemory?.let { g.setMemory(it); heldMemory = null }
             return CallsHostInstance(g.config.publishableKey, g.config.baseUrl, g.config.debug)
+        }
+
+        override fun makeAgents(agents: Map<String, CallsHostAgent>, options: CallsHostOptions) {
+            val app = application ?: return
+            for ((name, a) in agents) {
+                val existing = others[name]
+                if (existing != null) {
+                    if (existing.config.publishableKey != a.publishableKey || existing.config.baseUrl.trimEnd('/') != a.baseUrl) {
+                        Log.w(GraineInApp.TAG, "The \"$name\" agent runs with the key and base URL this launch started with; the new ones take effect at the next launch.")
+                    }
+                    continue
+                }
+                // The app may have made it itself; then the calls use that one.
+                val g = GraineInApp.find(name) ?: GraineInApp.init(app, GraineConfig(
+                    baseUrl = a.baseUrl,
+                    publishableKey = a.publishableKey,
+                    appVersion = options.appVersion,
+                    debug = options.debug,
+                ), name)
+                others[name] = g
+                actionHandlers.forEach { (action, handler) -> unregisters.getOrPut(action) { ArrayList() } += g.registerDeferredAction(action, handler) }
+                if (runtime.isNotEmpty()) g.setVariables(LinkedHashMap(runtime))
+            }
         }
 
         override fun configureCalls(options: CallsHostOptions) {
@@ -303,9 +379,12 @@ object GraineCallsHost {
             ))
         }
 
-        override fun startCall(activity: Any?, reason: String?, variables: Map<String, Any?>): String? {
+        override fun startCall(activity: Any?, reason: String?, variables: Map<String, Any?>): String? =
+            startCall(activity, reason, variables, GraineInApp.DEFAULT)
+
+        override fun startCall(activity: Any?, reason: String?, variables: Map<String, Any?>, agent: String): String? {
             val from = activity as? Activity ?: return null
-            return calls?.startCall(from, reason, variables)
+            return calls?.startCall(from, reason, variables, agent)
         }
 
         override fun answer() { calls?.answer() }
@@ -318,14 +397,29 @@ object GraineCallsHost {
 
         override fun setSpeaker(on: Boolean) { calls?.setSpeaker(on) }
 
+        // Who the user is and the screen are the app's: on one agent, every agent has them.
         override fun identify(traits: Map<String, Any?>?) { graine?.identify(traits) }
 
-        override fun setVariables(values: Map<String, Any?>) { graine?.setVariables(values) }
+        override fun setVariables(values: Map<String, Any?>) {
+            values.forEach { (k, v) -> if (v == null) runtime.remove(k) else runtime[k] = v }
+            agents().forEach { it.setVariables(values) }
+        }
 
         override fun setScreen(screen: GraineScreen?) { graine?.setScreen(screen) }
 
-        override fun registerAction(name: String, handler: (JSONObject, (ActionResult) -> Unit) -> Unit): () -> Unit =
-            graine?.registerDeferredAction(name, handler) ?: {}
+        /** Unregistering each action from every agent it was registered on. */
+        private val unregisters = HashMap<String, MutableList<() -> Unit>>()
+
+        /** On every agent: a call with any of them may ask for it. */
+        override fun registerAction(name: String, handler: (JSONObject, (ActionResult) -> Unit) -> Unit): () -> Unit {
+            actionHandlers[name] = handler
+            val mine = agents().map { it.registerDeferredAction(name, handler) }
+            unregisters[name] = ArrayList(mine)
+            return {
+                if (actionHandlers[name] === handler) actionHandlers.remove(name)
+                unregisters.remove(name)?.forEach { it() }
+            }
+        }
 
         override fun handlePush(data: Map<String, String>): Boolean {
             val g = graine ?: GraineInApp.peek()
@@ -349,8 +443,12 @@ object GraineCallsHost {
                 agentSpeaking = c.agentSpeaking,
                 caption = c.caption?.let { CallsHostSnapshot.Caption(it.first, it.second, it.third) },
                 connectedAt = connected.epochMs(c.connectedAt, SystemClock.elapsedRealtime(), System.currentTimeMillis()),
+                agent = call?.let { c.agentFor(it.callId).name },
             )
         }
+
+        /** The agent a call (by id) is with: placed with, or rung for — else the default. */
+        override fun agentOf(callId: String): String? = calls?.agentFor(callId)?.name
 
         override fun nextTurn(block: () -> Unit) { main.post { block() } }
 

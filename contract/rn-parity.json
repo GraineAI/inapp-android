@@ -1067,19 +1067,19 @@
     "Creta",
     "Seltos"
    ],
-   "verb": "compare",
-   "output": "Let's compare Creta and Seltos."
+   "label": "Compare",
+   "output": "Compare: Creta and Seltos"
   },
   {
    "titles": [
     "Creta"
    ],
-   "verb": "compare",
-   "output": "Let's compare Creta."
+   "label": "Compare",
+   "output": "Compare: Creta"
   },
   {
    "titles": [],
-   "verb": "compare",
+   "label": "Compare",
    "output": ""
   },
   {
@@ -1087,8 +1087,8 @@
     "  ",
     "A"
    ],
-   "verb": "compare",
-   "output": "Let's compare A."
+   "label": "Compare",
+   "output": "Compare: A"
   },
   {
    "titles": [
@@ -1096,8 +1096,8 @@
     "B",
     "C"
    ],
-   "verb": "choose",
-   "output": "Let's choose A, B and C."
+   "label": "Choose",
+   "output": "Choose: A, B and C"
   },
   {
    "titles": [
@@ -1106,8 +1106,39 @@
     "Seltos",
     "Curvv EV"
    ],
-   "verb": "tell me more",
-   "output": "Let's tell me more Creta, Seltos and Curvv EV."
+   "label": "Tell me more",
+   "output": "Tell me more: Creta, Seltos and Curvv EV"
+  },
+  {
+   "titles": [
+    "Morning",
+    "Evening"
+   ],
+   "label": "Taken",
+   "output": "Taken: Morning and Evening"
+  },
+  {
+   "titles": [
+    "Morning",
+    "Evening"
+   ],
+   "label": " Taken ",
+   "output": "Taken: Morning and Evening"
+  },
+  {
+   "titles": [
+    "Morning"
+   ],
+   "label": "",
+   "output": "Morning"
+  },
+  {
+   "titles": [
+    "Morning",
+    "Noon"
+   ],
+   "label": "   ",
+   "output": "Morning and Noon"
   }
  ],
  "widgetImages": [

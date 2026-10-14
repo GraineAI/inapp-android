@@ -37,8 +37,9 @@ internal object Ui {
     fun dp(ctx: Context, v: Float): Int = Math.round(v * ctx.resources.displayMetrics.density)
     fun dp(ctx: Context, v: Int): Int = dp(ctx, v.toFloat())
 
-    fun isDeviceDark(ctx: Context): Boolean =
+    fun isDeviceDark(ctx: Context): Boolean = runCatching {
         (ctx.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+    }.getOrDefault(false)
 
     /**
      * A CSS weight (400–800) on a TextView: exact from Android 9, bold-or-not
@@ -283,8 +284,11 @@ internal object Themed {
     }
 }
 
-/** Children laid out in rows that wrap — facts, chips, time slots. */
+/** Children laid out in rows that wrap — facts, chips, time slots. [alignEnd]: each row against the right edge (the chat's starters). */
 internal class FlowRow(context: Context, private val gapH: Int, private val gapV: Int) : ViewGroup(context) {
+    var alignEnd = false
+        set(v) { field = v; requestLayout() }
+
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val mode = MeasureSpec.getMode(widthMeasureSpec)
         val maxW = if (mode == MeasureSpec.UNSPECIFIED) Int.MAX_VALUE else MeasureSpec.getSize(widthMeasureSpec) - paddingLeft - paddingRight
@@ -306,14 +310,27 @@ internal class FlowRow(context: Context, private val gapH: Int, private val gapV
 
     override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
         val maxW = r - l - paddingLeft - paddingRight
-        var x = 0; var y = 0; var rowH = 0
+        // Rows first, so a right-aligned row knows its own width.
+        val rows = ArrayList<MutableList<View>>()
+        var x = 0
         for (i in 0 until childCount) {
             val c = getChildAt(i)
             if (c.visibility == GONE) continue
-            if (x > 0 && x + c.measuredWidth > maxW) { y += rowH + gapV; x = 0; rowH = 0 }
-            c.layout(paddingLeft + x, paddingTop + y, paddingLeft + x + c.measuredWidth, paddingTop + y + c.measuredHeight)
+            if (rows.isEmpty() || (x > 0 && x + c.measuredWidth > maxW)) { rows.add(ArrayList()); x = 0 }
+            rows.last().add(c)
             x += c.measuredWidth + gapH
-            rowH = maxOf(rowH, c.measuredHeight)
+        }
+        var y = 0
+        for (row in rows) {
+            val width = row.sumOf { it.measuredWidth } + gapH * (row.size - 1)
+            var cx = if (alignEnd) maxOf(0, maxW - width) else 0
+            var rowH = 0
+            for (c in row) {
+                c.layout(paddingLeft + cx, paddingTop + y, paddingLeft + cx + c.measuredWidth, paddingTop + y + c.measuredHeight)
+                cx += c.measuredWidth + gapH
+                rowH = maxOf(rowH, c.measuredHeight)
+            }
+            y += rowH + gapV
         }
     }
 }

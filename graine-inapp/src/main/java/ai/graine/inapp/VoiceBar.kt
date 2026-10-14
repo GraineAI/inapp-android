@@ -121,6 +121,8 @@ internal object VoiceBar {
         /** The customer is in the chat, not on the call. */
         val chat: Boolean = false,
         val chatOnline: Boolean = false,
+        /** Nothing could connect the chat, after every retry ([ChatSource.failed]). */
+        val chatFailed: Boolean = false,
         /** The engine page's view of the network; null until it says. */
         val online: Boolean? = null,
         val reconnecting: Boolean = false,
@@ -162,7 +164,12 @@ internal object VoiceBar {
     fun status(s: StatusInput): Status = when {
         s.error -> Status("Unavailable")
         // The chat has no microphone and no call to place: none of the words below are true there.
-        s.chat -> if (s.chatOnline) Status("Online") else Status("Connecting…", "connecting")
+        s.chat -> when {
+            s.chatOnline -> Status("Online")
+            // Said, not spun: a loader over a chat that has stopped trying is the lie the call's words avoid too.
+            s.chatFailed -> Status(ChatWindowView.FAILED_TEXT)
+            else -> Status("Connecting…", "connecting")
+        }
         // The network gets named, or the agent takes the blame for it.
         s.online == false -> Status("No connection")
         s.reconnecting || s.connectivity == Connectivity.RETRYING -> Status("Reconnecting…", "reconnecting")

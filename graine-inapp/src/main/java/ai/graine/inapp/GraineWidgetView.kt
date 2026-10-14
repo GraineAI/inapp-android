@@ -95,8 +95,26 @@ class GraineWidgetView @JvmOverloads constructor(
     /** A component is on its way. */
     val isLoading: Boolean get() = flow.loading != null
 
-    private val graine: GraineInApp? = if (isInEditMode) null else GraineInApp.get()
-    private val flow = WidgetFlow(graine?.config?.baseUrl ?: "")
+    /**
+     * The agent whose components this view draws and answers — the default
+     * one unless set. A voice bar or a chat view sets its own on the
+     * components view it holds; set it on a standalone one for another of the
+     * app's agents (`GraineInApp.get("support")`).
+     */
+    var graine: GraineInApp? = if (isInEditMode) null else GraineInApp.primary()
+        set(v) {
+            if (field === v) return
+            val attached = isAttachedToWindow
+            if (attached) unwire()
+            field = v
+            // Another agent's components: nothing of this one's is left on screen.
+            flow = WidgetFlow(v?.config?.baseUrl ?: "")
+            ticked.clear()
+            closeDialog()
+            if (attached) wire()
+            render()
+        }
+    private var flow = WidgetFlow(graine?.config?.baseUrl ?: "")
     private val main = Handler(Looper.getMainLooper())
     private val tick = Runnable { if (flow.tick(SystemClock.uptimeMillis())) render() else schedule() }
 
@@ -105,6 +123,9 @@ class GraineWidgetView @JvmOverloads constructor(
     private var tickedFor: String? = null
     private var page = 0
     private var wasLive = false
+    private var wasChatLive = false
+    /** The component on screen arrived in the chat, not on a call: nothing is listening, so nothing says so. */
+    private var typed = false
 
     private var dialog: Dialog? = null
     private var dialogSurface: String? = null
@@ -136,7 +157,8 @@ class GraineWidgetView @JvmOverloads constructor(
     fun dismiss() {
         val report = flow.dismiss()
         if (report != null) {
-            graine?.voice?.reportEvent(
+            // On whichever conversation is live — the call or the chat.
+            graine?.reportEvent(
                 "component_dismissed",
                 "The customer closed the component without choosing. Do not refer to options they cannot see; offer to show it again if they want it.",
                 mapOf("quiet" to true, "data" to report.eventData()),
@@ -152,11 +174,14 @@ class GraineWidgetView @JvmOverloads constructor(
     // ── what the agent says ────────────────────────────────────────────────
 
     override fun onWidget(widget: JSONObject) {
+        // Decided as it arrives: the conversation it belongs to is the one live now.
+        typed = graine?.inTextChat() == true
         flow.onWidget(widget, SystemClock.uptimeMillis())
         render()
     }
 
     override fun onWidgetPending(hint: JSONObject) {
+        typed = graine?.inTextChat() == true
         flow.onPending(hint, SystemClock.uptimeMillis())
         render()
     }
@@ -172,6 +197,16 @@ class GraineWidgetView @JvmOverloads constructor(
         wasLive = live
     }
 
+    override fun onChatState(connected: Boolean, connecting: Boolean) {
+        // A chat that (re)connects is a new conversation on the server: a card from the last one cannot be answered.
+        if (connected && !wasChatLive) { flow.reset(); render() }
+        wasChatLive = connected
+    }
+
+    override fun onChatMessage(role: Role, text: String, live: Boolean) {
+        if (role == Role.AGENT && flow.awaitingReply) { flow.onAgentStarted(); render() }
+    }
+
     /** A component nobody can answer any more is not left on screen. */
     override fun onEnded() { flow.reset(); render() }
 
@@ -185,22 +220,31 @@ class GraineWidgetView @JvmOverloads constructor(
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
+        wire()
+    }
+
+    override fun onDetachedFromWindow() {
+        unwire()
+        main.removeCallbacks(tick)
+        closeDialog()
+        super.onDetachedFromWindow()
+    }
+
+    private fun wire() {
         val g = graine ?: return
         g.addListener(this)
         unwatch = g.onDesignChange { render() }
         wasLive = g.voice.connected || g.voice.connecting
+        wasChatLive = g.chat.connected
         // Drawn while nothing was listening — a panel that was closed — and still unanswered.
         flow.seed(g.pendingWidget)
         render()
     }
 
-    override fun onDetachedFromWindow() {
+    private fun unwire() {
         graine?.removeListener(this)
         unwatch?.invoke()
         unwatch = null
-        main.removeCallbacks(tick)
-        closeDialog()
-        super.onDetachedFromWindow()
     }
 
     private fun schedule() {
@@ -219,14 +263,15 @@ class GraineWidgetView @JvmOverloads constructor(
         sub.action?.let { call ->
             g.executeAction(call.name, JSONObject(call.args as Map<*, *>)) { r ->
                 if (r.status != ActionResult.Status.OK) {
-                    g.voice.reportEvent(
+                    g.reportEvent(
                         "in_app_action_failed",
                         "\"${call.name}\" did not run: ${r.message.ifEmpty { r.status.wire }}. Do not describe a screen the customer cannot see.",
                     )
                 }
             }
         }
-        g.voice.answerWidget(sub.widgetId, sub.data, sub.summary)
+        // To the conversation that is live: the call's page, or the chat's socket.
+        g.answerWidget(sub.widgetId, sub.data, sub.summary)
         ticked.clear()
         render()
     }
@@ -436,7 +481,7 @@ class GraineWidgetView @JvmOverloads constructor(
     private fun closeButton(s: Skin): View = s.label("×", 20f, s.text, 600).apply {
         gravity = Gravity.CENTER
         background = Ui.rounded(s.borderTint(0.4), dp(22).toFloat())
-        contentDescription = "Close and keep talking"
+        contentDescription = Widgets.closeLabel(typed)
         isClickable = true
         setOnClickListener { dismiss() }
     }
@@ -515,13 +560,16 @@ class GraineWidgetView @JvmOverloads constructor(
         root.addView(scroll, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
         // The agent is still on the call — the difference between a screen it opened and one that replaced it.
-        val footer = Ui.vertical(context).apply {
-            setPadding(dp(18), dp(12), dp(18), dp(20))
-            background = topHairline(s)
+        // In the chat there is no call to be on: no footer (Widgets.screenFooter).
+        Widgets.screenFooter(c.prompt, typed)?.let { (label, line) ->
+            val footer = Ui.vertical(context).apply {
+                setPadding(dp(18), dp(12), dp(18), dp(20))
+                background = topHairline(s)
+            }
+            footer.addView(s.label(label, 10.5f, s.muted, 800).apply { letterSpacing = 0.4f / 10.5f })
+            footer.addView(s.label(line, 13.5f, s.text, 400, lines = 1).apply { setPadding(0, dp(2), 0, 0) })
+            root.addView(footer, Ui.matchWidth())
         }
-        footer.addView(s.label("STILL LISTENING", 10.5f, s.muted, 800).apply { letterSpacing = 0.4f / 10.5f })
-        footer.addView(s.label(c.prompt.ifEmpty { "Tap one, or just say it." }, 13.5f, s.text, 400, lines = 1).apply { setPadding(0, dp(2), 0, 0) })
-        root.addView(footer, Ui.matchWidth())
         return insetScreen(root, s.page)
     }
 
@@ -710,8 +758,7 @@ class GraineWidgetView @JvmOverloads constructor(
         // ONE BUTTON, ONE TURN. Below two it says what it still needs, and does nothing.
         val chosen = ticked.filter { id -> c.rows.any { it.id == id } }
         val ready = chosen.size >= 2
-        val verb = c.selectLabel.lowercase()
-        val label = if (ready) "${c.selectLabel} ${chosen.size}" else "Pick ${2 - chosen.size} more to $verb"
+        val label = Widgets.manyButtonLabel(chosen.size, c.selectLabel)
         return Ui.vertical(context).apply {
             addView(list, Ui.matchWidth())
             addView(s.label(label, 14.5f, if (ready) s.onAccent else s.muted, 700).apply {

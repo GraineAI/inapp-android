@@ -35,6 +35,10 @@ internal object SdkIcons {
     /** Points up as drawn; the chat header turns it 180°. */
     const val CHEVRON = "chevron"
     const val CLOSE = "close"
+    /** "New conversation" in a chat window's header: a page and a pen. */
+    const val COMPOSE = "compose"
+    /** The call screen's loudspeaker. */
+    const val SPEAKER = "speaker"
 
     /** design.json → icons, verbatim. */
     val ALL: Map<String, SdkIcon> = linkedMapOf(
@@ -58,6 +62,8 @@ internal object SdkIcons {
         ),
         CHEVRON to SdkIcon(body = null, lines = "M6 15l6-6 6 6"),
         CLOSE to SdkIcon(body = null, lines = "M6 6l12 12M18 6 6 18"),
+        COMPOSE to SdkIcon(body = null, lines = "M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M18.4 2.6a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4z"),
+        SPEAKER to SdkIcon(body = "M4 9.5h3.5L12 5.5v13l-4.5-4H4z", lines = "M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"),
     )
 
     /**

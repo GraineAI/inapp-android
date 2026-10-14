@@ -351,13 +351,20 @@ internal object CallUrls {
 }
 
 /**
- * THE PUSH THAT RINGS THE PHONE — what a client's server sends through FCM.
+ * THE PUSH THAT RINGS THE PHONE — what a client's server, or Graine itself,
+ * sends through FCM.
  *
  *   type        "agent_call" (anything else is not ours)
  *   call_id     required; every outcome carries it back
  *   reason      optional → the prompt's `call_reason`
  *   caller_name optional; what the ring shows
  *   variables   optional JSON object, as a string → more prompt variables
+ *   hosted      "1" when Graine rang it (contract §3.5): the SDK reports what
+ *               became of it to Graine, and carries no reason or variables —
+ *               the agent reads those from Graine when the call connects
+ *   agent_id    optional; the agent the call is with (or its web-call twin),
+ *               which picks the app's agent that rings it.
+ *               Not personal data
  */
 internal sealed class AgentCallPush {
     object NotOurs : AgentCallPush()
@@ -367,6 +374,12 @@ internal sealed class AgentCallPush {
         val reason: String?,
         val callerName: String?,
         val variables: Map<String, String>,
+        /** Graine rang it: outcomes go to Graine as well as to the app. */
+        val hosted: Boolean = false,
+        /** How long this one rings; null: the configured ring timeout. */
+        val ringTimeoutMs: Long? = null,
+        /** The agent (or web-call twin) id the call is with, when the push names one. */
+        val agentId: String? = null,
     ) : AgentCallPush()
 
     companion object {
@@ -388,6 +401,8 @@ internal sealed class AgentCallPush {
                 reason = data["reason"]?.trim()?.takeIf { it.isNotEmpty() },
                 callerName = data["caller_name"]?.trim()?.takeIf { it.isNotEmpty() },
                 variables = vars,
+                hosted = data["hosted"]?.trim() == "1",
+                agentId = data["agent_id"]?.trim()?.takeIf { it.isNotEmpty() },
             )
         }
     }

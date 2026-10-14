@@ -1,6 +1,7 @@
 package ai.graine.inapp;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import java.util.Collections;
@@ -61,7 +62,9 @@ public class JavaInteropTest {
         ThemeTokens t = new ThemeTokens(c.getV(), c.getPreset(), c.getScheme(), c.getColors(), c.getFont(), c.getShape(),
                 c.getSpacing(), c.getElevation(), c.getMotion(), c.getIcons(), c.getGlass(), c.getBubbles());
         assertEquals("none", t.getChrome());
-        assertEquals(c, t);
+        // The 0.3.0 constructor predates the chat and call tokens too: it builds a design without them.
+        assertEquals(c.copy(c.getV(), c.getPreset(), c.getScheme(), c.getColors(), c.getFont(), c.getShape(), c.getSpacing(),
+                c.getElevation(), c.getMotion(), c.getIcons(), c.getGlass(), c.getBubbles(), c.getChrome(), null, null), t);
     }
 
     @Test public void theCallsPhaseIsReadFromJava() {
@@ -97,6 +100,60 @@ public class JavaInteropTest {
         assertEquals(LogoPlate.ACCENT, new NativeAppearance("#318CE7", "Ring", null, 18.0).getLogoPlate());
     }
 
+    @Test public void aJavaAppHearsGrainesAnswersWithLambdas() {
+        final String[] heard = {null, null};
+        GraineCallback<GraineScheduledCall> booked = (call, error) -> {
+            heard[0] = call == null ? null : call.getId();
+            heard[1] = error == null ? null : error.getCode().getWire();
+        };
+        GraineScheduledCall call = new GraineScheduledCall("sc_1", new java.util.Date(1L));
+        assertTrue(call.isUpcoming());
+        assertTrue(call.getCanCancel());
+        assertEquals(GraineCallStatus.SCHEDULED.INSTANCE, call.getStatus());
+        booked.onResult(call, null);
+        assertEquals("sc_1", heard[0]);
+        booked.onResult(null, new GraineError(GraineErrorCode.TOO_SOON.INSTANCE, "Pick a later time."));
+        assertEquals("too_soon", heard[1]);
+        assertEquals(GraineErrorCode.NETWORK.INSTANCE, GraineErrorCode.from("network"));
+        GraineSchedulingRules rules = new GraineSchedulingRules();
+        assertEquals(false, rules.getUsersCanBook());
+        assertEquals(5L * 60_000L, rules.earliest(new java.util.Date(0L)).getTime());
+        GraineCallback<java.util.List<GraineMemory>> remembered = (memories, error) ->
+                heard[1] = memories == null ? null : memories.get(0).getText();
+        remembered.onResult(Collections.singletonList(new GraineMemory("m1", "Prefers calls after 6 pm")), null);
+        assertEquals("Prefers calls after 6 pm", heard[1]);
+        GraineCallback<Integer> forgot = (deleted, error) -> heard[0] = deleted == null ? null : "deleted " + deleted;
+        forgot.onResult(3, null);
+        assertEquals("deleted 3", heard[0]);
+    }
+
+    @Test public void aJavaAppDrawsItsOwnChatWithOnlyWhatItMustWrite() {
+        // typing, failed and shown are default methods: a Java source writes the five that matter.
+        ChatSource source = new ChatSource() {
+            @Override public java.util.List<GraineChatTurn> getMessages() {
+                return Collections.singletonList(new GraineChatTurn("t1", Role.AGENT, "Hello", new java.util.Date()));
+            }
+            @Override public boolean getOnline() { return true; }
+            @Override public void send(String text) {}
+            @Override public void addChangeListener(Runnable listener) {}
+            @Override public void removeChangeListener(Runnable listener) {}
+        };
+        assertEquals("Hello", source.getMessages().get(0).getText());
+        assertEquals(false, source.getTyping());
+        assertEquals(false, source.getFailed());
+        source.shown(true);
+    }
+
+    @Test public void theCallScreensWordsBuildWithoutTheOptionalOnes() {
+        CallStatusText words = new CallStatusText("Incoming call", "Connecting…", "Call ended");
+        assertEquals("Scheduled call", words.getScheduledText());
+        assertEquals("Missed call", words.getMissedText());
+        GraineCall hosted = new GraineCall("ic_1", GraineCall.Direction.INCOMING, "Acme", null,
+                Collections.<String, String>emptyMap(), true);
+        assertTrue(hosted.getHosted());
+        assertEquals("ai.graine.inapp.action.CALL_BACK", GraineCalls.ACTION_CALL_BACK);
+    }
+
     @Test public void aJavaAppConfiguresCallsAndHearsTheirOutcomes() {
         // Every argument has a default: a Java app names only what it cares about.
         GraineCallsConfig config = new GraineCallsConfig("Acme Support");
@@ -125,5 +182,26 @@ public class JavaInteropTest {
         GraineCall call = new GraineCall("c", GraineCall.Direction.INCOMING, "Acme", "payment_due",
                 Collections.singletonMap("who_called", "agent"));
         assertEquals(GraineCall.Direction.INCOMING, call.getDirection());
+    }
+
+    @SuppressWarnings({"ConstantConditions", "unused"})
+    @Test public void aJavaAppNamesItsOtherAgentsAndPicksOnePerCall() {
+        assertEquals("default", GraineInApp.DEFAULT);
+        assertEquals("ai.graine.inapp.extra.AGENT", GraineCalls.EXTRA_AGENT);
+        assertNull(GraineInApp.find("nobody"));
+        // Compiled, never run (they need an Application and an activity): the overloads a Java app writes.
+        if (System.nanoTime() < 0) {
+            GraineInApp support = GraineInApp.init(null, new GraineConfig("https://www.graine.ai", "pk_live_support"));
+            GraineInApp sales = GraineInApp.init(null, new GraineConfig("https://www.graine.ai", "pk_live_sales"), "sales");
+            GraineInApp again = GraineInApp.get();
+            GraineInApp named = GraineInApp.get("sales");
+            java.util.Map<String, GraineInApp> all = GraineInApp.getAll();
+            String name = sales.getName();
+            sales.getCalls().startCall(null, "upgrade", Collections.<String, Object>emptyMap(), "sales");
+            sales.getCalls().startCall(null, "help");
+            GraineInApp with = sales.getCalls().getCallAgent();
+            GraineChatActivity.open(null);
+            GraineChatActivity.open(null, "sales");
+        }
     }
 }

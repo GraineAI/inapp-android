@@ -1,0 +1,136 @@
+package ai.graine.inapp
+
+import android.os.Handler
+import android.os.Looper
+import org.json.JSONObject
+import java.util.concurrent.Executor
+
+/**
+ * WHAT EVERY AGENT IN THE APP SHARES — one app, one user, one device. An app
+ * may run several agents, each with its own publishable key (a support agent
+ * in Help, a sales agent on Plans): each owns its session, chat, voice,
+ * actions and requests. What is the same whichever agent asks lives here: the
+ * agents themselves, who the user is and their memory choice, the screen they
+ * are on and what they just did there, and the one native call engine.
+ * Main-thread writes; any-thread reads.
+ */
+internal object AppShared {
+    private val agents = LinkedHashMap<String, GraineInApp>()
+
+    /** An agent's name as it is kept: trimmed, and the default one when there is none. */
+    fun key(name: String): String = name.trim().ifEmpty { GraineInApp.DEFAULT }
+
+    /** The agent [name], made by [make] when there is none yet; true when it was made now. */
+    fun agent(name: String, make: (key: String) -> GraineInApp): Pair<GraineInApp, Boolean> = synchronized(agents) {
+        val k = key(name)
+        agents[k]?.let { return it to false }
+        val g = make(k)
+        agents[k] = g
+        g to true
+    }
+
+    fun find(name: String): GraineInApp? = synchronized(agents) { agents[key(name)] }
+
+    /** Every configured agent, in the order they were made. */
+    fun all(): List<GraineInApp> = synchronized(agents) { agents.values.toList() }
+
+    /** Every configured agent by name, in the order they were made. */
+    fun named(): Map<String, GraineInApp> = synchronized(agents) { LinkedHashMap(agents) }
+
+    /** The default agent, else the first one made: for an app that only named its agents. */
+    fun primary(): GraineInApp? = synchronized(agents) { agents[GraineInApp.DEFAULT] ?: agents.values.firstOrNull() }
+
+    // ── who the user is ────────────────────────────────────────────────────
+
+    /** The traits the last identify() handed over, raw; null signed out (or never identified). An agent made later starts with them. */
+    @Volatile var traits: Map<String, Any?>? = null
+    /** The memory choice made for the current user this launch; null leaves the choice kept on the device. */
+    @Volatile var memory: Boolean? = null
+
+    // ── the screen ─────────────────────────────────────────────────────────
+
+    @Volatile var screen: GraineScreen? = null
+    @Volatile var screenSince: Long = System.currentTimeMillis()
+    /** When the last tap was recorded, uptime ms: at most two a second reach the context. */
+    @Volatile var lastTapAt: Long = Long.MIN_VALUE / 2
+    /** The app's recent events, oldest first, at most ten. */
+    private val recentEvents = ArrayDeque<JSONObject>()
+
+    fun events(): List<JSONObject> = synchronized(recentEvents) { recentEvents.toList() }
+
+    fun record(event: JSONObject) {
+        synchronized(recentEvents) {
+            recentEvents.addLast(event)
+            while (recentEvents.size > 10) recentEvents.removeFirst()
+        }
+    }
+
+    // ── the native call engine ─────────────────────────────────────────────
+
+    @Volatile private var calls: GraineCalls? = null
+
+    /** The one call engine of the process, made by the first agent that asks for it. */
+    fun calls(home: GraineInApp): GraineCalls = calls ?: synchronized(this) { calls ?: GraineCalls(home).also { calls = it } }
+
+    /** The call engine if anything made it: nothing makes it just to ask whether a call is live. */
+    fun callsIfMade(): GraineCalls? = calls
+
+    /**
+     * Which configured agent an agent id belongs to: the one whose session
+     * (this launch's, or the last one kept on the device) has it as its agent
+     * or its web-call twin. Null when none does.
+     */
+    fun agentFor(agentId: String?): GraineInApp? {
+        val id = agentId?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        return all().firstOrNull { id in it.knownAgentIds() }
+    }
+
+    /** Forget every agent and everything they shared: between tests, which make agents of their own. */
+    fun reset() {
+        synchronized(agents) { agents.clear() }
+        traits = null
+        memory = null
+        screen = null
+        screenSince = System.currentTimeMillis()
+        lastTapAt = Long.MIN_VALUE / 2
+        synchronized(recentEvents) { recentEvents.clear() }
+        synchronized(this) { calls = null }
+    }
+}
+
+/** The main thread, as the SDK posts to it: Android's main looper in an app, a test's own clock on the JVM. */
+internal interface MainThread {
+    fun post(r: Runnable): Boolean
+    fun postDelayed(r: Runnable, delayMs: Long): Boolean
+    fun removeCallbacks(r: Runnable)
+
+    companion object {
+        fun android(): MainThread = object : MainThread {
+            private val handler = Handler(Looper.getMainLooper())
+            override fun post(r: Runnable): Boolean = handler.post(r)
+            override fun postDelayed(r: Runnable, delayMs: Long): Boolean = handler.postDelayed(r, delayMs)
+            override fun removeCallbacks(r: Runnable) = handler.removeCallbacks(r)
+        }
+    }
+}
+
+/**
+ * WHAT AN AGENT RUNS ON: the main thread, the network, the device's storage.
+ * An app's agents run on Android's own; a test hands in fakes, so several real
+ * agents run side by side on the JVM, offline (MultiAgentTest).
+ */
+internal class AgentEnv(
+    val main: MainThread = MainThread.android(),
+    /** Blocking work: requests and the session. Null: the agent's own background thread. */
+    val io: Executor? = null,
+    val http: HttpPost = PlatformHttp,
+    val fetchSession: (baseUrl: String, publishableKey: String) -> JSONObject = { b, k -> SessionFetch.fetchJson(b, k) },
+    /** The chat's socket, its clock and where its ticket is minted. Null: the platform's. */
+    val openSocket: ((String, List<String>, CallSocketListener) -> CallSocket)? = null,
+    val scheduler: CallScheduler? = null,
+    val ticketIo: ((() -> Unit) -> Unit)? = null,
+    val device: DeviceStore? = null,
+    val sessionCache: SessionCache? = null,
+    /** Fetch the design's typefaces. Off in tests: nothing reaches a font host. */
+    val fonts: Boolean = true,
+)

@@ -34,6 +34,15 @@
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|uiMode"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
 
+        <!-- The chat on a screen of its own (GraineChatActivity.open): above the
+             keyboard, in the brand's design. -->
+        <activity
+            android:name="ai.graine.inapp.GraineChatActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|uiMode"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+
         <service
             android:name="ai.graine.inapp.GraineCallService"
             android:exported="false"

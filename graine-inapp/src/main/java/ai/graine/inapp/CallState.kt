@@ -22,7 +22,7 @@ import android.net.Uri
 enum class GraineCallState { IDLE, RINGING, CONNECTING, ACTIVE, ENDED }
 
 /** The call in progress: who placed it, why, and the id every outcome carries back. */
-data class GraineCall(
+data class GraineCall @JvmOverloads constructor(
     /** From the push for an incoming call; generated for one the customer places. */
     val callId: String,
     val direction: Direction,
@@ -32,6 +32,12 @@ data class GraineCall(
     val reason: String?,
     /** The call's own prompt variables (`who_called`, `call_reason`, the push's `variables`). */
     val variables: Map<String, String>,
+    /**
+     * Graine rang it (the push said `hosted: "1"`): a call booked with the
+     * agent — by the agent in a conversation, by the user, or from the
+     * dashboard. The ring says "Scheduled call"; outcomes go to Graine too.
+     */
+    val hosted: Boolean = false,
 ) {
     enum class Direction { INCOMING, OUTGOING }
 }
@@ -49,6 +55,14 @@ data class GraineCallOutcome @JvmOverloads constructor(
     val kind: Kind,
     val endReason: EndReason? = null,
     val error: String? = null,
+    /** The call's id — the same one [GraineCallListener.onCallOutcome] carries beside it. */
+    val callId: String = "",
+    /** How long a call that connected lasted, in whole seconds ([Kind.ENDED]); null otherwise. */
+    val durationSeconds: Int? = null,
+    /** Graine rang it (a call booked with the agent): Graine hears this outcome too. */
+    val hosted: Boolean = false,
+    /** A [Kind.MISSED] ring refused because another call was live. */
+    val busy: Boolean = false,
 ) {
     enum class Kind(val wire: String) { ANSWERED("answered"), DECLINED("declined"), MISSED("missed"), ENDED("ended"), FAILED("failed") }
 
@@ -57,6 +71,17 @@ data class GraineCallOutcome @JvmOverloads constructor(
 
     /** One word for the app's server: answered · declined · missed · ended · failed. */
     val wire: String get() = kind.wire
+
+    /** WIRE.md's `outcome`: the same word as [wire]. */
+    val outcome: String get() = kind.wire
+
+    /** Why, in one word or sentence: who ended a call ([Kind.ENDED]), why it failed ([Kind.FAILED]), `busy` for a refused ring. */
+    val reason: String? get() = when (kind) {
+        Kind.ENDED -> endReason?.wire
+        Kind.FAILED -> error
+        Kind.MISSED -> if (busy) "busy" else null
+        else -> null
+    }
 
     companion object {
         @JvmField val ANSWERED = GraineCallOutcome(Kind.ANSWERED)
@@ -108,6 +133,9 @@ data class GraineCallsConfig @JvmOverloads constructor(
  * own id and leaves the live call alone — unless it is the live call's own id
  * again, which is ignored; a second outgoing call is refused.
  */
+/** Who the agent hears called for an answered ring: "scheduled" for a call Graine rang (hosted), else "agent". */
+internal fun whoCalled(hosted: Boolean): String = if (hosted) "scheduled" else "agent"
+
 internal class CallMachine(
     private val schedule: (Long, () -> Unit) -> (() -> Unit),
     private val ringTimeoutMs: () -> Long,
@@ -131,13 +159,15 @@ internal class CallMachine(
             return null
         }
         val vars = LinkedHashMap<String, String>()
-        vars["who_called"] = "agent"
+        // Who the agent hears called (contract §3.4): "scheduled" for a call Graine rang at a booked time,
+        // "agent" for a ring from the app's own server. Graine adds the booking's reason when the call connects.
+        vars["who_called"] = whoCalled(push.hosted)
         push.reason?.let { vars["call_reason"] = it }
         for ((k, v) in push.variables) if (k != "who_called" && !(k == "call_reason" && push.reason != null)) vars[k] = v
-        val c = GraineCall(push.callId, GraineCall.Direction.INCOMING, push.callerName, push.reason, vars)
+        val c = GraineCall(push.callId, GraineCall.Direction.INCOMING, push.callerName, push.reason, vars, push.hosted)
         call = c
         move(GraineCallState.RINGING)
-        cancelRing = schedule(ringTimeoutMs()) { ringTimedOut(c.callId) }
+        cancelRing = schedule(push.ringTimeoutMs?.takeIf { it > 0 } ?: ringTimeoutMs()) { ringTimedOut(c.callId) }
         return c
     }
 

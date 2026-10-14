@@ -146,7 +146,7 @@ class CallSessionTest {
 
     // ── connecting ──────────────────────────────────────────────────────────
 
-    @Test fun theTicketRidesTheSubprotocolAndTheVariablesRideTheUrl() {
+    @Test fun theTicketRidesTheSubprotocolAndTheVariablesRideTheTicketOnly() {
         session().start(); sched.drain()
         val (url, body) = requests.single()
         assertEquals("https://www.graine.ai/api/embed/ticket", url)
@@ -158,8 +158,8 @@ class CallSessionTest {
         assertEquals("payment_due", meta.getString("call_reason"))
         assertEquals("Asha", meta.getString("name"))
         assertEquals(listOf("graine.embed.v1", "tkt_1"), openedProtocols)
-        val token = CallVariables.contextToken(mapOf("who_called" to "agent", "call_reason" to "payment_due", "name" to "Asha"))!!
-        assertEquals("wss://ws.graine.ai/v1/s?context_token=" + CallUrls.encodeURIComponent(token), openedUrl)
+        // The gateway's URL as given: it builds the call's context from the ticket's signed claims and reads nothing on it.
+        assertEquals("wss://ws.graine.ai/v1/s", openedUrl)
         assertFalse("the ticket never rides the query", openedUrl!!.contains("tkt_1"))
     }
 
@@ -196,6 +196,8 @@ class CallSessionTest {
         assertEquals(2, socket.sent.size)
         sched.advance(1)
         assertEquals("ping", socket.types().last())
+        // Answered, as the gateway and the runtime answer every ping: a line that says nothing for 50 s is gone.
+        frame(JSONObject().put("type", "pong"))
         sched.advance(25_000)
         assertEquals(2, socket.types().count { it == "ping" })
     }

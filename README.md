@@ -17,7 +17,7 @@ Integration guide: https://www.graine.ai/docs/in-app/android
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    implementation("ai.graine:inapp-android:0.7.0")
+    implementation("ai.graine:inapp-android:0.8.0")
 }
 ```
 
@@ -293,6 +293,44 @@ whose `code` is a `GraineErrorCode`: `SCHEDULING_OFF`, `TOO_SOON`, `TOO_FAR`,
 `OUTSIDE_WINDOW`, `TOO_MANY_PENDING`, `NETWORK`… A `GraineScheduledCall` has
 `id`, `at`, `status` (`SCHEDULED`, `RINGING`, …, `NO_DEVICE`, or `Unknown`),
 `source` (`AGENT`, `APP`, `DASHBOARD`, `API`), `reason`, `isUpcoming` and `canCancel`.
+
+## Booking a call from your app
+
+When your workspace has Graine ring its users and the agent lets them book
+(Calls & scheduling, in the dashboard), the SDK draws the booking screen itself
+— "Call me at…" with no screen of your own:
+
+```kotlin
+if (graine.bookingAvailable) {                      // rung here, booking on, the user identified
+    graine.presentBooking(activity, reason = "Card replacement") { call, _ ->
+        if (call != null) showBooked(call)          // null: closed without booking
+    }
+}
+```
+
+The sheet is drawn in the agent's design, light or dark: the day (chips from
+today to the furthest day the agent allows), the time on the platform's time
+picker (spinner mode; only times the agent's rules allow), the phone's time
+zone, "What's it about? (optional)" — 120 characters, kept with the call for
+the agent, never in the push; `reason` fills it — and **Book call**. A refusal
+stays in the sheet as one line: "Pick a time at least 5 minutes from now",
+"Pick a time within 14 days", "That time is outside the hours we can call —
+pick another", "You already have 3 calls booked — cancel one first", "Sign in
+to book a call", "Couldn't book just now — try again". Once it is booked, the
+sheet says when the agent will call, and Done closes it. A sheet up from the
+bottom on a phone, a centred panel on a tablet; Back or a tap outside closes it.
+
+`GraineBookingDialog(activity, graine, reason) { call, _ -> }.show()` is the
+same sheet, for an app that shows it its own way. From Java:
+`graine.presentBooking(activity, (call, error) -> { … });`.
+
+`bookingAvailable` is each agent's own: true only when Graine rings this phone
+(the workspace's In-app calling, for Android), the agent lets users book, and
+the user is identified with the trait the agent's Identity setting names
+(otherwise a booking is refused with `IDENTITY_REQUIRED`). The SDK's chat
+window follows the same rule: **Book a call** under the booked calls in its
+Upcoming calls card, or on its own in the card's place when none are booked —
+and none when the design hides the booked-calls card.
 
 ## Several agents in one app
 

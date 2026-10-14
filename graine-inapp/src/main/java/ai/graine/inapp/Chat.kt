@@ -343,7 +343,9 @@ internal class TextChatSession(
             url = ChatUrls.direct(config.wsHost, config.webcallAgentId?.takeIf { it.isNotEmpty() } ?: config.agentId)
             protocols = emptyList()
         }
-        val full = CallUrls.withToken(url, CallVariables.contextToken(config.variables, CALL_TYPE))
+        // The direct socket reads the variables off its URL. The gateway builds the conversation's context
+        // from the ticket's signed claims and reads nothing else, so a token there would only reach the access logs.
+        val full = if (ticket != null) url else CallUrls.withToken(url, CallVariables.contextToken(config.variables, CALL_TYPE))
         openTimer = scheduler.schedule(CallFrames.OPEN_TIMEOUT_MS) {
             if (phase == Phase.CONNECTING) failBeforeOpen("The chat could not connect within ${CallFrames.OPEN_TIMEOUT_MS / 1000} seconds.")
         }

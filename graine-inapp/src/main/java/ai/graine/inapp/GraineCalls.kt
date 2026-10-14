@@ -483,60 +483,72 @@ class GraineCalls internal constructor(
         val c = machine.call ?: return
         // The call's own agent: its session, its key, who it knows the user as, its actions and its view of the screen.
         val graine = agentFor(c.callId)
+        // This launch's session, or the one kept on the device, starts the call now; the network refreshes it behind.
+        CallAgentIds.now(graine.session, graine.cachedSession)?.let { ids ->
+            open(c, graine, ids)
+            graine.loadSession { }
+            return
+        }
         graine.loadSession { s ->
             if (machine.call?.callId != c.callId || machine.state != GraineCallState.CONNECTING || session != null) return@loadSession
             if (s == null) { machine.fail("The agent could not be loaded."); return@loadSession }
-            route = AudioRoute(app) { i -> onMain { interrupted(c.callId, i) } }.also { it.acquire(speaker) }
-            val events = object : CallSessionEvents {
-                override fun onOpen() = onMain {
-                    if (machine.call?.callId == c.callId && machine.connected()) {
-                        connectedAt = android.os.SystemClock.elapsedRealtime()
-                        updateOngoing()
-                    }
-                }
-                override fun onFailed(error: String) = onMain { if (machine.call?.callId == c.callId) machine.fail(error) }
-                override fun onEnded(reason: GraineCallOutcome.EndReason, error: String?) = onMain {
-                    if (machine.call?.callId == c.callId) machine.end(reason, error)
-                }
-                override fun onCaption(role: Role, text: String, live: Boolean) = onMain {
-                    if (machine.call?.callId != c.callId) return@onMain
-                    caption = Triple(role, text, live)
-                    report { it.onCallCaption(role, text, live) }
-                }
-                override fun onAgentSpeaking(speaking: Boolean) = onMain {
-                    if (machine.call?.callId != c.callId) return@onMain
-                    agentSpeaking = speaking
-                    report { it.onAgentSpeaking(speaking) }
+            open(c, graine, CallAgentIds.of(s))
+        }
+    }
+
+    /** Call [c]'s conversation with [graine]'s agent, at [ids]. Main thread. */
+    private fun open(c: GraineCall, graine: GraineInApp, ids: CallAgentIds) {
+        if (machine.call?.callId != c.callId || machine.state != GraineCallState.CONNECTING || session != null) return
+        route = AudioRoute(app) { i -> onMain { interrupted(c.callId, i) } }.also { it.acquire(speaker) }
+        val events = object : CallSessionEvents {
+            override fun onOpen() = onMain {
+                if (machine.call?.callId == c.callId && machine.connected()) {
+                    connectedAt = android.os.SystemClock.elapsedRealtime()
+                    updateOngoing()
                 }
             }
-            val sess = VoiceCallSession(
-                CallSessionConfig(
-                    baseUrl = graine.config.baseUrl,
-                    publishableKey = graine.config.publishableKey,
-                    agentId = s.agentId,
-                    webcallAgentId = s.webcallAgentId,
-                    wsHost = s.wsHost,
-                    callVariables = c.variables,
-                    sdkVariables = graine.currentVariables(),
-                    // Who the user is and which call this is, so the call record carries the user and memory works.
-                    identity = graine.identityEnvelope(),
-                    callId = c.callId,
-                ),
-                CallSessionDeps(
-                    scheduler = scheduler,
-                    audio = AndroidCallAudio(),
-                    http = graine.env.http,
-                    // The SDK's own runner, on the main thread as every handler expects; it always answers.
-                    runAction = { name, args, answer -> main.post { graine.executeAction(name, args, answer) } },
-                    contextFrame = { graine.currentContextFrame() },
-                ),
-                events,
-            )
-            session = sess
-            sess.setMuted(muted)
-            unwatchContext = graine.onContext { frame -> session?.sendContext(frame) }
-            sess.start()
+            override fun onFailed(error: String) = onMain { if (machine.call?.callId == c.callId) machine.fail(error) }
+            override fun onEnded(reason: GraineCallOutcome.EndReason, error: String?) = onMain {
+                if (machine.call?.callId == c.callId) machine.end(reason, error)
+            }
+            override fun onCaption(role: Role, text: String, live: Boolean) = onMain {
+                if (machine.call?.callId != c.callId) return@onMain
+                caption = Triple(role, text, live)
+                report { it.onCallCaption(role, text, live) }
+            }
+            override fun onAgentSpeaking(speaking: Boolean) = onMain {
+                if (machine.call?.callId != c.callId) return@onMain
+                agentSpeaking = speaking
+                report { it.onAgentSpeaking(speaking) }
+            }
         }
+        val sess = VoiceCallSession(
+            CallSessionConfig(
+                baseUrl = graine.config.baseUrl,
+                publishableKey = graine.config.publishableKey,
+                agentId = ids.agentId,
+                webcallAgentId = ids.webcallAgentId,
+                wsHost = ids.wsHost,
+                callVariables = c.variables,
+                sdkVariables = graine.currentVariables(),
+                // Who the user is and which call this is, so the call record carries the user and memory works.
+                identity = graine.identityEnvelope(),
+                callId = c.callId,
+            ),
+            CallSessionDeps(
+                scheduler = scheduler,
+                audio = AndroidCallAudio(),
+                http = graine.env.http,
+                // The SDK's own runner, on the main thread as every handler expects; it always answers.
+                runAction = { name, args, answer -> main.post { graine.executeAction(name, args, answer) } },
+                contextFrame = { graine.currentContextFrame() },
+            ),
+            events,
+        )
+        session = sess
+        sess.setMuted(muted)
+        unwatchContext = graine.onContext { frame -> session?.sendContext(frame) }
+        sess.start()
     }
 
     // ── state ───────────────────────────────────────────────────────────────

@@ -99,19 +99,21 @@ class ChatTest {
         assertEquals("3f2504e0-4f89-11d3-9a0c-0305e82c3301", body.getString("installId"))
         assertFalse(body.getBoolean("memory"))
         assertEquals("Asia/Kolkata", body.getString("timezone"))
-        // The ticket rides the subprotocol; the variables ride the URL, as a text chat.
+        // The ticket rides the subprotocol, and the variables ride the ticket: the gateway reads nothing
+        // off its URL, so a query there would only reach the access logs.
         assertEquals(listOf(CallFrames.SUBPROTOCOL, "tkt_text"), openedProtocols)
-        assertTrue(openedUrl!!.startsWith("wss://ws.graine.ai/v1/s?context_token="))
-        val t = token(openedUrl!!)
-        assertEquals("text_chat", t.getString("call_type"))
-        assertEquals("gold", t.getJSONObject("recipient_data").getString("plan"))
-        assertFalse("the identity never becomes a variable", t.toString().contains("P-1234"))
+        assertEquals("wss://ws.graine.ai/v1/s", openedUrl)
     }
 
     @Test fun withNoTicketTheDirectSocketIsATextChat() {
         ticketReply = { HttpReply(503, """{"error":"Gateway not configured on this deployment."}""") }
-        open()
+        open(session(identity = IdentityEnvelope("P-1234", "3f2504e0-4f89-11d3-9a0c-0305e82c3301", false, "Asia/Kolkata")))
         assertTrue(openedUrl!!.startsWith("wss://ws.graine.ai/chat/v1/web_1?text_chat=1&context_token="))
+        // The direct socket reads the variables off its URL, as a text chat.
+        val t = token(openedUrl!!)
+        assertEquals("text_chat", t.getString("call_type"))
+        assertEquals("gold", t.getJSONObject("recipient_data").getString("plan"))
+        assertFalse("the identity never becomes a variable", t.toString().contains("P-1234"))
         assertEquals(emptyList<String>(), openedProtocols)
         ticketReply = { throw java.io.IOException("offline") }
         val other = ChatTest()

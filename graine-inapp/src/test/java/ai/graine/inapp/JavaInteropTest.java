@@ -204,4 +204,17 @@ public class JavaInteropTest {
             GraineChatActivity.open(null, "sales");
         }
     }
+
+    @SuppressWarnings({"ConstantConditions", "unused"})
+    @Test public void aJavaAppOffersTheBookingSheet() {
+        // Compiled, never run (they need an Application and an activity): the calls a Java app writes.
+        if (System.nanoTime() < 0) {
+            GraineInApp graine = GraineInApp.get();
+            boolean offer = graine.getBookingAvailable();
+            graine.presentBooking(null, (call, error) -> { });
+            graine.presentBooking(null, "Card replacement", (call, error) -> { });
+            new GraineBookingDialog(null).show();
+            new GraineBookingDialog(null, graine, "Card replacement", (call, error) -> { }).show();
+        }
+    }
 }

@@ -84,6 +84,8 @@ class GraineChatView internal constructor(
         window.onCollapse = { onClose?.invoke() }
         window.onRetry = { (source as? GraineChat)?.connect() ?: run { source.shown(false); source.shown(true) } }
         window.onCancelCall = { id -> (source as? GraineChat)?.cancelUpcomingCall(id) }
+        // The sheet books with scheduleCall, which refreshes the card.
+        window.onBook = { Ui.activity(context)?.let { a -> graine.presentBooking(a) { _, _ -> } } }
         // A refusal leaves the conversation as it was; nothing to say over it.
         window.onNewConversation = { (source as? GraineChat)?.newConversation() }
         render()
@@ -159,7 +161,8 @@ class GraineChatView internal constructor(
         val s = source
         window.render(t, accent, onAccent, dash.heading, null, dash.logoUrl, dash.logoPlate, s.messages, s.online,
             replying = s.typing, failed = s.failed, loader = loader, loaderColor = loaderColor,
-            upcoming = (s as? GraineChat)?.upcomingRows() ?: emptyList(), callName = graine.schedulingRules.callName ?: dash.heading)
+            upcoming = (s as? GraineChat)?.upcomingRows() ?: emptyList(), callName = graine.schedulingRules.callName ?: dash.heading,
+            bookable = s is GraineChat && graine.bookingAvailable)
         show(isAttachedToWindow && isShown)
     }
 }

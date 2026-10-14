@@ -846,7 +846,7 @@ class GraineInApp private constructor(
     val design: ResolvedDesign? get() = designPreview ?: session?.design ?: (if (session == null) cachedSession?.design else null)
 
     /** The last session's look and calls, as kept on the device for this agent; null before any session was ever fetched. */
-    private val cachedSession: SessionCache.Kept? by lazy { sessionCache.load(config.baseUrl, config.publishableKey) }
+    internal val cachedSession: SessionCache.Kept? by lazy { sessionCache.load(config.baseUrl, config.publishableKey) }
 
     /**
      * The ids this agent answers to — its agent and its web-call twin, from
@@ -868,6 +868,20 @@ class GraineInApp private constructor(
      * that woke the app), else the defaults: no booking, no hosted ringing.
      */
     val schedulingRules: GraineSchedulingRules get() = session?.schedulingRules ?: cachedSession?.rules ?: GraineSchedulingRules()
+
+    /**
+     * Whether this agent can be booked from the app now — what the SDK's own
+     * "Book a call" follows, and what an app's own button should: Graine
+     * rings this phone (`calls.hosted`, and `calls.platforms` empty or naming
+     * Android), the agent lets users book, and the user is identified with
+     * the trait the agent's Identity setting names (otherwise a booking is
+     * refused with `identity_required`). Each agent answers for itself. Read
+     * it again after [identify] and once the session has loaded.
+     */
+    val bookingAvailable: Boolean get() = Booking.available(schedulingRules, identity.value() != null)
+
+    /** Why the booking sheet cannot book now, as its line; null when it can. */
+    internal val bookingBlocked: String? get() = Booking.blocked(schedulingRules, identity.value() != null)
 
     /**
      * The tokens to draw in `context` right now: the brand's fixed light or
@@ -1048,6 +1062,8 @@ class GraineInApp private constructor(
             request(EmbedApi.SCHEDULE, Scheduling.scheduleBody(atMs, reason, identity.envelope())) { r ->
                 when (r) {
                     is EmbedReply.Ok -> {
+                        // The chat's Upcoming calls card shows it at once.
+                        if (chatLazy.isInitialized()) chat.refreshUpcomingCalls()
                         val call = Scheduling.scheduled(r.body)
                         if (call != null) done?.onResult(call, null)
                         else done?.onResult(null, GraineError(GraineErrorCode.UNAVAILABLE, "The booking was accepted but not described."))
@@ -1067,6 +1083,40 @@ class GraineInApp private constructor(
             }
         }
     }
+
+    /**
+     * Show the SDK's booking sheet over [activity] — a sheet up from the
+     * bottom on a phone, a centred panel on a tablet — in the agent's design:
+     * the day, the time (the platform's time picker), the phone's time zone,
+     * "What's it about? (optional)" (which [reason] fills) and Book call.
+     * [done] hears the booked call once the sheet closes, or null when the
+     * user closed it without booking. A refusal stays in the sheet as one line.
+     *
+     * Check [bookingAvailable] before offering it: an agent that cannot be
+     * booked now opens a sheet that says why and books nothing. One sheet at a
+     * time. Main thread, or any: it is shown on the main thread.
+     */
+    @JvmOverloads
+    fun presentBooking(activity: Activity, reason: String? = null, done: GraineCallback<GraineScheduledCall?>) {
+        main.post {
+            if (activity.isFinishing || activity.isDestroyed || bookingSheet?.isShowing == true) {
+                done.onResult(null, null)
+                return@post
+            }
+            if (!bookingAvailable) {
+                android.util.Log.w(TAG, "The booking sheet opened while this agent cannot be booked; it says why. Check bookingAvailable before offering it.")
+            }
+            val sheet = GraineBookingDialog(activity, this, reason, GraineCallback { call, error ->
+                bookingSheet = null
+                done.onResult(call, error)
+            })
+            bookingSheet = sheet
+            sheet.show()
+        }
+    }
+
+    /** The booking sheet on screen, so a second tap does not stack another. Main thread. */
+    private var bookingSheet: GraineBookingDialog? = null
 
     /** Cancel a booked call — only one booked for this user or install. [done] hears the call's status afterwards (cancelled). */
     @JvmOverloads
@@ -1310,6 +1360,8 @@ internal class SessionCache(private val slotRead: (slot: String) -> String?, pri
         val rules: GraineSchedulingRules,
         val agentId: String? = null,
         val webcallAgentId: String? = null,
+        /** Where the agent's socket lives — what lets a call start on the kept session (GraineCalls). */
+        val wsHost: String? = null,
     )
 
     fun save(baseUrl: String, publishableKey: String, session: JSONObject) {
@@ -1322,7 +1374,7 @@ internal class SessionCache(private val slotRead: (slot: String) -> String?, pri
             o.put("appearance", look)
         }
         (session.opt("calls") as? JSONObject)?.let { o.put("calls", it) }
-        for (k in listOf("agentId", "webcallAgentId")) (session.opt(k) as? String)?.takeIf { it.isNotBlank() }?.let { o.put(k, it) }
+        for (k in listOf("agentId", "webcallAgentId", "wsHost")) (session.opt(k) as? String)?.takeIf { it.isNotBlank() }?.let { o.put(k, it) }
         slotWrite(SLOT + "." + who, o.toString())
     }
 
@@ -1338,6 +1390,7 @@ internal class SessionCache(private val slotRead: (slot: String) -> String?, pri
             GraineSchedulingRules.parse(o.opt("calls")),
             o.optString("agentId").ifBlank { null },
             o.optString("webcallAgentId").ifBlank { null },
+            o.optString("wsHost").ifBlank { null },
         )
     }
 

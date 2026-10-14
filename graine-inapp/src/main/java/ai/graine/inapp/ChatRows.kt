@@ -123,18 +123,27 @@ internal data class ChatPieces(
     val upcoming: Boolean,
     /** The card's title: the brand's words, else "Upcoming call" / "Upcoming calls". */
     val upcomingTitle: String,
+    /**
+     * "Book a call" (BOOKING-SHEET.md §4): the agent can be booked from the
+     * app ([GraineInApp.bookingAvailable]) and the design keeps the
+     * booked-calls card — in the card under its calls, or as a compact row in
+     * its place when there are none.
+     */
+    val book: Boolean = false,
 ) {
     companion object {
         /** For [turns] and [upcomingCount] booked calls, under the design's chat tokens (null, an older server: everything on). */
-        fun of(turns: List<GraineChatTurn>, chat: ChatTokens?, upcomingCount: Int = 0): ChatPieces {
+        fun of(turns: List<GraineChatTurn>, chat: ChatTokens?, upcomingCount: Int = 0, bookable: Boolean = false): ChatPieces {
             val shown = if (chat?.showHistory != false) turns else turns.filter { !it.restored }
             val words = chat?.upcomingTitle?.trim().orEmpty()
+            val cardKept = chat?.showUpcomingCalls != false
             return ChatPieces(
                 turns = shown,
                 starters = ChatRows.offersStarters(shown),
                 newConversation = chat?.newConversation != false && ChatRows.offersNewConversation(shown),
-                upcoming = chat?.showUpcomingCalls != false && upcomingCount > 0,
+                upcoming = cardKept && upcomingCount > 0,
                 upcomingTitle = words.ifEmpty { UpcomingCalls.title(upcomingCount) },
+                book = cardKept && bookable,
             )
         }
     }

@@ -679,13 +679,15 @@ class GraineAgentBarView @JvmOverloads constructor(
                 cw.onSend = { text -> chat?.send(text) }
                 cw.onRetry = { retryChat() }
                 cw.onCancelCall = { id -> (chat as? GraineChat)?.cancelUpcomingCall(id) }
+                cw.onBook = { openBooking() }
                 cw.onNewConversation = { (chat as? GraineChat)?.newConversation() }
                 cw.onCollapse = { closeChat() }
                 chatSlot.addView(cw, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
             }
             w.render(t, l.accent, l.onAccent, l.name, l.hostImage, l.logoUrl, l.logoPlate, source.messages, source.online,
                 replying = source.typing, failed = source.failed, keyboardUp = imeLiftPx > 0, loader = l.loader, loaderColor = l.loaderColor,
-                upcoming = (source as? GraineChat)?.upcomingRows() ?: emptyList(), callName = graine.schedulingRules.callName ?: l.name)
+                upcoming = (source as? GraineChat)?.upcomingRows() ?: emptyList(), callName = graine.schedulingRules.callName ?: l.name,
+                bookable = source is GraineChat && graine.bookingAvailable)
             chatSlot.visibility = VISIBLE
             if (!chatShown) Themed.enter(chatSlot, t, px(VoiceBar.RISE).toFloat())
         } else {
@@ -762,6 +764,7 @@ class GraineAgentBarView @JvmOverloads constructor(
                     dialog.chat.onSend = { text -> chat?.send(text) }
                     dialog.chat.onRetry = { retryChat() }
                     dialog.chat.onCancelCall = { id -> (chat as? GraineChat)?.cancelUpcomingCall(id) }
+                    dialog.chat.onBook = { openBooking() }
                     // A sheet and a panel offer New conversation like the window above the bar.
                     dialog.chat.onNewConversation = { (chat as? GraineChat)?.newConversation() }
                     dialog.chat.onCollapse = { closeChat() }
@@ -773,7 +776,8 @@ class GraineAgentBarView @JvmOverloads constructor(
             d.paint(l.t)
             d.chat.render(l.t, l.accent, l.onAccent, l.name, l.hostImage, l.logoUrl, l.logoPlate, source.messages, source.online,
                 replying = source.typing, failed = source.failed, loader = l.loader, loaderColor = l.loaderColor,
-                upcoming = (source as? GraineChat)?.upcomingRows() ?: emptyList(), callName = graine.schedulingRules.callName ?: l.name)
+                upcoming = (source as? GraineChat)?.upcomingRows() ?: emptyList(), callName = graine.schedulingRules.callName ?: l.name,
+                bookable = source is GraineChat && graine.bookingAvailable)
             val host = Ui.activity(context)
             if (!d.isShowing && isAttachedToWindow && host != null && !host.isFinishing) d.show()
         } else {
@@ -785,6 +789,12 @@ class GraineAgentBarView @JvmOverloads constructor(
             screenOpen = true
             GraineChatActivity.openFromBar(context, graine.name)
         }
+    }
+
+    /** "Book a call" in the chat: the booking sheet over the bar's activity. A booking refreshes the card. */
+    private fun openBooking() {
+        val host = Ui.activity(context) ?: return
+        graine.presentBooking(host) { _, _ -> }
     }
 
     private fun dismissBigChat() {
@@ -964,6 +974,7 @@ class GraineAgentBarView @JvmOverloads constructor(
     }
 
     /** Android 11+: follow the keyboard frame by frame, instead of jumping after it lands. */
+    @android.annotation.TargetApi(30)
     private inner class ImeAnimation : WindowInsetsAnimation.Callback(WindowInsetsAnimation.Callback.DISPATCH_MODE_CONTINUE_ON_SUBTREE) {
         override fun onProgress(insets: WindowInsets, running: MutableList<WindowInsetsAnimation>): WindowInsets {
             if (running.any { it.typeMask and WindowInsets.Type.ime() != 0 }) updateKeyboard(insets)

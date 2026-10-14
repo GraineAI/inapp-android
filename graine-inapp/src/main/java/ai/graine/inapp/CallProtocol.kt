@@ -214,7 +214,7 @@ internal object CallText {
 
     /** JavaScript's `\s`: ASCII whitespace plus the Unicode spaces and line separators. */
     fun isJsSpace(c: Char): Boolean = when (c) {
-        '\t', '\n', '\u000B', '\u000C', '\r', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '　', '﻿' -> true
+        '\t', '\n', '\u000B', '\u000C', '\r', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '　', '\uFEFF' -> true
         else -> c in ' '..' '
     }
 }
@@ -236,6 +236,18 @@ internal object CallFrames {
     /** Below this much queued audio the agent's voice has, for every purpose here, finished. */
     const val AUDIBLE_BUFFER_SECONDS = 0.02
     const val CLOSE_AFTER_STOP_MS = 200L
+    /**
+     * The most microphone audio waiting for a slow line: 15 frames of 20 ms,
+     * 300 ms. Past it the oldest goes — a customer heard a second late is a
+     * conversation that has stopped working.
+     */
+    const val AUDIO_QUEUE_FRAMES = 15
+    /**
+     * A live line is never this quiet: the gateway and the runtime answer every
+     * ping (each [PING_MS]) with a pong. Nothing at all for two ping periods and
+     * the line is gone, whatever TCP still believes.
+     */
+    const val LIVENESS_MS = 2 * PING_MS
 
     fun init(variables: Map<String, String>): String = JSONObject()
         .put("type", "init")

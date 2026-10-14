@@ -12,17 +12,27 @@ import java.net.Socket
 import java.net.URI
 import java.security.MessageDigest
 import java.security.SecureRandom
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.locks.ReentrantLock
 import javax.net.ssl.HostnameVerifier
 import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLPeerUnverifiedException
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
+import kotlin.concurrent.withLock
 
 /** The socket a native call speaks over — the real client below, or a fake in tests. */
 internal interface CallSocket {
-    /** Queue one text frame. False once the socket is not open. Never call on the main thread. */
+    /** Queue one text frame. False once the socket is not open. Never blocks: the socket's writer sends it. */
     fun send(text: String): Boolean
+    /**
+     * Queue one frame the line may drop when it cannot keep up — the
+     * microphone's audio, where a late frame is worse than a missing one.
+     * Never a control frame. A socket without a queue sends it like any other.
+     */
+    fun sendDroppable(text: String): Boolean = send(text)
     /** Begin the close handshake (or abort a connect). Exactly one terminal callback follows. */
     fun close(code: Int = 1000, reason: String = "")
 }
@@ -44,7 +54,18 @@ internal interface CallSocketListener {
  * socket uses: the HTTP/1.1 upgrade (key, accept, subprotocols), masked client
  * frames, text messages fragmented or not, ping → pong, and the close
  * handshake, over `SSLSocketFactory.getDefault()` with the platform's hostname
- * verifier. One reader thread per socket; sends are serialised.
+ * verifier. One reader thread per socket, and one writer.
+ *
+ * SENDING NEVER BLOCKS. A socket write waits for the network, and on a slow
+ * or stalled uplink that is seconds, or forever: done on the caller's thread,
+ * a call's one session thread froze behind it — the agent's audio, the mark
+ * acks and the hang-up all queued up behind the microphone (measured on a live
+ * call). So frames go into a queue that a writer thread empties. The queue
+ * holds at most [droppableLimit] droppable frames — 300 ms of the
+ * microphone's — dropping the OLDEST when the line falls behind (what the
+ * customer said a second ago is worth less than what they say now); a control
+ * frame is never dropped. A close the line cannot carry within a second is
+ * forced: the socket is closed under it.
  *
  * TLS: the TCP connection is made first with a deadline, then layered with
  * `createSocket(socket, host, port, true)` — the host given there is what SNI
@@ -62,6 +83,10 @@ internal class WebSocketClient(
     private val headers: Map<String, String> = emptyMap(),
     private val sslSocketFactory: () -> SSLSocketFactory = { SSLSocketFactory.getDefault() as SSLSocketFactory },
     private val hostnameVerifier: () -> HostnameVerifier = { HttpsURLConnection.getDefaultHostnameVerifier() },
+    /** The most droppable frames waiting at once: 15 of the microphone's 20 ms frames, 300 ms. */
+    private val droppableLimit: Int = CallFrames.AUDIO_QUEUE_FRAMES,
+    /** The connection under TLS. A seam for the tests' line that stalls on command. */
+    private val plainSocket: () -> Socket = { Socket() },
 ) : CallSocket {
 
     private enum class State { CONNECTING, OPEN, CLOSING, CLOSED }
@@ -69,11 +94,29 @@ internal class WebSocketClient(
     @Volatile private var state = State.CONNECTING
     @Volatile private var socket: Socket? = null
     @Volatile private var output: OutputStream? = null
-    private val writeLock = Any()
+    /** Held by whoever is writing to the socket: the writer, or a best-effort frame from the reader. */
+    private val writeLock = ReentrantLock()
     private val terminal = AtomicBoolean(false)
     private val random = SecureRandom()
     @Volatile private var closeCode = 1000
     @Volatile private var closeReason = ""
+
+    /** One frame for the writer, masked and ready. */
+    private class Outgoing(val frame: ByteArray, val droppable: Boolean)
+
+    /** The writer's queue, oldest first, and everything below — guarded by [outboxLock]. */
+    private val outbox = ArrayDeque<Outgoing>()
+    private val outboxLock = ReentrantLock()
+    private val outboxReady = outboxLock.newCondition()
+    private var droppableQueued = 0
+    private var writerStopped = false
+    private val dropped = AtomicLong()
+
+    /** Droppable frames dropped because the line could not keep up. */
+    val droppedFrames: Long get() = dropped.get()
+
+    /** Droppable frames waiting to be written now. */
+    val queuedDroppable: Int get() = outboxLock.withLock { droppableQueued }
 
     /** Connect on the socket's own thread; [CallSocketListener.onOpen] when the upgrade succeeds. */
     fun connect(): WebSocketClient {
@@ -83,14 +126,12 @@ internal class WebSocketClient(
 
     override fun send(text: String): Boolean {
         if (state != State.OPEN) return false
-        return try {
-            writeFrame(OP_TEXT, text.toByteArray(Charsets.UTF_8))
-            true
-        } catch (e: Exception) {
-            // The reader sees the dead socket and reports it; this send just did not happen.
-            closeSocket()
-            false
-        }
+        return enqueue(encode(OP_TEXT, text.toByteArray(Charsets.UTF_8)), droppable = false)
+    }
+
+    override fun sendDroppable(text: String): Boolean {
+        if (state != State.OPEN) return false
+        return enqueue(encode(OP_TEXT, text.toByteArray(Charsets.UTF_8)), droppable = true)
     }
 
     override fun close(code: Int, reason: String) {
@@ -105,14 +146,79 @@ internal class WebSocketClient(
             State.OPEN -> {
                 state = State.CLOSING
                 closeCode = code; closeReason = reason
-                try { writeFrame(OP_CLOSE, closePayload(code, reason)) } catch (_: Exception) { closeSocket(); return }
-                // The server should echo the close; if it never does, stop waiting.
+                outboxLock.withLock {
+                    // The call is over: what the microphone said and the line has not carried stays unsaid.
+                    if (droppableQueued > 0) {
+                        dropped.addAndGet(droppableQueued.toLong())
+                        outbox.removeAll { it.droppable }
+                        droppableQueued = 0
+                    }
+                }
+                if (!enqueue(encode(OP_CLOSE, closePayload(code, reason)), droppable = false)) { closeSocket(); return }
+                // The server should echo the close. If it never does — or the line cannot carry ours — stop waiting:
+                // closing the socket also ends a write the network is holding.
                 Thread({
                     try { Thread.sleep(CLOSE_WAIT_MS) } catch (_: InterruptedException) {}
                     closeSocket()
                 }, "graine-ws-close").apply { isDaemon = true }.start()
             }
             else -> Unit
+        }
+    }
+
+    // ── the writer thread ───────────────────────────────────────────────────
+
+    /** A masked client frame, ready for the writer. */
+    private fun encode(opcode: Int, payload: ByteArray): ByteArray = encodeFrame(opcode, payload, ByteArray(4).also { random.nextBytes(it) })
+
+    /** Queue a frame. A droppable one beyond the limit pushes out the oldest droppable one; control frames always stay. */
+    private fun enqueue(frame: ByteArray, droppable: Boolean): Boolean = outboxLock.withLock {
+        if (writerStopped) return@withLock false
+        if (droppable) {
+            while (droppableQueued >= Math.max(1, droppableLimit)) {
+                val oldest = outbox.indexOfFirst { it.droppable }
+                if (oldest < 0) break
+                outbox.removeAt(oldest)
+                droppableQueued--
+                dropped.incrementAndGet()
+            }
+            droppableQueued++
+        }
+        outbox.addLast(Outgoing(frame, droppable))
+        outboxReady.signalAll()
+        true
+    }
+
+    private fun writeLoop() {
+        while (true) {
+            val next = outboxLock.withLock {
+                while (outbox.isEmpty() && !writerStopped) outboxReady.await()
+                if (writerStopped) return
+                outbox.removeFirst().also { if (it.droppable) droppableQueued-- }
+            }
+            try {
+                writeLock.withLock {
+                    val out = output ?: throw IOException("not open")
+                    out.write(next.frame)
+                    out.flush()
+                }
+            } catch (e: Exception) {
+                // The reader sees the dead socket and reports it; nothing more can be written.
+                closeSocket()
+                return
+            }
+        }
+    }
+
+    /** One frame now, from the reader, if the line is free within a moment: the close echo, a protocol error's close. Never waits on a stalled write. */
+    private fun writeNow(opcode: Int, payload: ByteArray) {
+        if (!writeLock.tryLock(WRITE_NOW_WAIT_MS, TimeUnit.MILLISECONDS)) return
+        try {
+            val out = output ?: return
+            out.write(encode(opcode, payload))
+            out.flush()
+        } finally {
+            writeLock.unlock()
         }
     }
 
@@ -132,9 +238,10 @@ internal class WebSocketClient(
             val response = readResponseHead(input)
             val protocol = verifyUpgrade(response, key, protocols)
             s.soTimeout = 0
-            synchronized(writeLock) { output = out }
+            writeLock.withLock { output = out }
             if (state != State.CONNECTING) { closeQuietly(s); return }
             state = State.OPEN
+            Thread({ writeLoop() }, "graine-ws-writer").apply { isDaemon = true }.start()
             listener.onOpen(protocol)
             readLoop(DataInputStream(input))
         } catch (e: Throwable) {
@@ -152,7 +259,7 @@ internal class WebSocketClient(
     }
 
     private fun openSocket(t: Target, deadline: Long): Socket {
-        val plain = Socket()
+        val plain = plainSocket()
         socket = plain
         plain.tcpNoDelay = true
         plain.connect(InetSocketAddress(t.host, t.port), remaining(deadline))
@@ -211,9 +318,9 @@ internal class WebSocketClient(
                     val code = if (payload.size >= 2) ((payload[0].toInt() and 0xff) shl 8) or (payload[1].toInt() and 0xff) else 1005
                     val reason = if (payload.size > 2) String(payload, 2, payload.size - 2, Charsets.UTF_8) else ""
                     if (state == State.OPEN) {
-                        // The server closed first: echo it, as the handshake asks.
+                        // The server closed first: echo it, as the handshake asks — best effort, never behind a stalled write.
                         state = State.CLOSING
-                        runCatching { writeFrame(OP_CLOSE, closePayload(if (code == 1005) 1000 else code, "")) }
+                        runCatching { writeNow(OP_CLOSE, closePayload(if (code == 1005) 1000 else code, "")) }
                     }
                     state = State.CLOSED
                     closeSocket()
@@ -222,7 +329,8 @@ internal class WebSocketClient(
                 }
                 OP_PING -> {
                     if (!fin || payload.size > 125) protocolError("a malformed ping")
-                    runCatching { writeFrame(OP_PONG, payload) }
+                    // Queued like any control frame: the reader never waits on the line.
+                    enqueue(encode(OP_PONG, payload), droppable = false)
                 }
                 OP_PONG -> Unit
                 else -> protocolError("opcode $opcode")
@@ -235,17 +343,8 @@ internal class WebSocketClient(
     }
 
     private fun protocolError(what: String): Nothing {
-        runCatching { writeFrame(OP_CLOSE, closePayload(1002, "")) }
+        runCatching { writeNow(OP_CLOSE, closePayload(1002, "")) }
         throw IOException("WebSocket protocol error: $what")
-    }
-
-    private fun writeFrame(opcode: Int, payload: ByteArray) {
-        val frame = encodeFrame(opcode, payload, ByteArray(4).also { random.nextBytes(it) })
-        synchronized(writeLock) {
-            val out = output ?: throw IOException("not open")
-            out.write(frame)
-            out.flush()
-        }
     }
 
     private fun deliverClosed(code: Int, reason: String) {
@@ -256,7 +355,14 @@ internal class WebSocketClient(
         if (terminal.compareAndSet(false, true)) listener.onFailure(e)
     }
 
+    /** The connection, closed — which also ends a write the network is holding — and the writer stopped. */
     private fun closeSocket() {
+        outboxLock.withLock {
+            writerStopped = true
+            outbox.clear()
+            droppableQueued = 0
+            outboxReady.signalAll()
+        }
         socket?.let { closeQuietly(it) }
     }
 
@@ -295,7 +401,10 @@ internal class WebSocketClient(
         const val OP_PONG = 0xA
         /** A voice frame is ~13 KB; nothing the agent sends comes near this. */
         const val MAX_MESSAGE_BYTES = 8L * 1024 * 1024
+        /** How long a close waits for the server's echo — or for a stalled line to carry it — before the socket is closed under it. */
         const val CLOSE_WAIT_MS = 1_000L
+        /** How long the reader waits for the line to write a frame of its own (an echo) before giving up on it. */
+        const val WRITE_NOW_WAIT_MS = 200L
         private const val GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
         /** One client frame: FIN set, masked as RFC 6455 requires of a client. */

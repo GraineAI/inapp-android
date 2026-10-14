@@ -84,6 +84,8 @@ class GraineChat internal constructor(
 
     init {
         graine.foregroundWatchers.add { fg -> onMain { onForeground(fg) } }
+        // Who is signed in decides whether the chat window offers "Book a call": windows on screen redraw.
+        graine.onIdentity { changed() }
     }
 
     // ── what an app calls ─────────────────────────────────────────────────

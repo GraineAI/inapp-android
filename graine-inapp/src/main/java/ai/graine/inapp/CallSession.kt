@@ -6,6 +6,7 @@ import java.net.URL
 import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.ThreadFactory
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * The call's microphone and speaker, behind an interface: AndroidCallAudio
@@ -143,13 +144,16 @@ internal class CallSessionDeps(
 /**
  * ONE NATIVE CALL ON THE VOICE SOCKET — sdk/NATIVE-CALLS.md "The wire protocol".
  *
- *   ticket (or the direct URL) → socket with context_token → init →
+ *   ticket (or the direct URL, with context_token) → socket → init →
  *   app_context → ping every 25 s, the microphone up through the echo guard,
  *   the agent's audio down through the decoder and the player, marks acked
  *   when heard, actions answered within 6 s, and stop + close to hang up.
+ *   Nothing arriving for two ping periods ends the call as dropped.
  *
  * Every piece of state lives on [CallSessionDeps.scheduler]'s thread: socket
- * callbacks, microphone frames and the public methods all hop onto it.
+ * callbacks, microphone frames and the public methods all hop onto it — but
+ * for the audio a hang-up releases at once, and sends, which never block it
+ * (the socket's writer carries them).
  */
 internal class VoiceCallSession(
     private val config: CallSessionConfig,
@@ -168,6 +172,11 @@ internal class VoiceCallSession(
     private var socket: CallSocket? = null
     private var openTimer: (() -> Unit)? = null
     private var pingTimer: (() -> Unit)? = null
+    /** When anything last arrived on the socket, and the timer that notices when nothing has for too long. */
+    private var lastInboundAt = 0L
+    private var livenessTimer: (() -> Unit)? = null
+    /** The microphone and the speaker were let go — once, from whichever thread got there first (a hang-up's own). */
+    private val audioReleased = AtomicBoolean(false)
 
     /** What this call's agent audio turned out to be — decided once, never per frame. */
     private var format: AgentAudioFormat? = null
@@ -201,19 +210,33 @@ internal class VoiceCallSession(
         }
     }
 
-    /** Hang up: the stop frame, then the close ~200 ms later. Audio is released now. No event follows. */
-    fun hangUp() = scheduler.post {
-        if (phase == Phase.CLOSED) return@post
-        val wasOpen = phase == Phase.OPEN
-        phase = Phase.CLOSED
-        teardown()
-        val s = socket ?: return@post
-        if (wasOpen) {
-            s.send(CallFrames.STOP)
-            scheduler.schedule(CallFrames.CLOSE_AFTER_STOP_MS) { s.close(1000, "") }
-        } else {
-            s.close(1000, "")
+    /**
+     * Hang up: the microphone and the speaker are released NOW, on the
+     * caller's thread — a hang-up never waits behind whatever the session's
+     * thread is doing — then the stop frame, and the close ~200 ms later (the
+     * socket forces it if the line cannot carry it within a second). No event
+     * follows.
+     */
+    fun hangUp() {
+        releaseAudio()
+        scheduler.post {
+            if (phase == Phase.CLOSED) return@post
+            val wasOpen = phase == Phase.OPEN
+            phase = Phase.CLOSED
+            teardown()
+            val s = socket ?: return@post
+            if (wasOpen) {
+                s.send(CallFrames.STOP)
+                scheduler.schedule(CallFrames.CLOSE_AFTER_STOP_MS) { s.close(1000, "") }
+            } else {
+                s.close(1000, "")
+            }
         }
+    }
+
+    /** Release the microphone and the speaker, once. Any thread. */
+    private fun releaseAudio() {
+        if (audioReleased.compareAndSet(false, true)) runCatching { audio.stop() }
     }
 
     /** Muted: frames are dropped before they are sent; the microphone keeps running. */
@@ -271,7 +294,9 @@ internal class VoiceCallSession(
             url = CallUrls.direct(config.wsHost, config.webcallAgentId?.takeIf { it.isNotEmpty() } ?: config.agentId)
             protocols = emptyList()
         }
-        val full = CallUrls.withToken(url, CallVariables.contextToken(variables, "webcall"))
+        // The variables on the direct socket's URL only: the gateway builds the call's context from the
+        // ticket's signed claims and reads nothing on its URL — a token there would only reach access logs.
+        val full = if (ticket != null) url else CallUrls.withToken(url, CallVariables.contextToken(variables, "webcall"))
         openTimer = scheduler.schedule(CallFrames.OPEN_TIMEOUT_MS) {
             if (phase == Phase.CONNECTING) failBeforeOpen("The call could not connect within ${CallFrames.OPEN_TIMEOUT_MS / 1000} seconds.")
         }
@@ -288,7 +313,11 @@ internal class VoiceCallSession(
     /** One socket per session, so one listener; anything it says after the session let go is ignored by phase. */
     private inner class Listener : CallSocketListener {
         override fun onOpen(protocol: String?) = scheduler.post { opened() }
-        override fun onText(text: String) = scheduler.post { if (phase == Phase.OPEN) onFrame(text) }
+        override fun onText(text: String) = scheduler.post {
+            if (phase != Phase.OPEN) return@post
+            lastInboundAt = scheduler.now()
+            onFrame(text)
+        }
         override fun onClosed(code: Int, reason: String) = scheduler.post {
             when (phase) {
                 Phase.CONNECTING -> failBeforeOpen("The call was refused (close $code${if (reason.isNotEmpty()) ": $reason" else ""}).")
@@ -313,6 +342,8 @@ internal class VoiceCallSession(
         send(CallFrames.init(variables))
         runCatching { deps.contextFrame() }.getOrNull()?.let { send(CallFrames.appContext(it)) }
         schedulePing()
+        lastInboundAt = scheduler.now()
+        armLiveness(CallFrames.LIVENESS_MS)
         format = null
         echo.reset()
         try {
@@ -326,7 +357,32 @@ internal class VoiceCallSession(
             events.onFailed("The microphone could not start: ${e.message ?: e.javaClass.simpleName}")
             return
         }
+        // A hang-up on another thread released the audio while it was starting: release it again.
+        if (audioReleased.get()) runCatching { audio.stop() }
         events.onOpen()
+    }
+
+    /**
+     * NOTHING HAS ARRIVED FOR TWO PING PERIODS. A live line answers every
+     * ping with a pong, so this is a line that is gone — a network that died
+     * without a reset, where TCP would go on believing for many minutes, the
+     * customer hearing silence and the microphone still open. Checked once a
+     * period, against the last frame that arrived.
+     */
+    private fun armLiveness(delayMs: Long) {
+        livenessTimer = scheduler.schedule(delayMs) {
+            livenessTimer = null
+            if (phase != Phase.OPEN) return@schedule
+            val quietMs = scheduler.now() - lastInboundAt
+            if (quietMs < CallFrames.LIVENESS_MS) {
+                armLiveness(CallFrames.LIVENESS_MS - quietMs)
+                return@schedule
+            }
+            val s = socket
+            endRemotely(GraineCallOutcome.EndReason.FAILED, "Nothing arrived for ${CallFrames.LIVENESS_MS / 1000} seconds: the connection was lost.")
+            // Closed for good: the socket forces it if the dead line cannot carry the close.
+            s?.close(1000, "")
+        }
     }
 
     /**
@@ -376,14 +432,18 @@ internal class VoiceCallSession(
     private fun teardown() {
         openTimer?.invoke(); openTimer = null
         pingTimer?.invoke(); pingTimer = null
+        livenessTimer?.invoke(); livenessTimer = null
         speakingTimer?.invoke(); speakingTimer = null
         runCatching { audio.clear() }
-        runCatching { audio.stop() }
+        releaseAudio()
         if (speaking) { speaking = false; events.onAgentSpeaking(false) }
         spokenTurn = ""
     }
 
     private fun send(text: String): Boolean = socket?.send(text) ?: false
+
+    /** The microphone's audio: the one frame the socket may drop when the line falls behind. */
+    private fun sendAudio(text: String): Boolean = socket?.sendDroppable(text) ?: false
 
     // ── the agent → the customer ────────────────────────────────────────────
 
@@ -512,7 +572,7 @@ internal class VoiceCallSession(
         } else if (!speaking) {
             bargedIn = false
         }
-        send(CallFrames.audio(B64.encode(AgentAudio.toLittleEndian(frame))))
+        sendAudio(CallFrames.audio(B64.encode(AgentAudio.toLittleEndian(frame))))
     }
 
     // ── the agent's actions ─────────────────────────────────────────────────
@@ -534,6 +594,32 @@ internal class VoiceCallSession(
             deps.runAction(a.name, a.arguments) { r -> scheduler.post { answer(r) } }
         } catch (e: Exception) {
             answer(ActionResult.error("\"${a.name}\" failed: ${e.message ?: e.javaClass.simpleName}"))
+        }
+    }
+}
+
+/**
+ * WHICH AGENT A CALL DIALS, AND WHERE — from this launch's session, or the one
+ * kept on the device. A call that has either starts at once; the network
+ * refreshes the session behind it (GraineCalls.connect).
+ */
+internal data class CallAgentIds(val agentId: String, val webcallAgentId: String?, val wsHost: String?) {
+    companion object {
+        fun of(s: SessionConfig) = CallAgentIds(s.agentId, s.webcallAgentId, s.wsHost)
+
+        /**
+         * What a call can start on NOW: this launch's session, else the kept
+         * one — but a kept one only when it says where the agent's socket
+         * lives. One kept by an older SDK does not, and a guess would dial
+         * Graine's own host for an install that runs its own. Null: the call
+         * waits for the network.
+         */
+        fun now(live: SessionConfig?, kept: SessionCache.Kept?): CallAgentIds? {
+            if (live != null) return of(live)
+            val k = kept ?: return null
+            val host = k.wsHost?.takeIf { it.isNotBlank() } ?: return null
+            val agent = k.agentId?.takeIf { it.isNotBlank() } ?: k.webcallAgentId?.takeIf { it.isNotBlank() } ?: return null
+            return CallAgentIds(agent, k.webcallAgentId, host)
         }
     }
 }

@@ -71,6 +71,8 @@ internal class ChatWindowView(
     var onRetry: (() -> Unit)? = null
     /** Cancel one of the Upcoming calls. */
     var onCancelCall: ((String) -> Unit)? = null
+    /** "Book a call": open the booking sheet. */
+    var onBook: (() -> Unit)? = null
     /** "New conversation" — offered in the header only while earlier messages (restored turns) are on screen. */
     var onNewConversation: (() -> Unit)? = null
 
@@ -220,17 +222,18 @@ internal class ChatWindowView(
      * [failed]: nothing could connect; the status says so and a tap retries.
      * [keyboardUp]: the thread gives up height while the keyboard is up (on the bar).
      * [upcoming]: the customer's booked calls, soonest first; [callName] names them.
+     * [bookable]: the agent can be booked from the app — "Book a call" in the card, or in its place.
      */
     fun render(
         t: ThemeTokens, accent: Int, onAccent: Int, heading: String, hostImage: String?, logoUrl: String?, logoPlate: LogoPlate,
         messages: List<GraineChatTurn>, isOnline: Boolean, replying: Boolean = false, failed: Boolean = false, keyboardUp: Boolean = false,
         loader: LoaderLook = Loaders.resolve(null), loaderColor: Int = accent,
-        upcoming: List<UpcomingRow> = emptyList(), callName: String = heading,
+        upcoming: List<UpcomingRow> = emptyList(), callName: String = heading, bookable: Boolean = false,
     ) {
         val chat = Surfaces.chatOf(t)
         val look = Look(t, chat, accent, onAccent, heading, hostImage, logoUrl, logoPlate, loader, loaderColor)
         // What the window draws of the pieces the design can leave out: earlier messages, New conversation, booked calls.
-        val pieces = ChatPieces.of(messages, chat, upcoming.size)
+        val pieces = ChatPieces.of(messages, chat, upcoming.size, bookable)
         val shown = pieces.turns
         val c = t.colors
         val r = t.shape.radius
@@ -267,7 +270,7 @@ internal class ChatWindowView(
         thread.setPadding(pad, pad, pad, pad)
         Ui.gap(thread, Themed.px(context, t.spacing.gap))
         Ui.gap(list, Themed.px(context, t.spacing.gap))
-        renderUpcoming(look, if (pieces.upcoming) upcoming else emptyList(), callName, pieces.upcomingTitle)
+        renderUpcoming(look, if (pieces.upcoming) upcoming else emptyList(), callName, pieces.upcomingTitle, pieces.book)
         val grew = drawMessages(look, shown)
         renderEmpty(look, shown.isEmpty())
         renderTyping(look, replying)
@@ -636,12 +639,18 @@ internal class ChatWindowView(
      * component card: "Upcoming call(s)", then a row per call (at most three):
      * the time in the device's own zone and words, the call name under it,
      * Cancel at the right ("Cancelling…" while it goes; a failure says so and
-     * a tap retries).
+     * a tap retries) — and, where the agent can be booked from the app
+     * ([book]), "Book a call" under them; with none booked, that alone in the
+     * card's place.
      */
-    private fun renderUpcoming(look: Look, rows: List<UpcomingRow>, callName: String, heading: String) {
+    private fun renderUpcoming(look: Look, rows: List<UpcomingRow>, callName: String, heading: String, book: Boolean) {
         upcomingSlot.removeAllViews()
-        upcomingSlot.visibility = if (rows.isEmpty()) GONE else VISIBLE
-        if (rows.isEmpty()) return
+        upcomingSlot.visibility = if (rows.isEmpty() && !book) GONE else VISIBLE
+        if (rows.isEmpty() && !book) return
+        if (rows.isEmpty()) {
+            upcomingSlot.addView(bookButton(look, standalone = true), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, px(40.0)))
+            return
+        }
         val t = look.t
         val c = t.colors
         val bw = Themed.px(context, t.shape.borderWidth)
@@ -722,7 +731,43 @@ internal class ChatWindowView(
                 }, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, px(32.0)))
             }, Ui.matchWidth())
         }
+        if (book) body.addView(bookButton(look, standalone = false), LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, px(36.0)))
         upcomingSlot.addView(card, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+    }
+
+    /**
+     * "Book a call" (BOOKING-SHEET.md §4) — opens the booking sheet. In the
+     * card, under its calls: outlined like Cancel, the full width. With no
+     * calls booked, a compact row in the card's place: the same, 40 high on
+     * `surfaceRaised`.
+     */
+    private fun bookButton(look: Look, standalone: Boolean): View {
+        val t = look.t
+        val c = t.colors
+        val bw = Themed.px(context, t.shape.borderWidth)
+        return LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER
+            Ui.gap(this, px(8.0))
+            background = Ui.rounded(if (standalone) Themed.color(c.surfaceRaised) else android.graphics.Color.TRANSPARENT,
+                Themed.px(context, minOf(t.shape.radius.md, 16.0)).toFloat(), maxOf(1, bw), Themed.color(c.border))
+            isClickable = true
+            isFocusable = true
+            contentDescription = Booking.CHAT_ROW
+            setOnClickListener { onBook?.invoke() }
+            addView(ImageView(context).apply {
+                setImageDrawable(IconDrawable(SdkIcons.CALL, t.icons.style, t.icons.stroke, look.accent, px(16.0)))
+                importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, LayoutParams(px(16.0), px(16.0)))
+            addView(TextView(context).apply {
+                text = Booking.CHAT_ROW
+                maxLines = 1
+                setTextColor(Themed.color(c.text))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, (t.font.scale.body - 1).toFloat())
+                Themed.face(this, t.font.body, t.font.weights.strong, graine)
+                importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+            })
+        }
     }
 
     companion object {

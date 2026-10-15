@@ -120,6 +120,13 @@ data class GraineCallsConfig @JvmOverloads constructor(
     val callActivity: Class<out Activity>? = null,
     /** How long an incoming call rings before it is missed. */
     val ringTimeoutMs: Long = 30_000,
+    /**
+     * How a call carries its audio: [GraineCallTransport.AUTO] (WebRTC when
+     * the app includes `ai.graine:inapp-android-rtc`, else the WebSocket),
+     * WEBSOCKET or WEBRTC. A call that cannot be placed over WebRTC continues
+     * over the WebSocket within the same call.
+     */
+    val callTransport: GraineCallTransport = GraineCallTransport.AUTO,
 )
 
 /**

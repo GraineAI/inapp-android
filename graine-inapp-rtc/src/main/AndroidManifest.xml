@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Merged into the app beside the SDK's own permissions (the microphone,
+         the network, the call's foreground service). WebRTC watches the
+         phone's networks — Wi-Fi, mobile — to choose its path and move with
+         them; without this permission its library stops the app on the first
+         call. A normal permission: granted at install, nothing is asked. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+</manifest>

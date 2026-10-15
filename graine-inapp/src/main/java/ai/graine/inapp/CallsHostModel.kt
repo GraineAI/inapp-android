@@ -50,6 +50,7 @@ internal enum class CallsHostCallScreen(val wire: String) { SDK("sdk"), APP("app
  *   ringTimeoutMs    number; 30000 by default, and for anything not above 0
  *   appVersion       string or null
  *   callScreen       "sdk" (the default) or "app"
+ *   callTransport    "auto" (the default), "websocket" or "webrtc": the calls' audio (GraineCallsConfig.callTransport)
  *   debug            bool; false by default: the SDK's debug log (GraineConfig.debug)
  *   android          { smallIcon: string or null }
  *   ios              { iconTemplate: string or null, includesCallsInRecents: bool }
@@ -74,6 +75,7 @@ internal data class CallsHostOptions(
     val ringTimeoutMs: Long = DEFAULT_RING_TIMEOUT_MS,
     val appVersion: String? = null,
     val callScreen: CallsHostCallScreen = CallsHostCallScreen.SDK,
+    val callTransport: GraineCallTransport = GraineCallTransport.AUTO,
     /** Read when the SDK instance is made, like the key and the base URL. */
     val debug: Boolean = false,
     val androidSmallIcon: String? = null,
@@ -91,6 +93,7 @@ internal data class CallsHostOptions(
             out["baseUrl"] = baseUrl
             out["ringTimeoutMs"] = ringTimeoutMs
             out["callScreen"] = callScreen.wire
+            if (callTransport != GraineCallTransport.AUTO) out["callTransport"] = callTransport.name.lowercase()
             out["debug"] = debug
             ringtoneSound?.let { out["ringtoneSound"] = it }
             appVersion?.let { out["appVersion"] = it }
@@ -130,6 +133,12 @@ internal data class CallsHostOptions(
                 callScreen = CallsHostCallScreen.values().firstOrNull { it.wire == word }
                     ?: throw GraineCallsHostException.invalidOptions("callScreen must be \"sdk\" or \"app\"")
             }
+            var callTransport = GraineCallTransport.AUTO
+            string(map, "callTransport")?.let { word ->
+                // Exact words, as iOS reads them: one set of options is valid on both platforms or on neither.
+                callTransport = GraineCallTransport.values().firstOrNull { it.name.lowercase() == word }
+                    ?: throw GraineCallsHostException.invalidOptions("callTransport must be \"auto\", \"websocket\" or \"webrtc\"")
+            }
             val android = obj(map, "android")
             val ios = obj(map, "ios")
             val agents = LinkedHashMap<String, CallsHostAgent>()
@@ -154,6 +163,7 @@ internal data class CallsHostOptions(
                 ringTimeoutMs = ringTimeoutMs,
                 appVersion = string(map, "appVersion")?.let(::nonBlank),
                 callScreen = callScreen,
+                callTransport = callTransport,
                 debug = bool(map, "debug", "debug") ?: false,
                 androidSmallIcon = android?.let { string(it, "smallIcon", "android.smallIcon") }?.let(::nonBlank),
                 iosIconTemplate = ios?.let { string(it, "iconTemplate", "ios.iconTemplate") }?.let(::nonBlank),
@@ -419,6 +429,10 @@ internal data class CallsHostSnapshot(
      * its ring was routed to by the push's `agent_id`.
      */
     val agent: String? = null,
+    /** The road the call's audio runs on: "webrtc" or "websocket", once decided. */
+    val transport: String? = null,
+    /** Why a call that tried WebRTC runs on the WebSocket (`no_answer`, `ice_timeout`, …). */
+    val transportFallbackReason: String? = null,
 ) {
     data class Caption(val role: Role, val text: String, val live: Boolean)
 
@@ -426,7 +440,7 @@ internal data class CallsHostSnapshot(
     val settled: CallsHostSnapshot
         get() = if (state == GraineCallState.IDLE) CallsHostSnapshot(error = present(error))
             else copy(callId = present(callId), reason = present(reason), callerName = present(callerName), error = present(error),
-                agent = present(agent))
+                agent = present(agent), transport = present(transport), transportFallbackReason = present(transportFallbackReason))
 
     val json: Map<String, Any?>
         get() {
@@ -444,6 +458,8 @@ internal data class CallsHostSnapshot(
                 "connectedAt" to s.connectedAt,
                 "error" to s.error,
                 "agent" to s.agent,
+                "transport" to s.transport,
+                "transportFallbackReason" to s.transportFallbackReason,
             )
         }
 

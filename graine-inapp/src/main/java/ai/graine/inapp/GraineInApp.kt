@@ -134,7 +134,7 @@ interface GraineListener {
     fun onSessionReady(session: SessionConfig) {}
     fun onCallState(connected: Boolean, connecting: Boolean) {}
     fun onCaption(role: Role, text: String, live: Boolean) {}
-    /** The agent drew a component. Answer it with GraineVoice.answerWidget. */
+    /** The agent drew a component. Answer it with [GraineInApp.answerWidget] — the SDK's component views do. */
     fun onWidget(widget: JSONObject) {}
     /** A component is on its way; its content is loading. Draw your loader. */
     fun onWidgetPending(hint: JSONObject) {}
@@ -302,11 +302,15 @@ class GraineInApp private constructor(
     internal fun nativeCallLive(): Boolean = AppShared.callsIfMade()?.let { it.state != GraineCallState.IDLE } ?: false
 
     /**
-     * A component answered — on whichever conversation is live: the voice
-     * call's page, or the chat's socket (the structured answer and the
-     * sentence that is the customer's turn, as the web chat sends them).
+     * ANSWER A COMPONENT the agent drew, from a UI of your own — on whichever
+     * conversation is live: the voice call's page, or the chat's socket (the
+     * structured answer, then the sentence that is the customer's turn, as the
+     * web chat sends them). [summary] is that sentence ("The Creta, please"):
+     * without it the answer lands and the conversation does not move; [data]
+     * goes to your webhook. The SDK's component views answer for themselves.
+     * Main thread.
      */
-    internal fun answerWidget(widgetId: String, data: Map<String, Any?>, summary: String) {
+    fun answerWidget(widgetId: String, data: Map<String, Any?>, summary: String) {
         clearPendingWidget()
         val onCall = voiceLazy.isInitialized() && voice.connected
         if (!onCall && chatLazy.isInitialized() && chat.connected) chat.submitWidget(widgetId, data, summary)

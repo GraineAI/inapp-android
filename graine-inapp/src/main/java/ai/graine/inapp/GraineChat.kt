@@ -45,6 +45,16 @@ class GraineChat internal constructor(
     override var failed = false
         private set
 
+    /**
+     * The conversation dropped — or a try to open it failed — while the
+     * customer is in the chat, and it is being made again: from then until it
+     * is connected, gives up ([failed]) or is closed. [connecting] is true
+     * too. Say "Reconnecting…", not "Offline", while it is.
+     */
+    val reconnecting: Boolean get() = remaking && connecting
+    /** A drop's retries are under way: set when one is scheduled, cleared when connected, given up or hung up. */
+    private var remaking = false
+
     override val messages: List<GraineChatTurn> get() = transcript.lines
 
     /**
@@ -384,6 +394,7 @@ class GraineChat internal constructor(
             changed()
             return
         }
+        remaking = true
         setState(connected = false, connecting = true)
         val r = Runnable { retry = null; if (wanted && session == null) openSession() }
         retry = r
@@ -482,6 +493,8 @@ class GraineChat internal constructor(
     // ── plumbing ──────────────────────────────────────────────────────────
 
     private fun setState(connected: Boolean, connecting: Boolean) {
+        // Connected, given up or hung up: whatever drop was being remade is over.
+        if (!connecting) remaking = false
         val changed = connected != this.connected || connecting != this.connecting
         val liveChanged = connected != this.connected
         this.connected = connected

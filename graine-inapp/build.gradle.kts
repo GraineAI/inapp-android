@@ -15,6 +15,9 @@ android {
         // getUserMedia and WebRTC, which the hosted engine needs.
         minSdk = 24
         consumerProguardFiles("consumer-rules.pro")
+        // The live WebRTC call on a device (src/androidTest/RtcLiveRunner.kt): an instrumentation of its own,
+        // with no test library behind it, run by hand — each run is a real call.
+        testInstrumentationRunner = "ai.graine.inapp.RtcLiveRunner"
     }
 
     compileOptions {
@@ -78,4 +81,6 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     // org.json is part of Android, but stubbed in JVM unit tests; the real one here.
     testImplementation("org.json:json:20240303")
+    // The live call on a device needs the WebRTC module; the SDK itself never does.
+    androidTestImplementation(project(":graine-inapp-rtc"))
 }

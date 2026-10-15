@@ -251,8 +251,11 @@ class CallStateTest {
         assertEquals(12, t.size)
         assertEquals("agent", t["who_called"])
         assertEquals("payment_due", t["call_reason"])
-        // And over a kilobyte, the SDK's are what gives way.
+        // And over a kilobyte, the SDK's are what gives way — handed over all at once too
+        // (that was nothing at all): the biggest of the rest go, the later on a tie.
         val big = (0 until 12).associate { "key$it" to "x".repeat(150) }
+        val whole = CallVariables.forTicket(mapOf("who_called" to "agent", "call_reason" to "payment_due") + big)!!
+        assertEquals(listOf("who_called", "call_reason", "key0", "key1", "key2", "key3", "key4", "key5"), whole.keys.toList())
         val t2 = CallVariables.ticketVariables(mapOf("who_called" to "agent"), big)!!
         assertEquals("agent", t2["who_called"])
         assertTrue(t2.size in 2..11)

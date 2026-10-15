@@ -164,6 +164,8 @@ class GraineAgentBarView @JvmOverloads constructor(
                 old.removeListener(this)
                 unwatch?.invoke()
                 unwatch = null
+                unwatchCaptions?.invoke()
+                unwatchCaptions = null
             }
             field = v
             widgetView.graine = v
@@ -181,6 +183,7 @@ class GraineAgentBarView @JvmOverloads constructor(
                 v.addListener(this)
                 v.voice.barShown(this, isShown)
                 unwatch = v.onDesignChange { applyLook() }
+                unwatchCaptions = v.voice.onCaptionsChange(captionsWatcher)
             }
             chosenSurface = null
             applyLook()
@@ -213,6 +216,13 @@ class GraineAgentBarView @JvmOverloads constructor(
     private var chatOnScreen = false
 
     private var lastCaption: String? = null
+    private var unwatchCaptions: (() -> Unit)? = null
+
+    /** The voice's captions switch moved, or its captions were cleared: the card follows. */
+    private val captionsWatcher: () -> Unit = {
+        if (voice.captions.isEmpty()) { lastCaption = null; captionLive = false }
+        if (isAttachedToWindow) refresh()
+    }
     private var captionRole = Role.AGENT
     private var captionLive = false
     private var micDenied = false
@@ -340,6 +350,7 @@ class GraineAgentBarView @JvmOverloads constructor(
         chat?.addChangeListener(chatWatcher)
         voice.barShown(this, isShown)
         unwatch = graine.onDesignChange { applyLook() }
+        unwatchCaptions = voice.onCaptionsChange(captionsWatcher)
         viewTreeObserver.addOnGlobalLayoutListener(layoutWatcher)
         setOnApplyWindowInsetsListener { v, insets -> post { updateKeyboard() }; v.onApplyWindowInsets(insets) }
         if (Build.VERSION.SDK_INT >= 30) setWindowInsetsAnimationCallback(ImeAnimation())
@@ -355,6 +366,8 @@ class GraineAgentBarView @JvmOverloads constructor(
         showChat(false)
         unwatch?.invoke()
         unwatch = null
+        unwatchCaptions?.invoke()
+        unwatchCaptions = null
         viewTreeObserver.removeOnGlobalLayoutListener(layoutWatcher)
         setOnApplyWindowInsetsListener(null)
         if (Build.VERSION.SDK_INT >= 30) setWindowInsetsAnimationCallback(null)
@@ -697,7 +710,8 @@ class GraineAgentBarView @JvmOverloads constructor(
         // The chat connects while this bar shows it, and only then.
         showChat(inChat && isAttachedToWindow && isShown)
 
-        val showCaption = !inChat && voice.connected && !lastCaption.isNullOrBlank()
+        // The voice's captions switch (CC) can hide the card; what is said is kept either way.
+        val showCaption = !inChat && voice.connected && voice.captionsOn && !lastCaption.isNullOrBlank()
         captionText.text = lastCaption
         // Still arriving: the words at 75%, the card itself solid.
         captionText.alpha = if (captionLive) VoiceBar.LIVE_ALPHA else 1f

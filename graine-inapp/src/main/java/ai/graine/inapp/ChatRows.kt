@@ -14,8 +14,16 @@ import java.util.TimeZone
  * and wherever the device's day changes between rows. A conversation all from
  * today draws exactly what it always did. The React Native SDK's chatRows
  * (protocol.ts), ported. Pure: every row is a JVM test (HistoryTest).
+ *
+ * Public for a chat of your own, drawn from `GraineInApp.get().chat.messages`:
+ *
+ *     for (row in ChatRows.build(chat.messages)) when (row) {
+ *         is ChatRows.Row.Day -> dayLine(ChatRows.dayLabel(row))
+ *         is ChatRows.Row.Voice -> callRow(row.at)        // "Voice call · " + your short time
+ *         is ChatRows.Row.Turn -> bubble(row.turn)
+ *     }
  */
-internal object ChatRows {
+object ChatRows {
     sealed class Row {
         /** A day separator: `today`, `yesterday` or `date`; the local date (YYYY-MM-DD); the first message's time on it. */
         data class Day(val day: String, val date: String, val at: Date) : Row() {
@@ -34,6 +42,7 @@ internal object ChatRows {
     const val DATE = "date"
 
     /** The rows for [turns] (oldest first), on the device's days in [zone]. */
+    @JvmStatic @JvmOverloads
     fun build(turns: List<GraineChatTurn>, now: Date = Date(), zone: TimeZone = TimeZone.getDefault()): List<Row> {
         val today = localDate(now, zone)
         val yesterday = Calendar.getInstance(zone).run { time = now; add(Calendar.DAY_OF_MONTH, -1); localDate(time, zone) }
@@ -69,6 +78,7 @@ internal object ChatRows {
     }
 
     /** "Today", "Yesterday", else the date in the device's words ("Tue 14 Oct"), with the year when it is not this one. */
+    @JvmStatic @JvmOverloads
     fun dayLabel(day: Row.Day, now: Date = Date(), zone: TimeZone = TimeZone.getDefault(), locale: Locale = Locale.getDefault()): String =
         when (day.day) {
             TODAY -> "Today"
@@ -83,19 +93,23 @@ internal object ChatRows {
         }
 
     /** "Voice call · 6:05 PM" — the call's first turn, in the device's short time ([clock]). */
+    @JvmStatic
     fun callLabel(clock: String): String = "Voice call · $clock"
 
     /** What a screen reader says for the row: "Voice call at 6:05 PM". */
+    @JvmStatic
     fun callSpoken(clock: String): String = "Voice call at $clock"
 
     /** The header's "New conversation" belongs to a conversation that continues: offered while restored turns are on screen. */
+    @JvmStatic
     fun offersNewConversation(turns: List<GraineChatTurn>): Boolean = turns.any { it.restored }
 
     /** The brand's starters belong to a new chat: not once the user has said something, nor on a conversation that continues. */
+    @JvmStatic
     fun offersStarters(turns: List<GraineChatTurn>): Boolean = turns.none { it.role == Role.CUSTOMER || it.restored }
 
     /** The local date of an instant, as the contract writes it: YYYY-MM-DD. */
-    fun localDate(at: Date, zone: TimeZone): String {
+    internal fun localDate(at: Date, zone: TimeZone): String {
         val c = Calendar.getInstance(zone).apply { time = at }
         return String.format(Locale.ROOT, "%04d-%02d-%02d", c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH))
     }

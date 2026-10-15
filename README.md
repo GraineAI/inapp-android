@@ -17,7 +17,7 @@ Integration guide: https://www.graine.ai/docs/in-app/android
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    implementation("ai.graine:inapp-android:0.8.0")
+    implementation("ai.graine:inapp-android:0.9.0")
 }
 ```
 
@@ -97,12 +97,15 @@ GraineConfig(
 
 An app drawing its own UI reads the same tokens with
 `GraineInApp.get().themeTokens(context)`, and the call's state — including
-`voice.phase` (listening, thinking, speaking…) — from `GraineInApp.get().voice`.
+`voice.phase` (listening, thinking, speaking…), `voice.captions` and the CC switch
+`voice.captionsOn` (`setCaptionsOn(on)`, `clearCaptions()`) — from `GraineInApp.get().voice`.
 While a call is being placed, `voice.connectStage` says where it is
 (registering, dialling, retrying, switching), `voice.slowConnect` turns true
 once the customer has waited 4 s (`GraineConfig.Timing.slowConnectMs`), and
 `voice.callFailed` means nothing could carry the call and `start()` tries
-again; `GraineListener.onConnectProgress` hears each change. The logo's plate
+again; `GraineListener.onConnectProgress` hears each change. A voice UI of your own
+calls `voice.viewOpened()` / `viewClosed()` as it comes and goes (a slow page load is then
+reported while it is open), and `voice.attached` says whether the engine is mounted. The logo's plate
 is `Appearance.resolve(…).logoPlate`, and `Logo.box` / `Logo.plate` size and
 fill it as the bar does.
 
@@ -200,6 +203,43 @@ kept on the device so a push that wakes a closed app draws it too. A
 ring nobody answers stays on "Missed call" with **Call back**, and leaves a
 missed-call notification with the same action.
 
+### Calls over WebRTC
+
+Add the WebRTC module beside the SDK, and calls carry their audio over WebRTC:
+a jitter buffer and loss concealment, a path that survives a moment's dropout,
+and the phone's own echo canceller. Nothing else changes — not your code, the
+ring, the call screen or the outcomes.
+
+```kotlin
+dependencies {
+    implementation("ai.graine:inapp-android:0.9.0")
+    implementation("ai.graine:inapp-android-rtc:0.9.0")   // same version as the SDK
+}
+```
+
+- **What the person notices:** a call that holds up better on mobile data and
+  connects as fast as before — it is prepared the moment they tap, or while the
+  phone rings. If WebRTC cannot be set up for a call, the call simply goes on
+  over the WebSocket inside the same ring and screen: no second ring, no error.
+  The agent's voice arrives at telephone bandwidth on WebRTC today: steadier
+  through a weak network, narrower than the WebSocket's on a perfect one.
+- **Choose** with `GraineCallsConfig(callTransport = …)`: `GraineCallTransport.AUTO`
+  (the default — WebRTC when the module is in the app), `WEBSOCKET` or `WEBRTC`.
+  The agent's **In-app call audio** setting in the dashboard can switch WebRTC
+  off for every install at once, without a release.
+- **Which one carried a call:** `calls.transport` (`"webrtc"` or `"websocket"`)
+  and, when a call that would have used WebRTC is on the WebSocket,
+  `calls.transportFallbackReason` (`mint_failed`, `register_failed`,
+  `no_response`, `no_answer`, `ice_timeout`, `error`, `dashboard`,
+  `unavailable`). Read them once the call is `ACTIVE`.
+- **Size:** WebRTC's native library, per phone (an app bundle delivers one
+  ABI): about 7.4 MB installed on 64-bit ARM (about 2.5–3.3 MB to download),
+  4.3 MB on 32-bit ARM, 8.2–8.4 MB on x86; and about 0.5 MB of classes.
+- The module's manifest adds `ACCESS_NETWORK_STATE` (a normal permission,
+  granted at install, nothing asked); its R8 rules ship inside it. Licences:
+  `graine-inapp-rtc/THIRD-PARTY-NOTICES.md` (WebRTC, BSD 3-Clause) — include it
+  in your app's open-source licences screen.
+
 ## Who the user is, and memory
 
 ```kotlin
@@ -228,11 +268,13 @@ root.addView(GraineChatView(context).apply { onClose = { finish() } })
 ```
 
 The same agent, by text: it sees the screen, runs your actions and draws its
-components in the chat. The voice bar switches between the call and the chat as
+components in the chat (drawing one yourself, from `onWidget`? answer it with
+`graine.answerWidget(widgetId, data, summary)`, on whichever conversation is live). The voice bar switches between the call and the chat as
 the dashboard's mode says (voice, chat or both); `bar.chat = null` keeps it to
 the call. The chat is drawn in the brand's chat design (Garage → Chat window),
 and shows the user's booked calls on an Upcoming calls card they can cancel from. `GraineInApp.get().chat` is the conversation itself (`messages`,
-`send`, `connect`, `close`), and a `ChatSource` of your own can stand in its place.
+`send`, `connect`, `close`, and `connected`, `connecting`, `reconnecting` while a dropped chat is made
+again, `failed` once it gave up), and a `ChatSource` of your own can stand in its place.
 
 ### Conversations continue
 
@@ -242,7 +284,8 @@ instead of greeting them again. The chat opens with the recent messages (the
 last 50, kept for a while after the last one), earlier calls show as one
 "Voice call · 6:05 PM" row, and day lines say Today, Yesterday or the date.
 Drawing your own chat? `turn.restored` marks a message from an earlier
-conversation and `turn.channel` (`CHAT`, `VOICE`) where it was said.
+conversation and `turn.channel` (`CHAT`, `VOICE`) where it was said;
+`ChatRows.build(chat.messages)` gives the rows to draw (day lines, one row per earlier call).
 `chat.newConversation { _, error -> }` starts a fresh thread (the chat window's
 header offers it while an earlier conversation is on screen); what the agent
 remembers about the user stays. `forgetMemory` clears the chat on screen too.
@@ -280,7 +323,7 @@ chat you place yourself.
 
 ```kotlin
 val rules = graine.schedulingRules                       // usersCanBook, earliest(now), latest(now), …
-graine.scheduleCall(at, reason = "Review the KYC documents") { call, error -> }   // GraineScheduledCall
+graine.scheduleCall(at, reason = "Follow-up") { call, error -> }                  // GraineScheduledCall
 graine.scheduledCalls { calls, error -> }                                         // upcoming first
 graine.cancelScheduledCall(call.id) { status, error -> }                          // GraineCallStatus.CANCELLED
 ```

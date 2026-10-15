@@ -52,41 +52,55 @@ internal object CallVariables {
         return B64.encode(sb.toString().toByteArray(Charsets.UTF_8))
     }
 
+    /** Kept first, and dropped last: why a call is happening. */
+    private val TICKET_FIRST_KEYS = listOf("who_called", "call_reason")
+
     /**
      * The variables as the ticket carries them — protocol.ts
-     * `variablesForTicket`: at most 12 keys of at most 40 characters, values
-     * of at most 200, and nothing at all over 1024 bytes. The gateway builds
-     * the agent's context from the ticket's signed claims, so this is what the
-     * agent knows on the gateway path.
+     * `variablesForTicket`: at most 12 keys (`who_called` and `call_reason`
+     * first, then the rest in order) of at most 40 characters, values of at
+     * most 200, trimmed to fit 1024 bytes — the biggest go first, one at a
+     * time (the later on a tie), the call's own only when nothing else is
+     * left. The gateway builds the agent's context from the ticket's signed
+     * claims, so this is what the agent knows on the gateway path.
      */
     fun forTicket(vars: Map<String, Any?>?): Map<String, String>? {
         if (vars == null) return null
-        val out = LinkedHashMap<String, String>()
-        var n = 0
-        for ((k, v) in vars) {
-            if (n >= TICKET_KEYS) break
-            val s = jsString(v) ?: continue
+        val entries = ArrayList<Pair<String, String>>()
+        fun add(k: String, v: Any?) {
+            val s = jsString(v) ?: return
             val key = k.take(TICKET_KEY_LENGTH)
             val value = s.take(TICKET_VALUE_LENGTH)
-            if (key.isEmpty() || value.isEmpty()) continue
-            out[key] = value
-            n++
+            if (key.isEmpty() || value.isEmpty() || entries.any { it.first == key }) return
+            entries.add(key to value)
         }
-        if (n == 0) return null
+        for (k in TICKET_FIRST_KEYS) if (vars.containsKey(k)) add(k, vars[k])
+        for ((k, v) in vars) if (k !in TICKET_FIRST_KEYS) add(k, v)
+        val kept = ArrayList(entries.take(TICKET_KEYS))
         // Bytes, not characters: a Devanagari name is three bytes a letter.
-        var bytes = 2
-        for ((k, v) in out) bytes += utf8Length(k) + utf8Length(v) + 6
-        return if (bytes > TICKET_TOTAL_BYTES) null else out
+        fun size(p: Pair<String, String>) = utf8Length(p.first) + utf8Length(p.second) + 6
+        var bytes = 2 + kept.sumOf { size(it) }
+        while (kept.isNotEmpty() && bytes > TICKET_TOTAL_BYTES) {
+            val rest = kept.any { it.first !in TICKET_FIRST_KEYS }
+            var drop = -1
+            for ((i, p) in kept.withIndex()) {
+                if (rest && p.first in TICKET_FIRST_KEYS) continue
+                if (drop < 0 || size(p) >= size(kept[drop])) drop = i
+            }
+            bytes -= size(kept[drop])
+            kept.removeAt(drop)
+        }
+        if (kept.isEmpty()) return null
+        return LinkedHashMap<String, String>().apply { for ((k, v) in kept) put(k, v) }
     }
 
     /**
      * The call's variables, the SDK's after them, as many as the ticket holds.
      *
-     * [forTicket] keeps the first twelve keys and drops everything over a
-     * kilobyte — so the merged map, handed over whole, could lose exactly the
-     * keys this call exists to carry (`who_called`, `call_reason`) behind an
-     * app's long identify(). The call's own go first and always win; the
-     * SDK's are added while the ticket still accepts them.
+     * [forTicket] puts only `who_called` and `call_reason` first — so the
+     * merged map, handed over whole, could lose the call's other own
+     * variables to an app's long identify(). The call's own go first and
+     * always win; the SDK's are added while the ticket still takes them whole.
      */
     fun ticketVariables(call: Map<String, String>, sdk: Map<String, String>): Map<String, String>? {
         var best = forTicket(call)

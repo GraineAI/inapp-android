@@ -179,6 +179,7 @@ class CallsHostOptionsTest {
         assertEquals(30_000L, o.ringTimeoutMs)
         assertNull(o.appVersion)
         assertEquals(CallsHostCallScreen.SDK, o.callScreen)
+        assertEquals(GraineCallTransport.AUTO, o.callTransport)
         assertFalse(o.debug)
         assertNull(o.androidSmallIcon)
         assertNull(o.iosIconTemplate)
@@ -192,10 +193,12 @@ class CallsHostOptionsTest {
             "ringTimeoutMs" to 45_000,
             "appVersion" to "2.4.0",
             "callScreen" to "app",
+            "callTransport" to "webrtc",
             "debug" to true,
             "android" to mapOf("smallIcon" to "ic_call"),
             "ios" to mapOf("iconTemplate" to "CallIcon", "includesCallsInRecents" to true),
         ))
+        assertEquals(GraineCallTransport.WEBRTC, o.callTransport)
         assertEquals("https://graine.example.com", o.baseUrl)
         assertEquals("ring", o.ringtoneSound)
         assertEquals(45_000L, o.ringTimeoutMs)
@@ -237,6 +240,9 @@ class CallsHostOptionsTest {
             with("callScreen" to 1) to "callScreen must be a string",
             with("callScreen" to "web") to "callScreen must be \"sdk\" or \"app\"",
             with("callScreen" to "SDK") to "callScreen must be \"sdk\" or \"app\"",
+            with("callTransport" to true) to "callTransport must be a string",
+            with("callTransport" to "rtc") to "callTransport must be \"auto\", \"websocket\" or \"webrtc\"",
+            with("callTransport" to "WebRTC") to "callTransport must be \"auto\", \"websocket\" or \"webrtc\"",
             with("debug" to "yes") to "debug must be a boolean",
             with("debug" to 1) to "debug must be a boolean",
             with("android" to "ic_call") to "android must be an object",
@@ -293,6 +299,7 @@ class CallsHostOptionsTest {
             "ios" to null,
             "android" to JSONObject.NULL,
             "callScreen" to null,
+            "callTransport" to null,
             "ringTimeoutMs" to null,
             "debug" to JSONObject.NULL,
         ))
@@ -322,16 +329,25 @@ class CallsHostOptionsTest {
             "ringTimeoutMs" to 45_000,
             "appVersion" to "2.4.0",
             "callScreen" to "app",
+            "callTransport" to "websocket",
             "debug" to true,
             "android" to mapOf("smallIcon" to "ic_call"),
             "ios" to mapOf("iconTemplate" to "CallIcon", "includesCallsInRecents" to true),
         ))
         assertEquals(full, CallsHostOptions.parse(full.json))
+        assertEquals("websocket", full.json["callTransport"])
         val plain = CallsHostOptions.parse(minimal)
         assertEquals(plain, CallsHostOptions.parse(plain.json))
         // Through the JSON text SharedPreferences keeps.
         assertEquals(full, CallsHostOptions.parse(JSONObject(Protocol.toJson(full.json).toString())))
         assertFalse("android is only kept when it says something", plain.json.containsKey("android"))
+        assertFalse("the default transport is not written down", plain.json.containsKey("callTransport"))
+    }
+
+    @Test fun eachTransportIsReadByItsOwnWord() {
+        assertEquals(GraineCallTransport.AUTO, CallsHostOptions.parse(with("callTransport" to "auto")).callTransport)
+        assertEquals(GraineCallTransport.WEBSOCKET, CallsHostOptions.parse(with("callTransport" to "websocket")).callTransport)
+        assertEquals(GraineCallTransport.WEBRTC, CallsHostOptions.parse(with("callTransport" to "webrtc")).callTransport)
     }
 
     @Test fun theAppsOtherAgentsAreNamedWithTheirOwnKeys() {
@@ -528,13 +544,13 @@ class CallsHostValuesTest {
 
 class CallsHostSnapshotTest {
     private val keys = setOf("state", "callId", "direction", "reason", "callerName", "muted", "speakerOn", "agentSpeaking",
-        "caption", "connectedAt", "error", "agent")
+        "caption", "connectedAt", "error", "agent", "transport", "transportFallbackReason")
 
     @Test fun everyKeyIsAlwaysThereAndIdleIsNullsAndFalses() {
         val json = CallsHostSnapshot().json
         assertEquals(keys, json.keys)
         assertEquals("idle", json["state"])
-        for (key in listOf("callId", "direction", "reason", "callerName", "caption", "connectedAt", "error", "agent")) {
+        for (key in listOf("callId", "direction", "reason", "callerName", "caption", "connectedAt", "error", "agent", "transport", "transportFallbackReason")) {
             assertTrue(key, json.containsKey(key) && json[key] == null)
         }
         for (key in listOf("muted", "speakerOn", "agentSpeaking")) assertEquals(key, false, json[key])
@@ -545,9 +561,12 @@ class CallsHostSnapshotTest {
             state = GraineCallState.ACTIVE, callId = "c1", direction = GraineCall.Direction.INCOMING, reason = "payment_due",
             callerName = "Acme", muted = true, speakerOn = true, agentSpeaking = true,
             caption = CallsHostSnapshot.Caption(Role.AGENT, "Hi Asha", true), connectedAt = 1_760_000_000_123L, agent = "sales",
+            transport = "websocket", transportFallbackReason = "no_answer",
         ).json
         assertEquals(keys, json.keys)
         assertEquals("the call's agent, by name", "sales", json["agent"])
+        assertEquals("what the call's audio runs on", "websocket", json["transport"])
+        assertEquals("why it is not WebRTC", "no_answer", json["transportFallbackReason"])
         assertEquals("active", json["state"])
         assertEquals("c1", json["callId"])
         assertEquals("incoming", json["direction"])
@@ -566,10 +585,13 @@ class CallsHostSnapshotTest {
             state = GraineCallState.IDLE, callId = "c1", direction = GraineCall.Direction.OUTGOING, reason = "support",
             callerName = "Acme", muted = true, speakerOn = true, agentSpeaking = true,
             caption = CallsHostSnapshot.Caption(Role.CUSTOMER, "hello", false), connectedAt = 5L,
-            error = "The microphone permission was not granted.", agent = "sales",
+            error = "The microphone permission was not granted.", agent = "sales", transport = "webrtc",
+            transportFallbackReason = "ice_timeout",
         )
         assertEquals(CallsHostSnapshot(error = "The microphone permission was not granted."), stale.settled)
         assertNull("no call, no agent", stale.json["agent"])
+        assertNull("no call, no transport", stale.json["transport"])
+        assertNull(stale.json["transportFallbackReason"])
         val json = stale.json
         assertNull(json["callId"])
         assertNull(json["caption"])
@@ -895,6 +917,15 @@ class CallsHostCoreTest {
         assertEquals("Acme Assistant", rig.platform.configured.last().displayName)
         assertTrue(rig.platform.logs.isEmpty())
         assertEquals("kept for the next cold start", "Acme Assistant", rig.store.load().first?.get("displayName"))
+    }
+
+    @Test fun theTransportReachesTheCallsAndIsKeptForAColdStart() {
+        val rig = HostRig()
+        rig.configure(mapOf("callTransport" to "webrtc"))
+        assertEquals(GraineCallTransport.WEBRTC, rig.platform.configured.last().callTransport)
+        assertEquals("webrtc", rig.store.load().first?.get("callTransport"))
+        rig.configure(mapOf("callTransport" to "websocket"))
+        assertEquals(GraineCallTransport.WEBSOCKET, rig.platform.configured.last().callTransport)
     }
 
     @Test fun invalidOptionsAreRefusedAndNothingIsKept() {

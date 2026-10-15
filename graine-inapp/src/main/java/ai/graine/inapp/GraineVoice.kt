@@ -89,6 +89,74 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
      */
     val callFailed: Boolean get() = progress.failed
 
+    /**
+     * What has been said this call, oldest first — the agent's turns and the
+     * customer's. A live turn is replaced as its words arrive, not appended;
+     * the last 12 are kept, and a new call starts empty: a transcript outliving
+     * its call is a privacy question, not a feature. [GraineListener.onCaption]
+     * hears each line as it comes.
+     */
+    var captions: List<GraineCaption> = emptyList()
+        private set
+
+    /**
+     * The captions switch — CC. The SDK's bar shows the line being said only
+     * while it is on. On by default: a caption nobody asked to hide is an
+     * accessibility default. What is said is kept ([captions]) either way.
+     */
+    var captionsOn = true
+        private set
+
+    /** Turn the captions on or off — for your own CC button. The call goes on. */
+    fun setCaptionsOn(on: Boolean) {
+        if (on == captionsOn) return
+        captionsOn = on
+        captionsChanged()
+    }
+
+    /** Forget what has been said ([captions]) without ending the call. */
+    fun clearCaptions() {
+        if (captions.isEmpty()) return
+        captions = emptyList()
+        captionsChanged()
+    }
+
+    private val captionWatchers = java.util.concurrent.CopyOnWriteArraySet<() -> Unit>()
+
+    /** The SDK's bars, told when the switch moves or the captions are cleared. Returns what stops it. */
+    internal fun onCaptionsChange(watch: () -> Unit): () -> Unit {
+        captionWatchers.add(watch)
+        return { captionWatchers.remove(watch) }
+    }
+
+    private fun captionsChanged() = captionWatchers.forEach { runCatching { it() } }
+
+    /** Whether the engine is mounted: [attach] was called, and [detach] was not since. */
+    val attached: Boolean get() = webView != null
+
+    /**
+     * A voice UI of your own came on screen ([viewOpened]) or left it
+     * ([viewClosed]) — the SDK's bars say so themselves. While one is open, a
+     * page still loading is the customer's wait, reported as [slowConnect];
+     * when the last one goes, a failed connect and its stage are no longer
+     * news. Call them in pairs. Main thread.
+     */
+    fun viewOpened() {
+        appViews++
+        if (appViews == 1) barShown(appViewsToken, true)
+    }
+
+    /** The UI from [viewOpened] left the screen. */
+    fun viewClosed() {
+        if (appViews == 0) return
+        appViews--
+        if (appViews == 0) barShown(appViewsToken, false)
+    }
+
+    /** Voice UIs of the app's own on screen, counted as one bar while any is. */
+    private var appViews = 0
+    private val appViewsToken = Any()
+
     /** What the call is doing, in one word — see [CallPhase]. A bar says "Thinking…" from this. */
     val phase: CallPhase
         get() = CallPhase.of(reconnecting, connectivity, connecting, ready, connected, agentSpeaking, awaitingAgent)
@@ -239,6 +307,8 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
         activityRef = WeakReference(null)
         progress.clear()
         ready = false; startedCall = false; pendingStart = false
+        // The engine is gone, and its call: what was said goes with it.
+        if (captions.isNotEmpty()) { captions = emptyList(); captionsChanged() }
         setCall(connected = false, connecting = false)
     }
 
@@ -265,6 +335,8 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
         progress.clear()
         agentSpeaking = false
         awaitingAgent = false
+        // A new call, not a continuation: the last one's words do not open this one.
+        if (captions.isNotEmpty()) { captions = emptyList(); captionsChanged() }
         setCall(connected = connected, connecting = true)
         if (!hasMic()) {
             pendingStart = true
@@ -412,7 +484,8 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
         graine.listeners.forEach { l -> runCatching { f(l) } }
     }
 
-    private fun handle(msg: PageMessage) {
+    /** One message from the engine page, on the main thread. Internal for the JVM tests, which speak as the page. */
+    internal fun handle(msg: PageMessage) {
         when (msg) {
             PageMessage.Ready -> {
                 ready = true
@@ -443,6 +516,7 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
                 agentSpeaking = msg.role == Role.AGENT && msg.live
                 if (msg.role == Role.CUSTOMER && !msg.live) awaitingAgent = true
                 if (msg.role == Role.AGENT) awaitingAgent = false
+                captions = CaptionLog.fold(captions, GraineCaption(msg.role, msg.text, msg.live))
                 report { it.onCaption(msg.role, msg.text, msg.live) }
             }
             is PageMessage.Widget -> {
@@ -661,5 +735,28 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
     companion object {
         /** The request code the SDK uses for the microphone prompt. */
         const val MIC_REQUEST = 0x6E7A
+    }
+}
+
+/** One line of what was said on a call: who said it, the words, and whether they are still arriving. */
+data class GraineCaption(val role: Role, val text: String, val live: Boolean)
+
+/**
+ * WHAT HAS BEEN SAID, folded as every SDK folds it (the React Native
+ * launcher's foldCaption): a live turn replaces the tail it belongs to — same
+ * role, still live — rather than appending the same sentence growing a word at
+ * a time; an empty line settles the open turn instead of blanking it; the last
+ * [HISTORY] are kept.
+ */
+internal object CaptionLog {
+    /** How many turns are kept. A caption box shows two or three. */
+    const val HISTORY = 12
+
+    fun fold(lines: List<GraineCaption>, next: GraineCaption): List<GraineCaption> {
+        val tail = lines.lastOrNull()
+        val continues = tail != null && tail.live && tail.role == next.role
+        if (next.text.isEmpty()) return if (continues) lines.dropLast(1) + tail!!.copy(live = false) else lines
+        val merged = if (continues) lines.dropLast(1) + next else lines + next
+        return if (merged.size > HISTORY) merged.takeLast(HISTORY) else merged
     }
 }

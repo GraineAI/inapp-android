@@ -113,11 +113,24 @@ class GraineCalls internal constructor(
     @Volatile var connectedAt = 0L
         private set
 
+    /** How the call in progress carries its audio: "webrtc" or "websocket"; null with no call. */
+    val transport: String? get() = transports.transport
+
+    /**
+     * Why a call that would have used WebRTC is on the WebSocket instead —
+     * mint_failed, register_failed, no_response, no_answer, ice_timeout, error,
+     * dashboard (the agent's Call audio setting) or unavailable (no WebRTC in
+     * this build); null otherwise. Final once the call is ACTIVE.
+     */
+    val transportFallbackReason: String? get() = transports.fallbackReason
+
     /** The agent the call in progress is with — for an app's own call screen to draw in its design. Null with no call. */
     val callAgent: GraineInApp? get() = call?.let { agentFor(it.callId) }
 
     private val scheduler by lazy { ExecutorScheduler("graine-call") }
-    private var session: VoiceCallSession? = null
+    /** WebRTC or the WebSocket, per call: decided and prepared at the tap or the ring (CallTransport.kt). */
+    private val transports by lazy { CallTransports(app, { config }, ::agentFor, { scheduler }) }
+    private var session: CallTransportSession? = null
     private var route: AudioRoute? = null
     private var unwatchContext: (() -> Unit)? = null
     private var service = WeakReference<GraineCallService>(null)
@@ -522,7 +535,7 @@ class GraineCalls internal constructor(
                 report { it.onAgentSpeaking(speaking) }
             }
         }
-        val sess = VoiceCallSession(
+        val sess = CallTransportSession(
             CallSessionConfig(
                 baseUrl = graine.config.baseUrl,
                 publishableKey = graine.config.publishableKey,
@@ -558,6 +571,7 @@ class GraineCalls internal constructor(
         call = c
         val live = s != GraineCallState.IDLE && s != GraineCallState.ENDED
         if (live != nativeLive) { nativeLive = live; GraineInApp.nativeCallChanged(live) }
+        transports.onState(s, c)
         when (s) {
             GraineCallState.RINGING -> c?.let {
                 if (it.callId in hostedIds) reportHosted(HostedOutcomes.Report(it.callId, HostedOutcomes.RINGING))

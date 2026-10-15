@@ -376,6 +376,7 @@ object GraineCallsHost {
                 ringtone = ringtone(app, options.ringtoneSound),
                 callActivity = if (options.callScreen == CallsHostCallScreen.APP) launchActivity(app) else null,
                 ringTimeoutMs = options.ringTimeoutMs,
+                callTransport = options.callTransport,
             ))
         }
 
@@ -444,6 +445,8 @@ object GraineCallsHost {
                 caption = c.caption?.let { CallsHostSnapshot.Caption(it.first, it.second, it.third) },
                 connectedAt = connected.epochMs(c.connectedAt, SystemClock.elapsedRealtime(), System.currentTimeMillis()),
                 agent = call?.let { c.agentFor(it.callId).name },
+                transport = c.transport,
+                transportFallbackReason = c.transportFallbackReason,
             )
         }
 

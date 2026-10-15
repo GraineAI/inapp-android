@@ -166,6 +166,14 @@ data class GraineSchedulingRules @JvmOverloads constructor(
     /** The platforms Graine rings: "ios", "android". Empty: every one. */
     val platforms: List<String> = emptyList(),
 ) {
+    /**
+     * The dashboard's word on how this agent's native calls carry their audio
+     * (`calls.audioTransport`): "webrtc", "websocket" — the switch that turns
+     * WebRTC off — or null, no opinion. Read by the call engine only.
+     */
+    internal var audioTransport: String? = null
+        private set
+
     /** The earliest a call can be booked for: [now] plus [minLeadMinutes]. */
     @JvmOverloads
     fun earliest(now: java.util.Date = java.util.Date()): java.util.Date = java.util.Date(now.time + minLeadMinutes * 60_000L)
@@ -201,7 +209,9 @@ data class GraineSchedulingRules @JvmOverloads constructor(
                 callName = (o.opt("callName") as? String)?.trim()?.takeIf { it.isNotEmpty() },
                 hostedRinging = o.opt("hosted") == true,
                 platforms = platforms,
-            )
+            ).also { r ->
+                r.audioTransport = (o.opt("audioTransport") as? String)?.trim()?.lowercase()?.takeIf { it == "webrtc" || it == "websocket" }
+            }
         }
     }
 }
@@ -334,17 +344,15 @@ internal object Scheduling {
      * request (WIRE.md): booking switched off, a time before
      * [GraineSchedulingRules.earliest], a time after [GraineSchedulingRules.latest].
      * The server checks again — and checks what only it knows (calling hours,
-     * pending calls) — so null here is not a promise.
+     * pending calls) — so null here is not a promise. Refused in the booking
+     * sheet's words ([Booking.errorLine]), the same on every SDK.
      */
     fun check(atMs: Long, nowMs: Long, rules: GraineSchedulingRules): GraineError? {
-        if (!rules.usersCanBook) return GraineError(GraineErrorCode.SCHEDULING_OFF, "This agent does not let users book calls.")
+        fun refused(code: GraineErrorCode) = GraineError(code, Booking.errorLine(code, rules))
+        if (!rules.usersCanBook) return refused(GraineErrorCode.SCHEDULING_OFF)
         val now = java.util.Date(nowMs)
-        if (atMs < rules.earliest(now).time || atMs <= nowMs) {
-            return GraineError(GraineErrorCode.TOO_SOON, "Pick a time at least ${rules.minLeadMinutes} minutes from now.")
-        }
-        if (atMs > rules.latest(now).time) {
-            return GraineError(GraineErrorCode.TOO_FAR, "Pick a time within the next ${rules.maxDaysAhead} days.")
-        }
+        if (atMs < rules.earliest(now).time || atMs <= nowMs) return refused(GraineErrorCode.TOO_SOON)
+        if (atMs > rules.latest(now).time) return refused(GraineErrorCode.TOO_FAR)
         return null
     }
 

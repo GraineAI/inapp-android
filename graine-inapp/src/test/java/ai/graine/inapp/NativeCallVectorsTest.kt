@@ -110,7 +110,7 @@ class NativeCallVectorsTest {
         assertEquals(int(limits["valueLength"]), CallVariables.TICKET_VALUE_LENGTH)
         assertEquals(int(limits["totalBytes"]), CallVariables.TICKET_TOTAL_BYTES)
         val cases = list(t["cases"]).map(::obj)
-        assertEquals(5, cases.size)
+        assertEquals(8, cases.size)
         for (c in cases) {
             val got = CallVariables.forTicket(obj(c["vars"]))
             val expect = c["expect"]?.let { obj(it) }

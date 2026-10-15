@@ -205,6 +205,17 @@ public class JavaInteropTest {
         }
     }
 
+    @Test public void aJavaAppLaysOutAChatOfItsOwn() {
+        java.util.Date at = new java.util.Date(1_760_000_000_000L);
+        GraineChatTurn hi = new GraineChatTurn("t1", Role.AGENT, "Hi", at);
+        java.util.List<ChatRows.Row> rows = ChatRows.build(Collections.singletonList(hi), at, java.util.TimeZone.getTimeZone("UTC"));
+        assertEquals(1, rows.size());
+        assertTrue(rows.get(0) instanceof ChatRows.Row.Turn);
+        assertEquals("Voice call · 6:05 PM", ChatRows.callLabel("6:05 PM"));
+        assertTrue(ChatRows.offersStarters(Collections.singletonList(hi)));
+        assertTrue(!ChatRows.offersNewConversation(Collections.singletonList(hi)));
+    }
+
     @SuppressWarnings({"ConstantConditions", "unused"})
     @Test public void aJavaAppOffersTheBookingSheet() {
         // Compiled, never run (they need an Application and an activity): the calls a Java app writes.

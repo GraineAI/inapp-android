@@ -126,6 +126,17 @@ class EmbedTest {
         assertNull("exactly the latest is allowed", Scheduling.check(rules.latest(java.util.Date(now)).time, now, rules))
     }
 
+    @Test fun aLocalRefusalSaysItInTheBookingSheetsWords() {
+        val now = 1_000_000_000_000L
+        val one = GraineSchedulingRules(usersCanBook = true, minLeadMinutes = 1, maxDaysAhead = 1, maxPendingPerUser = 1)
+        assertEquals("1 minute, not 1 minutes", "Pick a time at least 1 minute from now", Scheduling.check(now - 60_000, now, one)?.message)
+        assertEquals("Pick a time within 1 day", Scheduling.check(now + 3 * 86_400_000L, now, one)?.message)
+        val many = one.copy(minLeadMinutes = 5, maxDaysAhead = 14)
+        assertEquals("Pick a time at least 5 minutes from now", Scheduling.check(now + 60_000, now, many)?.message)
+        assertEquals("Pick a time within 14 days", Scheduling.check(now + 15 * 86_400_000L, now, many)?.message)
+        assertEquals("Booking a call isn't available right now", Scheduling.check(now + 3_600_000, now, many.copy(usersCanBook = false))?.message)
+    }
+
     @Test fun aBookingSaysWhenWhyAndWho() {
         val at = Scheduling.parseIso("2026-10-14T12:30:00Z")!!
         val o = Scheduling.scheduleBody(at, "  Follow up on the KYC documents " + "x".repeat(200), env, TimeZone.getTimeZone("Asia/Kolkata"))

@@ -29,9 +29,15 @@ import java.util.concurrent.FutureTask
  * options, the snapshot, where events go, how actions are answered — is here,
  * inside the SDK, where its tests cover it (CallsHostModel.kt).
  *
- *     GraineCallsHost.handlePush(context, message.data)   // from the messaging service, before any JavaScript or Dart
  *     GraineCallsHost.configure(context, mapOf("publishableKey" to "pk_…", "displayName" to "Acme"))
  *     val sink = GraineCallsHost.addSink { event, payload -> … }
+ *     GraineCallsHost.handlePush(context, message.data)   // only from a messaging service of the app's own
+ *
+ * Pushes: with Firebase in the app, the SDK's own messaging service receives
+ * the token and Graine's call pushes, natively and before any JavaScript or
+ * Dart runs, and the SDK reads the token when it starts. Only a messaging
+ * service of the app's own, which outranks the SDK's, hands them over
+ * ([handlePush], [onNewToken]).
  *
  * Several agents in one app: `configure` names the others under
  * `agents` (`{"sales": {"publishableKey": "pk_…"}}`), `startCall` takes
@@ -97,12 +103,13 @@ object GraineCallsHost {
     @JvmStatic
     fun snapshot(): Map<String, Any?> = onMainSync { core.snapshot() }
 
-    /** iOS registers for VoIP pushes here. Android has none: the app hands its pushes to [handlePush]. */
+    /** iOS registers for VoIP pushes here. Android has none: Firebase's messages reach the SDK's messaging service, or an app's own hands them to [handlePush]. */
     @JvmStatic
     fun enableVoIPPushes() {}
 
     /**
-     * A push's data, from the app's messaging service: `{String: String}`.
+     * A push's data, from a messaging service of the app's own (the SDK's
+     * own service needs no call): `{String: String}`.
      * If nothing configured the calls this launch, the kept options are
      * applied first, so a push that woke the app rings before any JavaScript
      * or Dart has run. True when it was a call (ringing, refused as busy, or
@@ -115,9 +122,10 @@ object GraineCallsHost {
     }
 
     /**
-     * FCM's new token for this install, from the app's messaging service:
-     * kept, and registered with Graine when the workspace has Graine ring its
-     * users ([GraineCalls.onNewToken]). Safe before anything is configured.
+     * FCM's new token for this install, from a messaging service of the app's
+     * own (the SDK's own service, and the SDK at start, need no call): kept,
+     * and registered with Graine when the workspace has Graine ring its users
+     * ([GraineCalls.onNewToken]). Safe before anything is configured.
      */
     @JvmStatic
     fun onNewToken(context: Context, token: String) {

@@ -109,6 +109,60 @@ class CallSetupTest {
         assertTrue(message.contains("registerPushToken"))
     }
 
+    private fun noTokenMessage(setup: PushSetup?, failure: String? = null): String =
+        CallSetup.problems(ready().copy(hasPushToken = false, pushSetup = setup, pushFailure = failure)).single { it.code == "no_push_token" }.message
+
+    @Test fun withoutFirebaseTheFixIsAddingFirebaseNotWritingAService() {
+        val m = noTokenMessage(PushSetup.NO_FIREBASE)
+        assertTrue(m.contains("Firebase Cloud Messaging is not in this app"))
+        for (step in listOf("google-services.json", "Google services Gradle plugin", "firebase-messaging", "android.googleServicesFile")) assertTrue(step, m.contains(step))
+        assertTrue(m.contains("the SDK registers for pushes by itself"))
+        assertFalse("no messaging service to write", m.contains("FirebaseMessagingService"))
+    }
+
+    @Test fun firebaseNotSetUpNamesTheSetupLeft() {
+        val m = noTokenMessage(PushSetup.NOT_SET_UP)
+        assertTrue(m.contains("Firebase is not set up"))
+        assertTrue(m.contains("google-services.json"))
+        assertTrue(m.contains("Google services Gradle plugin"))
+        assertTrue(m.contains("registers for pushes by itself"))
+        assertFalse(m.contains("FirebaseMessagingService"))
+    }
+
+    @Test fun tokenCreationTurnedOffIsTheAppsChoiceToUndo() {
+        val m = noTokenMessage(PushSetup.AUTO_INIT_OFF)
+        assertTrue(m.contains("automatic token creation off"))
+        assertTrue(m.contains("isAutoInitEnabled = true"))
+        assertTrue(m.contains("GraineCalls.onNewToken(context, token)"))
+    }
+
+    @Test fun firebaseThatGaveNoTokenSaysWhyInItsOwnWord() {
+        val m = noTokenMessage(PushSetup.FAILED, "SERVICE_NOT_AVAILABLE")
+        assertTrue(m.contains("could not give this install a token (SERVICE_NOT_AVAILABLE)"))
+        assertTrue(m.contains("Google Play services"))
+        assertTrue(m.contains("registerPushToken"))
+        assertFalse("no empty brackets without a reason", noTokenMessage(PushSetup.FAILED).contains("()"))
+        assertTrue(noTokenMessage(PushSetup.FAILED).contains("could not give this install a token. "))
+    }
+
+    @Test fun askedOrUnknownSaysTheSdkRegistersItselfAndNamesTheHelpers() {
+        for (setup in listOf(PushSetup.ASKED, null)) {
+            val m = noTokenMessage(setup)
+            assertTrue(m.contains("the SDK registers for pushes by itself"))
+            assertTrue("for an app with its own service", m.contains("An app whose own FirebaseMessagingService receives the messages"))
+            for (helper in listOf("GraineCalls.onNewToken(context, token)", "registerPushToken", "Graine.calls.onNewToken")) assertTrue(helper, m.contains(helper))
+        }
+    }
+
+    @Test fun noMessageAsksForAServiceAtLaunch() {
+        for (setup in PushSetup.entries.toList() + listOf<PushSetup?>(null)) {
+            val m = noTokenMessage(setup, "SERVICE_NOT_AVAILABLE")
+            assertFalse("$setup: the old fix", m.contains("Hand FCM's token over at launch"))
+            assertFalse("$setup: the old fix", m.contains("in your FirebaseMessagingService.onNewToken"))
+            assertTrue(m.startsWith("No push token has reached the SDK 15 seconds after the calls were configured, so calls can't ring this phone"))
+        }
+    }
+
     @Test fun notificationsNotYetAskedAndTurnedOffSayDifferentFixes() {
         val asked = CallSetup.problems(ready().copy(permissions = allGranted.copy(notifications = DENIED))).single()
         assertEquals("notifications_not_allowed", asked.code)
@@ -150,8 +204,12 @@ class CallSetupTest {
             listOf("manifest_entry_missing", "no_push_token", "notifications_not_allowed", "full_screen_not_allowed", "microphone_blocked", "hosted_ringing_off"),
             all.map { it.code },
         )
-        for (p in all) for (word in listOf("Apollo", "Hermes", "gateway", "Jambonz", "mem0")) {
-            assertFalse("${p.code} names $word", p.message.contains(word))
+        // Every way of saying no_push_token too, whatever the SDK found of Firebase.
+        val noToken = (PushSetup.entries.toList() + listOf<PushSetup?>(null)).map { setup ->
+            CallSetup.problems(CallSetupFacts(hasPushToken = false, msSinceConfigure = 60_000L, pushSetup = setup, pushFailure = "SERVICE_NOT_AVAILABLE")).single()
+        }
+        for (p in all + noToken) for (word in listOf("Apollo", "Hermes", "gateway", "Jambonz", "LiveKit", "mem0")) {
+            assertFalse("${p.code} names $word", p.message.contains(word, ignoreCase = true))
         }
     }
 
@@ -169,7 +227,7 @@ class CallSetupTest {
     @Test fun theLibraryManifestDeclaresEverythingTheCheckLooksFor() {
         val manifest = listOf(File("src/main/AndroidManifest.xml"), File("graine-inapp/src/main/AndroidManifest.xml")).first { it.exists() }.readText()
         for (p in CallSetup.REQUIRED_PERMISSIONS) assertTrue(p, manifest.contains("android:name=\"$p\""))
-        for (c in listOf("GraineCallActivity", "GraineCallPermissionActivity", "GraineCallService", "GraineCallReceiver")) {
+        for (c in listOf("GraineCallActivity", "GraineCallPermissionActivity", "GraineCallService", "GraineCallReceiver", "GraineMessagingService")) {
             assertTrue(c, manifest.contains("android:name=\"ai.graine.inapp.$c\""))
         }
         // The screen that asks is the SDK's alone, never in Recents, and transparent.

@@ -78,6 +78,13 @@ dependencies {
     // Deliberately nothing at runtime beyond the platform: no OkHttp, no
     // coroutines, no AndroidX. An SDK that drags a dependency tree into a
     // bank's app is an SDK that fails a security review before anyone runs it.
+    //
+    // Firebase Cloud Messaging only to COMPILE the SDK's messaging service
+    // against (GraineMessagingService.kt): never in the AAR's dependencies. An
+    // app that rings adds Firebase itself; one that does not never loads the
+    // service (FirebasePush.kt checks for Firebase first). The React Native and
+    // Flutter builds compile the same file against this same version.
+    compileOnly("com.google.firebase:firebase-messaging:24.1.0")
     testImplementation("junit:junit:4.13.2")
     // org.json is part of Android, but stubbed in JVM unit tests; the real one here.
     testImplementation("org.json:json:20240303")

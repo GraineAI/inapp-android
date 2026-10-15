@@ -999,8 +999,8 @@ class GraineInApp private constructor(
 
     /**
      * Register this install's push token with Graine, when the workspace has
-     * Graine ring its users (`calls.hosted`) and the app handed over a token
-     * ([GraineCalls.onNewToken]): on every new token ([force]), whenever what
+     * Graine ring its users (`calls.hosted`) and a token reached the SDK (from
+     * Firebase by itself, or [GraineCalls.onNewToken]): on every new token ([force]), whenever what
      * it says changes (another user, a new zone, a new app version), and
      * otherwise at most once a day ([DeviceRegistration]). Best effort: the
      * next launch tries again. Every agent registers the one install with its
@@ -1034,7 +1034,7 @@ class GraineInApp private constructor(
         }
     }
 
-    /** A new push token from the app's messaging service: kept, and registered when Graine rings this app. */
+    /** A new push token (the SDK's messaging service, the app's, or the one read at start): kept, and registered when Graine rings this app. */
     internal fun pushTokenChanged(token: String) {
         runCatching { device.pushToken = token }
         registerDevice(force = true)
@@ -1259,7 +1259,7 @@ class GraineInApp private constructor(
         internal fun nativeCallChanged(live: Boolean) = AppShared.all().forEach { g -> if (g.chatLazy.isInitialized()) g.chat.nativeCall(live) }
     }
 
-    /** Just made: who the user already is, as the other agents know it; the app's lifecycle; the session. */
+    /** Just made: who the user already is, as the other agents know it; the app's lifecycle; the session; the push token. */
     private fun started() {
         AppShared.traits?.let { t ->
             variables.setIdentity(t)
@@ -1269,6 +1269,8 @@ class GraineInApp private constructor(
         if (config.debug) CallLog.enabled = true
         watchLifecycle()
         loadSession { }
+        // With Firebase in the app, this install's push token reaches the SDK by itself — once a process.
+        FirebasePush.start(application, config.debug)
     }
 }
 

@@ -5,7 +5,7 @@ package ai.graine.inapp
  * setup self-check, as rules with no Android in them, so a JVM test proves
  * them. CallPermissions.kt and GraineCalls read the facts on a phone (the
  * permissions, the manifest, the push token, the sessions) and ask these
- * rules what they mean.
+ * rules what they mean; FirebasePush says what the SDK found of Firebase.
  *
  * A problem is never an exception: calls still work wherever they can. The
  * check says what is missing, in plain words with the exact fix, once in the
@@ -129,6 +129,10 @@ internal data class CallSetupFacts(
     val missingManifest: List<String> = emptyList(),
     /** A push token has reached the SDK (now, or on an earlier launch). */
     val hasPushToken: Boolean = false,
+    /** What the SDK found of Firebase when it started (FirebasePush); null before. */
+    val pushSetup: PushSetup? = null,
+    /** Firebase's reason for giving no token, when it gave one. */
+    val pushFailure: String? = null,
     /** Milliseconds since the calls were configured; null before. */
     val msSinceConfigure: Long? = null,
     val permissions: GraineCallPermissions = GraineCallPermissions(
@@ -164,12 +168,7 @@ internal object CallSetup {
             )
         }
         if (!f.hasPushToken && (f.msSinceConfigure ?: 0L) >= SETTLE_MS) {
-            out += GraineCallSetupProblem(
-                "no_push_token",
-                "No Firebase push token has reached the SDK ${SETTLE_MS / 1000} seconds after the calls were configured, so calls can't ring this phone. " +
-                    "Hand FCM's token over at launch and in your FirebaseMessagingService.onNewToken: GraineCalls.onNewToken(context, token) " +
-                    "(React Native and Flutter: registerPushToken; Kotlin Multiplatform: Graine.calls.onNewToken).",
-            )
+            out += GraineCallSetupProblem("no_push_token", noPushToken(f.pushSetup, f.pushFailure))
         }
         when (f.permissions.notifications) {
             GraineCallPermissionStatus.DENIED -> out += GraineCallSetupProblem(
@@ -206,6 +205,38 @@ internal object CallSetup {
             )
         }
         return out
+    }
+
+    /**
+     * Why no push token has come, with the fix. With Firebase set up in the
+     * app the SDK registers for pushes by itself (FirebasePush), so the fix is
+     * whatever the SDK found missing when it started: Firebase itself, its
+     * setup (google-services.json and the Google services plugin), the
+     * app's choice to create no tokens, or a phone Firebase could not reach.
+     */
+    private fun noPushToken(setup: PushSetup?, failure: String?): String {
+        val lead = "No push token has reached the SDK ${SETTLE_MS / 1000} seconds after the calls were configured, so calls can't ring this phone"
+        val ownService = "An app whose own FirebaseMessagingService receives the messages hands each new token over from its onNewToken: " +
+            "GraineCalls.onNewToken(context, token) (React Native and Flutter: registerPushToken; Kotlin Multiplatform: Graine.calls.onNewToken)."
+        return when (setup) {
+            PushSetup.NO_FIREBASE ->
+                "$lead: Firebase Cloud Messaging is not in this app. Add Firebase to the app — google-services.json in the app module, " +
+                    "the Google services Gradle plugin and the firebase-messaging library (Expo: android.googleServicesFile, and the " +
+                    "@graineai/inapp-react-native-calls plugin) — and the SDK registers for pushes by itself."
+            PushSetup.NOT_SET_UP ->
+                "$lead: Firebase Cloud Messaging is in this app, but Firebase is not set up. Add your google-services.json to the app module " +
+                    "and apply the Google services Gradle plugin; the SDK then registers for pushes by itself."
+            PushSetup.AUTO_INIT_OFF ->
+                "$lead: this app turned Firebase's automatic token creation off, so the SDK creates no token itself. Turn it back on once " +
+                    "the app may receive pushes (FirebaseMessaging.getInstance().isAutoInitEnabled = true) and the token reaches the SDK by itself, " +
+                    "or hand one over: GraineCalls.onNewToken(context, token)."
+            PushSetup.FAILED ->
+                "$lead: Firebase could not give this install a token${failure?.let { " ($it)" }.orEmpty()}. The phone needs Google Play services " +
+                    "and a connection; the SDK asks again when the app next starts. $ownService"
+            PushSetup.ASKED, null ->
+                "$lead. With Firebase set up in the app (google-services.json and the Google services Gradle plugin) the SDK registers for " +
+                    "pushes by itself. $ownService"
+        }
     }
 
     /** Whether Graine rings this phone, from every known session's rules; null when none is known. */

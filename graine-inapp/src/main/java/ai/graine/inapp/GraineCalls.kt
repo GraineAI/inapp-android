@@ -30,7 +30,11 @@ import java.util.concurrent.CopyOnWriteArraySet
  *     // Application.onCreate, after GraineInApp.init:
  *     GraineInApp.get().calls.configure(GraineCallsConfig(displayName = "Acme", smallIcon = R.drawable.ic_call))
  *
- *     // FirebaseMessagingService — one line each:
+ *     // Calls Graine rings: add Firebase to the app (google-services.json, the Google services
+ *     // plugin, firebase-messaging). The SDK registers for pushes itself: its own messaging
+ *     // service receives the calls, and it reads the push token when it starts.
+ *
+ *     // Only an app with a FirebaseMessagingService of its own, which outranks the SDK's — one line each:
  *     override fun onNewToken(token: String) = GraineCalls.onNewToken(this, token)
  *     override fun onMessageReceived(message: RemoteMessage) { if (GraineCalls.handlePush(this, message.data)) return }
  *
@@ -244,6 +248,8 @@ class GraineCalls internal constructor(
     private fun setupFacts(): CallSetupFacts = CallSetupFacts(
         missingManifest = runCatching { CallPermissions.missingManifest(app, config.callActivity) }.getOrElse { emptyList() },
         hasPushToken = runCatching { DeviceStore.of(app).pushToken }.getOrNull() != null,
+        pushSetup = FirebasePush.setup,
+        pushFailure = FirebasePush.failure,
         msSinceConfigure = configuredAt.takeIf { it != 0L }?.let { android.os.SystemClock.elapsedRealtime() - it },
         permissions = callPermissions,
         hostedRinging = CallSetup.hostedRinging(AppShared.all().mapNotNull { it.session?.schedulingRules ?: it.cachedSession?.rules }),
@@ -899,10 +905,15 @@ class GraineCalls internal constructor(
 
     companion object {
         /**
-         * FCM's new token for this install, from the app's
-         * `FirebaseMessagingService.onNewToken` — one line:
+         * FCM's new token for this install, from a `FirebaseMessagingService`
+         * of the app's own — one line:
          *
          *     override fun onNewToken(token: String) = GraineCalls.onNewToken(this, token)
+         *
+         * Only an app with its own messaging service needs it: that service
+         * outranks the SDK's and receives every token. Otherwise, with Firebase
+         * in the app, the SDK's own service receives each new token and the SDK
+         * reads the current one when it starts.
          *
          * Kept on the device and registered with Graine when the workspace has
          * Graine ring its users (Workspace settings → In-app calling), so the
@@ -919,10 +930,14 @@ class GraineCalls internal constructor(
         }
 
         /**
-         * Hand every FCM data message here first, from the app's
-         * `FirebaseMessagingService.onMessageReceived` — one line:
+         * Hand every FCM data message here first, from a
+         * `FirebaseMessagingService` of the app's own — one line:
          *
          *     override fun onMessageReceived(message: RemoteMessage) { if (GraineCalls.handlePush(this, message.data)) return }
+         *
+         * Only an app with its own messaging service needs it: that service
+         * outranks the SDK's and receives every message. Otherwise, with
+         * Firebase in the app, the SDK's own service hands each message here.
          *
          * True when it was a call (Graine's own ring, or one the app's server
          * sent) — ringing, refused as busy, or malformed — and the app should do

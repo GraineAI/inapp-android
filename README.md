@@ -17,7 +17,7 @@ Integration guide: https://www.graine.ai/docs/in-app/android
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    implementation("ai.graine:inapp-android:0.10.0")
+    implementation("ai.graine:inapp-android:0.10.1")
 }
 ```
 
@@ -139,9 +139,30 @@ GraineInApp.get().calls.configure(GraineCallsConfig(
 `call_id` is required and comes back with every outcome; `reason` becomes the
 prompt's `call_reason`; `variables` (a JSON object, as a string) become prompt
 variables; answering sets `who_called = "agent"` (`"scheduled"` for a call Graine
-rang at a booked time). Hand every message to the SDK
-first — and its token, so Graine itself can ring your users (below). The SDK
-does not depend on Firebase; two lines in your messaging service:
+rang at a booked time).
+
+**Add Firebase to your app; the SDK registers for pushes itself.** Add
+Firebase Cloud Messaging as Firebase's own setup describes it:
+`google-services.json` in the app module, the Google services Gradle plugin,
+and the messaging library:
+
+```kotlin
+// app/build.gradle.kts, with the Google services plugin applied
+dependencies {
+    implementation(platform("com.google.firebase:firebase-bom:<latest>"))
+    implementation("com.google.firebase:firebase-messaging")
+}
+```
+
+That is all. The SDK's manifest brings its own messaging service
+(`ai.graine.inapp.GraineMessagingService`), which receives every new token and
+rings each call push, and the SDK reads the current token when it starts. The
+SDK itself does not depend on Firebase: an app without it builds and runs as
+before, without calls that ring.
+
+**Already have your own `FirebaseMessagingService`?** Android delivers each
+message to one service, and yours outranks the SDK's (declared at priority
+-1). Keep yours and hand Graine's over, two lines:
 
 ```kotlin
 class Messaging : FirebaseMessagingService() {
@@ -156,7 +177,7 @@ class Messaging : FirebaseMessagingService() {
 **Graine rings your users itself** — a call the agent booked in a
 conversation, one the user booked in your app, or one booked from the
 dashboard — once your push credentials are uploaded under Workspace settings →
-In-app calling. With the two lines above the SDK registers the device (and who
+In-app calling. With Firebase in the app the SDK registers the device (and who
 uses it, from `identify`), rings those calls exactly as your own ("Scheduled
 call" on the ring), and tells Graine what became of each. Nothing else to send
 from your server — you need no server at all.
@@ -189,15 +210,17 @@ web view call first.
 
 **The SDK does by itself:** merges every manifest entry a call needs (the
 permissions, the call screen, the `microphone` foreground service, Answer and
-Decline), creates the notification channels, rings over the lock screen, keeps
+Decline, and a Firebase messaging service that receives the push token and
+Graine's calls), creates the notification channels, rings over the lock screen, keeps
 the call going with the screen off, asks for the microphone on the call screen
 when a call starts without it, registers the device with Graine and reports
 every outcome — and checks your setup at `configure`, logging each problem once
 in logcat (`Calls setup (code): …`) with the exact fix.
 
-**Your app adds:** Firebase Cloud Messaging (`google-services.json` and the
-messaging dependency) with the two lines above, and — at a moment you choose,
-never needed at launch — one call that asks for the permissions:
+**Your app adds:** Firebase Cloud Messaging (`google-services.json`, the
+Google services plugin and the messaging dependency) — no messaging service of
+your own — and, at a moment you choose, never needed at launch, one call that
+asks for the permissions:
 
 ```kotlin
 // Onboarding, or a "Call me" screen.
@@ -227,7 +250,7 @@ GraineInApp.get().calls.callSetupProblems.forEach { Log.w("Calls", "${it.code}: 
 | Code | What it means |
 | --- | --- |
 | `manifest_entry_missing` | The merged manifest lost a call entry (look for `tools:node="remove"`) |
-| `no_push_token` | No FCM token reached the SDK 15 seconds after `configure`: hand it to `GraineCalls.onNewToken` |
+| `no_push_token` | No FCM token reached the SDK 15 seconds after `configure`: Firebase is missing or not set up in the app (the message says which), or an app with its own messaging service never handed one to `GraineCalls.onNewToken` |
 | `notifications_not_allowed` | A call can't ring while the app is closed or in the background |
 | `full_screen_not_allowed` | A locked phone rings with a heads-up notification instead of the call screen |
 | `microphone_blocked` | Only Settings can let calls hear the customer |
@@ -235,7 +258,8 @@ GraineInApp.get().calls.callSetupProblems.forEach { Log.w("Calls", "${it.code}: 
 
 A problem is never an exception: calls still work where they can. Play asks
 for a declaration of the `microphone` foreground service; an app that never
-uses calls can drop the call entries with `tools:node="remove"`. Your own call
+uses calls can drop the call entries with `tools:node="remove"` (the messaging
+service, `ai.graine.inapp.GraineMessagingService`, among them). Your own call
 screen (`callActivity`) draws `calls.state` and calls the same methods; forward
 its `onRequestPermissionsResult` to `calls.onRequestPermissionsResult`.
 
@@ -255,8 +279,8 @@ ring, the call screen or the outcomes.
 
 ```kotlin
 dependencies {
-    implementation("ai.graine:inapp-android:0.10.0")
-    implementation("ai.graine:inapp-android-rtc:0.10.0")   // same version as the SDK
+    implementation("ai.graine:inapp-android:0.10.1")
+    implementation("ai.graine:inapp-android-rtc:0.10.1")   // same version as the SDK
 }
 ```
 

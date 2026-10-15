@@ -17,7 +17,7 @@ Integration guide: https://www.graine.ai/docs/in-app/android
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    implementation("ai.graine:inapp-android:0.9.0")
+    implementation("ai.graine:inapp-android:0.10.0")
 }
 ```
 
@@ -185,16 +185,59 @@ GraineInApp.get().calls.addListener(object : GraineCallListener {
 at a time: a push during a call is reported `missed`, and a native call ends any
 web view call first.
 
-- Android 13+: ask for `POST_NOTIFICATIONS` (during onboarding) — without it the
-  phone cannot ring. The microphone is asked for on the call screen if needed.
-- Android 14+: the full-screen call screen needs `USE_FULL_SCREEN_INTENT`, which
-  Play grants to calling apps; without it the call rings as a heads-up
-  notification. Play also asks for a declaration of the `microphone`
-  foreground service. An app that never uses calls can drop these entries with
-  `tools:node="remove"`.
-- Your own call screen (`callActivity`) draws `calls.state` and calls the same
-  methods; forward its `onRequestPermissionsResult` to
-  `calls.onRequestPermissionsResult`.
+### Permissions and setup: what the SDK does, what your app adds
+
+**The SDK does by itself:** merges every manifest entry a call needs (the
+permissions, the call screen, the `microphone` foreground service, Answer and
+Decline), creates the notification channels, rings over the lock screen, keeps
+the call going with the screen off, asks for the microphone on the call screen
+when a call starts without it, registers the device with Graine and reports
+every outcome — and checks your setup at `configure`, logging each problem once
+in logcat (`Calls setup (code): …`) with the exact fix.
+
+**Your app adds:** Firebase Cloud Messaging (`google-services.json` and the
+messaging dependency) with the two lines above, and — at a moment you choose,
+never needed at launch — one call that asks for the permissions:
+
+```kotlin
+// Onboarding, or a "Call me" screen.
+GraineInApp.get().calls.requestCallPermissions(activity) { p ->
+    // p.microphone, p.notifications (Android 13+), p.fullScreen (Android 14+), each
+    // GRANTED · DENIED (not yet) · BLOCKED (only Settings can change it) · NOT_NEEDED
+    if (p.fullScreen == GraineCallPermissionStatus.BLOCKED) {
+        // After a sentence of your own: "Allow full-screen calls so Acme can ring your locked phone."
+        GraineInApp.get().calls.openCallSettings(GraineCallPermission.FULL_SCREEN)
+    }
+}
+```
+
+It asks from a transparent screen of the SDK's own, so no activity forwards a
+permission result. The full-screen ring has no dialog on Android 14+:
+`openCallSettings(FULL_SCREEN)` opens its page (`NOTIFICATIONS` the app's
+notification settings, `MICROPHONE` the app's page). `calls.callPermissions`
+reads all three at any time — read it again in `onResume`, as the customer may
+have changed Settings. `allGranted` is true when each is granted or not needed.
+
+**What is still missing**, in plain words — the same list the log shows:
+
+```kotlin
+GraineInApp.get().calls.callSetupProblems.forEach { Log.w("Calls", "${it.code}: ${it.message}") }
+```
+
+| Code | What it means |
+| --- | --- |
+| `manifest_entry_missing` | The merged manifest lost a call entry (look for `tools:node="remove"`) |
+| `no_push_token` | No FCM token reached the SDK 15 seconds after `configure`: hand it to `GraineCalls.onNewToken` |
+| `notifications_not_allowed` | A call can't ring while the app is closed or in the background |
+| `full_screen_not_allowed` | A locked phone rings with a heads-up notification instead of the call screen |
+| `microphone_blocked` | Only Settings can let calls hear the customer |
+| `hosted_ringing_off` | Graine can't ring this phone: no push credentials uploaded for Android |
+
+A problem is never an exception: calls still work where they can. Play asks
+for a declaration of the `microphone` foreground service; an app that never
+uses calls can drop the call entries with `tools:node="remove"`. Your own call
+screen (`callActivity`) draws `calls.state` and calls the same methods; forward
+its `onRequestPermissionsResult` to `calls.onRequestPermissionsResult`.
 
 **The call screen is your brand's**: the design's call tokens (Garage → Call
 screen) draw its background, avatar, colours, words, controls and ring (the
@@ -212,8 +255,8 @@ ring, the call screen or the outcomes.
 
 ```kotlin
 dependencies {
-    implementation("ai.graine:inapp-android:0.9.0")
-    implementation("ai.graine:inapp-android-rtc:0.9.0")   // same version as the SDK
+    implementation("ai.graine:inapp-android:0.10.0")
+    implementation("ai.graine:inapp-android-rtc:0.10.0")   // same version as the SDK
 }
 ```
 

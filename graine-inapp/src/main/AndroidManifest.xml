@@ -34,6 +34,16 @@
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|uiMode"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
 
+        <!-- Asks for the call permissions (calls.requestCallPermissions) and
+             reports the answer, so no activity of the app forwards a result.
+             Transparent, never in Recents, never shown on its own. -->
+        <activity
+            android:name="ai.graine.inapp.GraineCallPermissionActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|uiMode"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <!-- The chat on a screen of its own (GraineChatActivity.open): above the
              keyboard, in the brand's design. -->
         <activity

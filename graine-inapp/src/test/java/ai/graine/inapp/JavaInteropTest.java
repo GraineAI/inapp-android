@@ -19,6 +19,16 @@ public class JavaInteropTest {
         assertTrue(config.getEndOnBackground());
     }
 
+    @Test public void callPermissionsAreReadAndAnsweredFromJava() {
+        GraineCallPermissionsCallback done = permissions -> assertTrue(permissions.getAllGranted());
+        done.onResult(new GraineCallPermissions(GraineCallPermissionStatus.GRANTED, GraineCallPermissionStatus.GRANTED,
+                GraineCallPermissionStatus.NOT_NEEDED));
+        assertEquals(GraineCallPermission.FULL_SCREEN, GraineCallPermission.of("fullScreen"));
+        assertEquals("notNeeded", GraineCallPermissionStatus.NOT_NEEDED.getWire());
+        GraineCallSetupProblem problem = new GraineCallSetupProblem("no_push_token", "Hand the token over.");
+        assertEquals("no_push_token", problem.getCode());
+    }
+
     @Test public void actionResultsAreStaticFactories() {
         assertEquals(ActionResult.Status.OK, ActionResult.ok().getStatus());
         assertEquals("Opened.", ActionResult.ok("Opened.").getMessage());

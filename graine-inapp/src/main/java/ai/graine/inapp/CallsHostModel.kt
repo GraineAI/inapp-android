@@ -209,6 +209,9 @@ internal data class CallsHostAgent(val publishableKey: String, val baseUrl: Stri
 internal object CallsHostValues {
     fun isNull(raw: Any?): Boolean = raw == null || raw == JSONObject.NULL
 
+    /** A call permission by its word: `microphone`, `notifications` or `fullScreen` (`full_screen` and any case too); null for anything else. */
+    fun permission(raw: Any?): GraineCallPermission? = GraineCallPermission.of(raw as? String)
+
     /** A string-keyed map, or null. A key that is not a string is dropped: the values are JSON. */
     fun map(raw: Any?): Map<String, Any?>? = when (raw) {
         is Map<*, *> -> LinkedHashMap<String, Any?>().also { out -> raw.forEach { (k, v) -> if (k is String) out[k] = v } }

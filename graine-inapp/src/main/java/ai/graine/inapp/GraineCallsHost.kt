@@ -39,6 +39,9 @@ import java.util.concurrent.FutureTask
  * The snapshot, `incoming`, `outcome` and `action` say which: `agent` is the
  * call's agent by name ("default" for the default one).
  *
+ * Permissions and setup: [callPermissions], [requestCallPermissions],
+ * [openCallSettings] and [callSetupProblems], as JSON-safe maps.
+ *
  * Events: `state` (the snapshot, at most once per turn of the main loop),
  * `outcome`, `incoming` and `action` (`voipToken` is iOS's). Main thread: a
  * call from another thread hops there first (`configure`, `restore`,
@@ -149,6 +152,43 @@ object GraineCallsHost {
 
     @JvmStatic
     fun setSpeaker(on: Boolean) = onMain { core.setSpeaker(on) }
+
+    // ── permissions and setup ───────────────────────────────────────────────
+
+    /**
+     * The call permissions: `{microphone, notifications, fullScreen}`, each
+     * `granted`, `denied`, `blocked` or `notNeeded`. Safe before anything is
+     * configured: a permission is the phone's.
+     */
+    @JvmStatic
+    fun callPermissions(context: Context): Map<String, Any?> {
+        remember(context)
+        return CallPermissions.read(context).toMap()
+    }
+
+    /**
+     * Ask for the call permissions the system's dialog can still ask for, from
+     * [activity] (a transparent screen of the SDK's over it, so no result has
+     * to be forwarded); [done] gets them as they stand after, on the main
+     * thread. Never on its own: the app chooses when.
+     */
+    @JvmStatic
+    fun requestCallPermissions(context: Context, activity: Activity?, done: (Map<String, Any?>) -> Unit) {
+        remember(context)
+        CallPermissions.request(context, activity) { done(it.toMap()) }
+    }
+
+    /** Open the Settings page for `microphone`, `notifications` or `fullScreen`: true when one opened; false for any other word. */
+    @JvmStatic
+    fun openCallSettings(context: Context, activity: Activity?, item: Any?): Boolean {
+        remember(context)
+        val permission = CallsHostValues.permission(item) ?: return false
+        return onMainSync { CallPermissions.openSettings(context, activity, permission) }
+    }
+
+    /** What the app's setup still lacks for calls: `[{code, message}]`, empty when nothing is missing (and before anything is configured). */
+    @JvmStatic
+    fun callSetupProblems(): List<Map<String, Any?>> = device.calls?.callSetupProblems?.map { it.toMap() } ?: emptyList()
 
     // ── what the agent knows ────────────────────────────────────────────────
 

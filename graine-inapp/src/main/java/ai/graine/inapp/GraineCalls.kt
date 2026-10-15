@@ -52,6 +52,15 @@ import java.util.concurrent.CopyOnWriteArraySet
  * and a ring Graine sends rings with the agent it is for (the push's
  * `agent_id`): its key reports the outcome, its design draws the screen.
  *
+ * PERMISSIONS AND SETUP: [requestCallPermissions] asks for the microphone and
+ * (Android 13+) notifications at a moment the app chooses — never on its own
+ * at launch; a call that starts without the microphone still asks on the
+ * call screen. [callPermissions] reads them, the full-screen ring (Android
+ * 14+) included, and [openCallSettings] opens the page that changes each.
+ * [callSetupProblems] says what the app's setup still lacks — a manifest
+ * entry, the push token, a permission, Graine's ringing — and each one is
+ * logged once, with its fix.
+ *
  * Public methods are main-thread, except [handlePush], which is safe from the
  * messaging service's thread. Listeners are called on the main thread.
  */
@@ -140,6 +149,10 @@ class GraineCalls internal constructor(
     private val micGiveUp = Runnable {
         if (micPending) { micPending = false; machine.fail("The microphone permission was not granted.") }
     }
+    /** When [configure] first ran (elapsedRealtime): the setup self-check's clock. 0 before. */
+    @Volatile private var configuredAt = 0L
+    /** Each setup problem is logged once a launch. */
+    private val setupLog = CallSetupLog()
 
     init {
         CallLog.enabled = home.config.debug || AppShared.all().any { it.config.debug }
@@ -162,7 +175,79 @@ class GraineCalls internal constructor(
     fun configure(config: GraineCallsConfig) {
         this.config = config
         runCatching { ensureChannels() }
+        startSetupCheck()
     }
+
+    // ── permissions and setup ───────────────────────────────────────────────
+
+    /**
+     * The call permissions as the phone holds them now: the microphone, the
+     * ring's notifications (Android 13+ asks; before, they are on unless
+     * turned off in Settings) and the full-screen ring (Android 14+: Settings
+     * only). Each `GRANTED`, `DENIED` (not yet — asking may change it),
+     * `BLOCKED` (only Settings can change it) or `NOT_NEEDED`. Read it again
+     * when the app returns to the foreground: the customer may have changed
+     * Settings. Any thread.
+     */
+    val callPermissions: GraineCallPermissions get() = CallPermissions.read(app)
+
+    /**
+     * Ask for the call permissions the system's dialog can still ask for — the
+     * microphone, and notifications on Android 13+ — at a moment the app
+     * chooses (onboarding, a "Call me" screen). The SDK never asks on its own
+     * at launch. It asks from a transparent screen of its own over [activity]
+     * (by default the app's screen in front), so nothing has to forward a
+     * permission result. [done] gets the permissions as they stand after, on
+     * the main thread — at once when there is nothing to ask or no screen in
+     * front. The full-screen ring is not a dialog: [openCallSettings] opens
+     * its page.
+     */
+    @JvmOverloads
+    fun requestCallPermissions(activity: Activity? = null, done: GraineCallPermissionsCallback) =
+        CallPermissions.request(app, activity ?: resumed.get(), done)
+
+    /**
+     * Open the Settings page that changes [item]: the full-screen ring's own
+     * page on Android 14+, the app's notification settings, or the app's page
+     * for the microphone. From [activity] (by default the screen in front).
+     * True when a page opened.
+     */
+    @JvmOverloads
+    fun openCallSettings(item: GraineCallPermission, activity: Activity? = null): Boolean =
+        CallPermissions.openSettings(app, activity ?: resumed.get(), item)
+
+    /**
+     * What the app's setup still lacks for calls, read now: each a stable
+     * `code` and a sentence with the exact fix — a manifest entry the merge
+     * dropped, no push token 15 seconds after [configure], notifications or
+     * the full-screen ring not allowed, the microphone blocked, or Graine not
+     * ringing this phone. Empty when nothing is missing. Calls still work
+     * where they can. Any thread.
+     */
+    val callSetupProblems: List<GraineCallSetupProblem> get() = CallSetup.problems(setupFacts())
+
+    /** The first [configure] starts the self-check: what is missing now is logged now, and what is still missing once a push token has had its time. */
+    private fun startSetupCheck() {
+        if (configuredAt != 0L) return
+        configuredAt = android.os.SystemClock.elapsedRealtime()
+        main.post { logSetupProblems() }
+        main.postDelayed({ logSetupProblems() }, CallSetup.SETTLE_MS + 500)
+    }
+
+    /** Each problem not yet said this launch, as a warning with its fix. */
+    private fun logSetupProblems() {
+        if (configuredAt == 0L) return
+        val fresh = runCatching { setupLog.fresh(callSetupProblems) }.getOrElse { emptyList() }
+        fresh.forEach { Log.w(GraineInApp.TAG, "Calls setup (${it.code}): ${it.message}") }
+    }
+
+    private fun setupFacts(): CallSetupFacts = CallSetupFacts(
+        missingManifest = runCatching { CallPermissions.missingManifest(app, config.callActivity) }.getOrElse { emptyList() },
+        hasPushToken = runCatching { DeviceStore.of(app).pushToken }.getOrNull() != null,
+        msSinceConfigure = configuredAt.takeIf { it != 0L }?.let { android.os.SystemClock.elapsedRealtime() - it },
+        permissions = callPermissions,
+        hostedRinging = CallSetup.hostedRinging(AppShared.all().mapNotNull { it.session?.schedulingRules ?: it.cachedSession?.rules }),
+    )
 
     // ── an agent calls the customer ─────────────────────────────────────────
 
@@ -436,6 +521,8 @@ class GraineCalls internal constructor(
             micPending = false
             main.removeCallbacks(micGiveUp)
             val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
+            val screen = resumed.get()
+            CallPermissions.record(app, Manifest.permission.RECORD_AUDIO, granted) { screen != null && !screen.shouldShowRequestPermissionRationale(it) }
             if (!granted) machine.fail("The microphone permission was denied.")
             else if (machine.state == GraineCallState.CONNECTING) startService()
         }

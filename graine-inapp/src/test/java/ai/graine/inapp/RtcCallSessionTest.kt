@@ -262,15 +262,22 @@ class RtcCallSessionTest {
         assertTrue(steps.any { it.startsWith("dial: no reply to the INVITE: redial") })
     }
 
-    @Test fun twelveSecondsWithoutMediaIsTheBudget() {
+    /** 16 Oct: the SBC said "trying" and the call never reached the agent, every other tap. */
+    @Test fun aStuckDialIsCancelledAndDialledAgainAfterThreeSecondsThenFallsBack() {
         sbc.inviteAnswer = FakeSbc.Answer.TRYING_ONLY
         val s = prepared()
         s.dial(deps, listener); pump()
-        sched.advance(11_999); pump()
+        sched.advance(2_999); pump()
         assertTrue(log.isEmpty())
+        assertEquals("heard: still waiting for the answer", 1, sipSockets.size)
         sched.advance(1); pump()
-        assertEquals("heard, never answered", listOf("fallback no_answer"), log)
-        assertEquals("the INVITE was cancelled", 1, sip.requests("CANCEL").size)
+        assertEquals("the stuck INVITE was cancelled", 1, sipSockets[0].requests("CANCEL").size)
+        assertEquals("a fresh socket and registration", 2, sipSockets.size)
+        peer.candidate("srflx"); pump()
+        assertEquals("dialled again: challenged, then with its credentials", 2, sip.requests("INVITE").size)
+        sched.advance(3_000); pump()
+        assertEquals("heard twice, never answered", listOf("fallback no_answer"), log)
+        assertEquals("that INVITE was cancelled too", 1, sip.requests("CANCEL").size)
     }
 
     @Test fun answeredWithNoMediaPathFallsBackAfterEightSeconds() {

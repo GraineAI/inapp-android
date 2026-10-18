@@ -61,6 +61,9 @@ class RtcRulesTest {
         assertEquals(3_000, RtcDial.probeDeadlineMs(2_000))
         assertEquals(4_000, RtcDial.probeDeadlineMs(9_000))
         assertEquals(15_000, RtcDial.ANSWER_DEADLINE_MS)
+        assertEquals(3_000, RtcDial.ANSWER_AFTER_HEARD_MS)
+        // Two stuck dials, each with a second of setup, inside the attempt's budget: the redial must be reachable.
+        assertTrue(RtcDial.MAX_DIALS * (RtcDial.ANSWER_AFTER_HEARD_MS + 1_000) < RtcDial.ATTEMPT_BUDGET_MS)
         assertEquals(8_000, RtcDial.ICE_CONNECT_DEADLINE_MS)
         assertEquals(12_000, RtcDial.ATTEMPT_BUDGET_MS)
     }

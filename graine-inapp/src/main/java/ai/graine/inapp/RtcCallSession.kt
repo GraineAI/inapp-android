@@ -464,7 +464,15 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
 
         override fun onProvisional(code: Int) {
             if (!current) return
-            if (!heard) step("provisional", "$code after ${now() - inviteAt} ms")
+            if (!heard) {
+                step("provisional", "$code after ${now() - inviteAt} ms")
+                // The SBC has it: still only "trying" after ANSWER_AFTER_HEARD_MS is a stuck dial, cancelled and
+                // dialled once more on a fresh connection while the attempt's budget still has room.
+                answerTimer?.invoke()
+                answerTimer = scheduler.schedule(RtcDial.ANSWER_AFTER_HEARD_MS) {
+                    if (seq == dialSeq && phase == Phase.DIALING) dialFailed(null, "no_answer")
+                }
+            }
             heard = true
             heardTimer?.invoke(); heardTimer = null
         }

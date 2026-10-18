@@ -1,3 +1,7 @@
+## 0.10.2
+
+- **A WebRTC call the server acknowledges but never answers is dialled again after 3 seconds.** The engine used to wait out the whole 12-second WebRTC attempt for such a call — a long *Connecting…*, then the call continued without WebRTC — because its 15-second answer ceiling could never fire inside that budget. Now, 3 s after the server's first reply with no answer, the stuck dial is cancelled and made once more on a fresh connection (what a second tap did by hand); a second stuck dial continues on the standard connection, with `transportFallbackReason` `no_answer`. Nothing to change in your app. Update `ai.graine:inapp-android` and `ai.graine:inapp-android-rtc` together.
+
 ## 0.10.1
 
 - **The SDK registers for pushes itself: no `FirebaseMessagingService` to write.** With Firebase Cloud Messaging in the app (`google-services.json`, the Google services plugin and `com.google.firebase:firebase-messaging`), the SDK's own messaging service (`ai.graine.inapp.GraineMessagingService`, merged from its manifest) receives every new token and rings Graine's call pushes, leaving every other message alone; and once a process, when the SDK starts, it reads the current token, so an install whose token is older than this version registers too. A token the SDK already holds is not sent again. An app that turned Firebase's automatic token creation off is left to its choice. Firebase stays optional: the SDK is compiled against it and ships without it (no new dependency), an app without it builds — R8 included — and runs as before.

@@ -89,13 +89,13 @@ internal object RtcDial {
     const val ANSWER_DEADLINE_MS = 15_000L
     /**
      * From the SBC's first reply to the answer. The SBC replies the moment it has the INVITE, and a
-     * healthy call is answered within a second of that (34 ms to the feature server, then the agent
-     * picks up). One that has said "trying" and then nothing for this long is stuck: it is cancelled
-     * and dialled once more on a fresh connection, which gets through — what a second tap did by hand.
-     * It has to stay well inside the attempt's 12 s: the 15 s answer ceiling never fired before the
-     * budget did, so a stuck dial was a 12-second spin and then the WebSocket, every other call.
+     * healthy call is answered right after: 37 ms median on production, measured at the SBC on
+     * 18 Oct 2026. One that has said "trying" and then nothing for half a second is stuck — a feature
+     * server that took the call and never answered — so it is cancelled and dialled once more on a
+     * fresh connection. A seatbelt, and a short one: 0.10.2's 3 s was 80× a normal answer and only
+     * delayed the fallback; this is still ~13× the median, so a healthy call never trips it.
      */
-    const val ANSWER_AFTER_HEARD_MS = 3_000L
+    const val ANSWER_AFTER_HEARD_MS = 500L
     /** Answered, and still no media path after this: the customer's patience, not the library's ~30 s. */
     const val ICE_CONNECT_DEADLINE_MS = 8_000L
     /** Dials per call: the first, and one on a fresh connection. Then the WebSocket. */

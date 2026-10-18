@@ -1,5 +1,10 @@
+## 0.10.3
+
+- **A stalled WebRTC dial is redialled after half a second, not 3 seconds.** A dial the server has acknowledged is answered within a few dozen milliseconds; one still unanswered half a second after that is cancelled and made once more on a fresh connection, and a second stalled dial continues on the standard connection, with `transportFallbackReason` `no_answer`. 0.10.2's 3 seconds only delayed that fallback. Nothing to change in your app. Update `ai.graine:inapp-android` and `ai.graine:inapp-android-rtc` together.
+
 ## 0.10.2
 
+- **Withdrawn the same day — use 0.10.3,** which redials after half a second.
 - **A WebRTC call the server acknowledges but never answers is dialled again after 3 seconds.** The engine used to wait out the whole 12-second WebRTC attempt for such a call — a long *Connecting…*, then the call continued without WebRTC — because its 15-second answer ceiling could never fire inside that budget. Now, 3 s after the server's first reply with no answer, the stuck dial is cancelled and made once more on a fresh connection (what a second tap did by hand); a second stuck dial continues on the standard connection, with `transportFallbackReason` `no_answer`. Nothing to change in your app. Update `ai.graine:inapp-android` and `ai.graine:inapp-android-rtc` together.
 
 ## 0.10.1

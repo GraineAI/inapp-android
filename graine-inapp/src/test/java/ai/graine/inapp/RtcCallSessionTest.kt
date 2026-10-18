@@ -263,11 +263,11 @@ class RtcCallSessionTest {
     }
 
     /** 16 Oct: the SBC said "trying" and the call never reached the agent, every other tap. */
-    @Test fun aStuckDialIsCancelledAndDialledAgainAfterThreeSecondsThenFallsBack() {
+    @Test fun aStuckDialIsCancelledAndDialledAgainAfterHalfASecondThenFallsBack() {
         sbc.inviteAnswer = FakeSbc.Answer.TRYING_ONLY
         val s = prepared()
         s.dial(deps, listener); pump()
-        sched.advance(2_999); pump()
+        sched.advance(499); pump()
         assertTrue(log.isEmpty())
         assertEquals("heard: still waiting for the answer", 1, sipSockets.size)
         sched.advance(1); pump()
@@ -275,7 +275,7 @@ class RtcCallSessionTest {
         assertEquals("a fresh socket and registration", 2, sipSockets.size)
         peer.candidate("srflx"); pump()
         assertEquals("dialled again: challenged, then with its credentials", 2, sip.requests("INVITE").size)
-        sched.advance(3_000); pump()
+        sched.advance(500); pump()
         assertEquals("heard twice, never answered", listOf("fallback no_answer"), log)
         assertEquals("that INVITE was cancelled too", 1, sip.requests("CANCEL").size)
     }

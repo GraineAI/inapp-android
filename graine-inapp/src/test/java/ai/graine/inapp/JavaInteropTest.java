@@ -181,6 +181,8 @@ public class JavaInteropTest {
         // Default methods: an app written against one callback still compiles as more are added.
         listener.onCallState(GraineCallState.RINGING, null);
         listener.onAgentSpeaking(true);
+        listener.onAgentLevel(0.5f);
+        listener.onCallReconnecting(true);
         listener.onCallOutcome("call_1", GraineCallOutcome.MISSED);
         assertEquals("call_1", heard[0]);
         assertEquals("missed", heard[1]);

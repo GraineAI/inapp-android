@@ -93,7 +93,9 @@ internal class RtcDialDeps(
  * goes on, on the WebSocket, inside the same ring and screen. The whole
  * attempt has 12 s.
  * After media nothing falls back: a lost path gets one ICE restart, then the
- * call ends as dropped.
+ * call ends as dropped. From the drop until the path is back (or the call
+ * ends) the call is reconnecting ([Listener.onReconnecting]), which the call
+ * screen shows as its reconnecting moment.
  *
  * On its control channel the call says how it went, as analytics rows
  * (CallAnalytics): at media the transport and where the tap's wait went, then
@@ -125,6 +127,13 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
         fun onControlJoined() {}
         /** The far side's audio, measured about five times a second while the call is up. */
         fun onAudioStats(stats: GraineRtcStats) {}
+        /**
+         * The call's media path dropped after the call was up and is being
+         * recovered — ICE disconnected or failed, its restart under way (true)
+         * — or it is back (false). Never before media; false again before
+         * [onEnded] when the call ends while recovering. Not after [hangUp].
+         */
+        fun onReconnecting(reconnecting: Boolean) {}
         /**
          * Just before [onFallback]: the analytics rows (CallAnalytics frames)
          * of what happened on the way — the socket replaced, the answer with no
@@ -217,6 +226,8 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
     private var dropStartedAt: Long? = null
     private var restartTried = false
     private var restarting = false
+    /** The media path is being recovered (Listener.onReconnecting): only ever after media, from a drop until it is back. */
+    private var reconnecting = false
     private var restartTimer: (() -> Unit)? = null
     private var dropTimer: (() -> Unit)? = null
     private var statsTimer: (() -> Unit)? = null
@@ -940,10 +951,12 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
                 restarting = false
                 restartTimer?.invoke(); restartTimer = null
                 dropTimer?.invoke(); dropTimer = null
+                setReconnecting(false)
             }
             "disconnected" -> if (dropStartedAt == null) {
                 dropStartedAt = now()
                 step("media", "ICE disconnected")
+                setReconnecting(true)
                 if (!restartTried) {
                     restartTimer = scheduler.schedule(RtcMediaWatch.RESTART_AFTER_MS) { restartTimer = null; restartIce() }
                     dropTimer = scheduler.schedule(RtcMediaWatch.RECOVERY_WINDOW_MS) { dropped("ICE did not reconnect") }
@@ -953,6 +966,7 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
             }
             "failed" -> {
                 val began = dropStartedAt ?: now().also { dropStartedAt = it }
+                setReconnecting(true)
                 if (restarting) return
                 if (!restartTried && now() - began < RtcMediaWatch.RECOVERY_WINDOW_MS) {
                     restartTimer?.invoke(); restartTimer = null
@@ -971,6 +985,7 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
         restartTried = true
         restarting = true
         step("media", "restarting ICE")
+        setReconnecting(true)
         val gen = peerGen
         val c = call
         if (peer == null || c == null) { dropped("nothing to restart"); return }
@@ -1136,6 +1151,7 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
             if (phase == Phase.DONE) return@post
             qualityRow()
             phase = Phase.DONE
+            reconnecting = false
             release()
         }
     }
@@ -1176,7 +1192,20 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
         release()
         endCaptionTurn()
         if (speaking.reset()) listener.onAgentSpeaking(false)
+        setReconnecting(false)
         listener.onEnded(reason, error)
+    }
+
+    /**
+     * Recovering the media path after the call was up — the call screen's
+     * reconnecting moment. Told only when it changes. Only the media watch
+     * sets it, and the watch runs only once the call is LIVE: a call that never
+     * had media never shows it.
+     */
+    private fun setReconnecting(on: Boolean) {
+        if (reconnecting == on) return
+        reconnecting = on
+        listener.onReconnecting(on)
     }
 
     /** Timers, the call (BYE or CANCEL), the registration and its socket, the control channel right after the BYE, the media. */

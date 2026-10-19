@@ -548,7 +548,7 @@ class CallsHostValuesTest {
 
 class CallsHostSnapshotTest {
     private val keys = setOf("state", "callId", "direction", "reason", "callerName", "muted", "speakerOn", "agentSpeaking",
-        "caption", "connectedAt", "error", "agent", "transport", "transportFallbackReason")
+        "reconnecting", "caption", "connectedAt", "error", "agent", "transport", "transportFallbackReason")
 
     @Test fun everyKeyIsAlwaysThereAndIdleIsNullsAndFalses() {
         val json = CallsHostSnapshot().json
@@ -557,13 +557,13 @@ class CallsHostSnapshotTest {
         for (key in listOf("callId", "direction", "reason", "callerName", "caption", "connectedAt", "error", "agent", "transport", "transportFallbackReason")) {
             assertTrue(key, json.containsKey(key) && json[key] == null)
         }
-        for (key in listOf("muted", "speakerOn", "agentSpeaking")) assertEquals(key, false, json[key])
+        for (key in listOf("muted", "speakerOn", "agentSpeaking", "reconnecting")) assertEquals(key, false, json[key])
     }
 
     @Test fun aLiveCallShowsEverything() {
         val json = CallsHostSnapshot(
             state = GraineCallState.ACTIVE, callId = "c1", direction = GraineCall.Direction.INCOMING, reason = "payment_due",
-            callerName = "Acme", muted = true, speakerOn = true, agentSpeaking = true,
+            callerName = "Acme", muted = true, speakerOn = true, agentSpeaking = true, reconnecting = true,
             caption = CallsHostSnapshot.Caption(Role.AGENT, "Hi Asha", true), connectedAt = 1_760_000_000_123L, agent = "sales",
             transport = "websocket", transportFallbackReason = "no_answer",
         ).json
@@ -579,6 +579,7 @@ class CallsHostSnapshotTest {
         assertEquals(true, json["muted"])
         assertEquals(true, json["speakerOn"])
         assertEquals(true, json["agentSpeaking"])
+        assertEquals("the connection is being recovered", true, json["reconnecting"])
         assertEquals("milliseconds since the epoch", 1_760_000_000_123L, json["connectedAt"])
         assertEquals(mapOf("role" to "agent", "text" to "Hi Asha", "live" to true), json["caption"])
         assertNull(json["error"])
@@ -587,7 +588,7 @@ class CallsHostSnapshotTest {
     @Test fun atIdleOnlyTheErrorSurvives() {
         val stale = CallsHostSnapshot(
             state = GraineCallState.IDLE, callId = "c1", direction = GraineCall.Direction.OUTGOING, reason = "support",
-            callerName = "Acme", muted = true, speakerOn = true, agentSpeaking = true,
+            callerName = "Acme", muted = true, speakerOn = true, agentSpeaking = true, reconnecting = true,
             caption = CallsHostSnapshot.Caption(Role.CUSTOMER, "hello", false), connectedAt = 5L,
             error = "The microphone permission was not granted.", agent = "sales", transport = "webrtc",
             transportFallbackReason = "ice_timeout",
@@ -600,6 +601,7 @@ class CallsHostSnapshotTest {
         assertNull(json["callId"])
         assertNull(json["caption"])
         assertEquals(false, json["muted"])
+        assertEquals("no call, nothing recovering", false, json["reconnecting"])
         assertEquals("The microphone permission was not granted.", json["error"])
     }
 
@@ -1271,6 +1273,26 @@ class CallsHostCoreTest {
         rig.core.engineChanged()
         rig.platform.runTurns()
         assertEquals(true, rig.events.payloads("state").last()["agentSpeaking"])
+    }
+
+    @Test fun aCallRecoveringItsConnectionIsNewsAndSoIsItsReturn() {
+        val rig = HostRig()
+        rig.configure()
+        rig.platform.fields = CallsHostSnapshot(GraineCallState.ACTIVE, "c1", GraineCall.Direction.OUTGOING, connectedAt = 1_000_000L)
+        rig.core.engineChanged()
+        rig.platform.runTurns()
+        assertEquals(false, rig.events.payloads("state").last()["reconnecting"])
+        rig.platform.fields = rig.platform.fields.copy(reconnecting = true)
+        // GraineCallsHost hears onCallReconnecting and says the engine changed.
+        rig.core.engineChanged()
+        rig.platform.runTurns()
+        assertEquals("the screen's reconnecting moment", true, rig.events.payloads("state").last()["reconnecting"])
+        assertEquals(true, rig.core.snapshot()["reconnecting"])
+        rig.platform.fields = rig.platform.fields.copy(reconnecting = false)
+        rig.core.engineChanged()
+        rig.platform.runTurns()
+        assertEquals("back", false, rig.events.payloads("state").last()["reconnecting"])
+        assertEquals(3, rig.events.payloads("state").size)
     }
 
     @Test fun aNewSinkReadsTheSnapshot() {

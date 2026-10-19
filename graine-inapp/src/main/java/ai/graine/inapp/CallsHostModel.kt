@@ -421,6 +421,8 @@ internal data class CallsHostSnapshot(
     val muted: Boolean = false,
     val speakerOn: Boolean = false,
     val agentSpeaking: Boolean = false,
+    /** The call's connection dropped after the call was up and is being recovered (a call carried over WebRTC). */
+    val reconnecting: Boolean = false,
     val caption: Caption? = null,
     /** When the conversation opened, in ms since the Unix epoch, as JavaScript's Date and Dart's DateTime take it. */
     val connectedAt: Long? = null,
@@ -457,6 +459,7 @@ internal data class CallsHostSnapshot(
                 "muted" to s.muted,
                 "speakerOn" to s.speakerOn,
                 "agentSpeaking" to s.agentSpeaking,
+                "reconnecting" to s.reconnecting,
                 "caption" to s.caption?.let { linkedMapOf<String, Any?>("role" to it.role.name.lowercase(), "text" to it.text, "live" to it.live) },
                 "connectedAt" to s.connectedAt,
                 "error" to s.error,

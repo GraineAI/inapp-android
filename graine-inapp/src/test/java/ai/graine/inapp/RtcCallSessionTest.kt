@@ -73,7 +73,12 @@ class RtcCallSessionTest {
         wsHost = "wss://ws.graine.ai",
     )
 
+    /** The reconnecting moments told, and how many log lines came before each: its place among the other events. */
+    private val reconnects = mutableListOf<Boolean>()
+    private val reconnectsAt = mutableListOf<Int>()
+
     private val listener = object : RtcCallSession.Listener {
+        override fun onReconnecting(reconnecting: Boolean) { reconnects += reconnecting; reconnectsAt += log.size }
         override fun onMedia() { log += "media" }
         override fun onFallback(reason: String, detail: String) { log += "fallback $reason" }
         override fun onRefused(message: String) { log += "refused $message" }
@@ -609,5 +614,69 @@ class RtcCallSessionTest {
         sched.advance(4_000); pump()
         assertEquals("minted again", 2, mints.size)
         assertEquals("with the same session id", mints[0].getString("session_id"), mints[1].getString("session_id"))
+    }
+
+    // ── reconnecting: the media path recovered after the call was up ────────
+
+    @Test fun aDropAfterMediaIsReconnectingThroughItsRestartUntilTheMediaIsBack() {
+        live()
+        peer.ice("disconnected"); pump()
+        assertEquals(listOf(true), reconnects)
+        sched.advance(3_000); pump()
+        assertTrue(peer.calls.contains("createOffer(restart)"))
+        peer.candidate("srflx"); pump()
+        assertEquals("one moment, the restart inside it", listOf(true), reconnects)
+        peer.ice("checking"); peer.ice("connected"); pump()
+        assertEquals(listOf(true, false), reconnects)
+        assertTrue("the call goes on", log.isEmpty())
+    }
+
+    @Test fun aDropThatHealsOnItsOwnEndsTheMomentToo() {
+        live()
+        peer.ice("disconnected"); pump()
+        peer.ice("connected"); pump()
+        assertEquals(listOf(true, false), reconnects)
+        peer.ice("disconnected"); pump()
+        peer.ice("completed"); pump()
+        assertEquals("every drop its own moment", listOf(true, false, true, false), reconnects)
+    }
+
+    @Test fun iceFailedIsReconnectingWhileItsRestartRuns() {
+        live()
+        peer.ice("failed"); pump()
+        assertTrue(peer.calls.contains("createOffer(restart)"))
+        assertEquals(listOf(true), reconnects)
+        peer.candidate("srflx"); pump()
+        peer.ice("checking"); peer.ice("connected"); pump()
+        assertEquals(listOf(true, false), reconnects)
+    }
+
+    @Test fun aCallThatNeverHadMediaIsNeverReconnecting() {
+        val s = prepared()
+        s.dial(deps, listener); pump()
+        peer.ice("checking"); peer.ice("disconnected"); pump()
+        peer.ice("failed"); pump()
+        sched.advance(15_000); pump()
+        assertTrue("before media a drop is the dial's, never the call's", reconnects.isEmpty())
+        assertTrue(log.single().startsWith("fallback"))
+    }
+
+    @Test fun aCallThatEndsWhileReconnectingSaysSoBeforeItsEnd() {
+        live()
+        peer.ice("disconnected"); pump()
+        sched.advance(3_000); pump()
+        peer.candidate("srflx"); pump()
+        sched.advance(7_000); pump()
+        assertEquals(listOf("ended failed"), log)
+        assertEquals(listOf(true, false), reconnects)
+        assertEquals("both before the end was told", listOf(0, 0), reconnectsAt)
+    }
+
+    @Test fun aHangUpWhileReconnectingTellsNothingMore() {
+        val s = live()
+        peer.ice("disconnected"); pump()
+        s.hangUp(); pump()
+        peer.ice("connected"); pump()
+        assertEquals("no event follows a hang-up", listOf(true), reconnects)
     }
 }

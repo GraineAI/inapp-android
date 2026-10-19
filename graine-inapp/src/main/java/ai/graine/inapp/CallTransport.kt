@@ -430,6 +430,8 @@ internal class CallTransportSession(
             override fun onEnded(reason: GraineCallOutcome.EndReason, error: String?) = events.onEnded(reason, error)
             override fun onCaption(role: Role, text: String, live: Boolean) = events.onCaption(role, text, live)
             override fun onAgentSpeaking(speaking: Boolean) = events.onAgentSpeaking(speaking)
+            override fun onAudioStats(stats: GraineRtcStats) = events.onAgentAudio(stats.audioLevel, stats.totalAudioEnergy, stats.totalSamplesDuration)
+            override fun onReconnecting(reconnecting: Boolean) = events.onReconnecting(reconnecting)
         })
     }
 

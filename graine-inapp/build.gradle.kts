@@ -31,6 +31,8 @@ android {
         freeCompilerArgs += listOf("-Xjvm-default=all")
     }
     testOptions {
+        // The test APK as an app of today's: edge to edge, and no older-app warning over the call screen's gallery.
+        targetSdk = 36
         unitTests.isReturnDefaultValues = true
         unitTests.all {
             it.systemProperty("graine.version", project.version.toString())
@@ -41,6 +43,10 @@ android {
                 ?.let { d -> it.inputs.dir(d).withPathSensitivity(PathSensitivity.RELATIVE) }
         }
     }
+    // The test APK reads the contract (CallScreenGalleryActivity draws design.json's designs). Never in the AAR.
+    sourceSets.getByName("androidTest").assets.srcDirs(
+        listOf(rootProject.file("contract"), rootProject.file("../contract")).filter { it.isDirectory },
+    )
     publishing {
         // Maven Central requires sources; they ship with every comment in them,
         // which is why verifyPackage reads them before anything is published.

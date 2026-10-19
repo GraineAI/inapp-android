@@ -59,15 +59,24 @@ data class CallStatusText @JvmOverloads constructor(
     val ended: String,
     val scheduled: String? = null,
     val missed: String? = null,
+    /** A call the customer placed, before it is through. Absent: the connecting words. */
+    val outgoing: String? = null,
+    /** A connected call recovering its connection. Absent: "Reconnecting…". */
+    val reconnecting: String? = null,
 ) {
     /** The ring of a call Graine rang (booked by the agent, the user or the dashboard). */
     val scheduledText: String get() = scheduled?.takeIf { it.isNotBlank() } ?: DEFAULT_SCHEDULED
     /** A ring nobody answered — on the screen, and in the missed-call notification. */
     val missedText: String get() = missed?.takeIf { it.isNotBlank() } ?: DEFAULT_MISSED
+    /** A call the customer placed, not through yet: the brand's words for it, else what connecting says. */
+    val outgoingText: String get() = outgoing?.takeIf { it.isNotBlank() } ?: connecting
+    /** A connected call recovering its connection. */
+    val reconnectingText: String get() = reconnecting?.takeIf { it.isNotBlank() } ?: DEFAULT_RECONNECTING
 
     companion object {
         const val DEFAULT_SCHEDULED = "Scheduled call"
         const val DEFAULT_MISSED = "Missed call"
+        const val DEFAULT_RECONNECTING = "Reconnecting…"
     }
 }
 
@@ -109,6 +118,12 @@ data class CallTokens(
     /** "system", "graine" or "soft". */
     val ringtone: String,
     val statusText: CallStatusText,
+    /**
+     * The look (contract/DESIGN.md "Call screen" → "The look"), as the server
+     * sent it; null from a server that predates it — [Surfaces.screenOf] then
+     * derives today's screen in the look's terms.
+     */
+    val screen: CallScreenTokens? = null,
 )
 
 internal object Surfaces {
@@ -170,12 +185,17 @@ internal object Surfaces {
         )
     }
 
-    /** `tokens.call` → its values over the derived ones; null when the server sent none (an older one). */
-    fun call(raw: Any?, colors: ThemeColors): CallTokens? {
+    /**
+     * `tokens.call` → its values over the derived ones; null when the server
+     * sent none (an older one). `weights` are the scheme's, for the look's
+     * type when the server leaves it out.
+     */
+    @JvmOverloads
+    fun call(raw: Any?, colors: ThemeColors, weights: FontWeights? = null): CallTokens? {
         val o = raw as? JSONObject ?: return null
         val d = defaultCall(colors)
         val status = o.opt("statusText") as? JSONObject
-        return CallTokens(
+        val flat = CallTokens(
             background = hex(o, "background", d.background),
             backgroundTo = if (o.has("backgroundTo")) Design.normaliseHex(o.opt("backgroundTo") as? String) else d.backgroundTo,
             text = hex(o, "text", d.text),
@@ -209,11 +229,15 @@ internal object Surfaces {
                 ringing = status?.let { text(it, "ringing", d.statusText.ringing) } ?: d.statusText.ringing,
                 connecting = status?.let { text(it, "connecting", d.statusText.connecting) } ?: d.statusText.connecting,
                 ended = status?.let { text(it, "ended", d.statusText.ended) } ?: d.statusText.ended,
-                // Optional: a server that does not send them reads the defaults (scheduledText, missedText).
+                // Optional: a server that does not send them reads the defaults (scheduledText, missedText, …).
                 scheduled = status?.opt("scheduled") as? String,
                 missed = status?.opt("missed") as? String,
+                outgoing = status?.opt("outgoing") as? String,
+                reconnecting = status?.opt("reconnecting") as? String,
             ),
         )
+        // The look, over today's screen in its terms: a key the server left out is today's.
+        return flat.copy(screen = CallLooks.parse(o, CallLooks.derive(flat, weights)))
     }
 
     // ── derived, for a server that sends none ──────────────────────────────
@@ -226,13 +250,16 @@ internal object Surfaces {
         composerBackground = c.surfaceRaised, composerText = c.text, composerPlaceholder = c.textMuted, composerBorder = c.border,
     )
 
+    /** Graine Classic's type weights: its call name and status in the look. Declared before what uses it. */
+    private val CLASSIC_WEIGHTS = FontWeights(400, 600, 600)
+
     /**
      * Graine Classic's call screen (design.json → the first case's `call`),
      * what a server that sends no `call` — and a cold start before any
      * session — draws: the dark screen in both schemes. The avatar and Call
      * back take the scheme's accent, so a brand on an older server keeps its colour.
      */
-    val CLASSIC_CALL = CallTokens(
+    val CLASSIC_CALL: CallTokens = withLook(CallTokens(
         background = "#0E0F11", backgroundTo = null, text = "#F5F5F4", textMuted = "#A0A5AE",
         avatar = "logo", avatarShape = "circle", avatarFill = "#318CE7", avatarText = "#FFFFFF",
         buttonFill = "#333435", buttonIcon = "#F5F5F4", buttonActiveFill = "#F5F5F4", buttonActiveIcon = "#0E0F11",
@@ -240,8 +267,11 @@ internal object Surfaces {
         acceptFill = "#16A34A", acceptIcon = WHITE, declineFill = "#DC2626", declineIcon = WHITE,
         callbackFill = "#318CE7", callbackIcon = WHITE,
         captions = true, timer = true, controls = listOf("mute", "speaker", "chat", "end"), ringtone = "system",
-        statusText = CallStatusText("Incoming call", "Connecting…", "Call ended", "Scheduled call", "Missed call"),
-    )
+        statusText = CallStatusText("Incoming call", "Connecting…", "Call ended", "Scheduled call", "Missed call", "Connecting…", "Reconnecting…"),
+    ))
+
+    /** Flat call tokens with their look written out as the server writes it for a design with no look knob. */
+    private fun withLook(c: CallTokens): CallTokens = c.copy(screen = CallLooks.derive(c.copy(screen = null), CLASSIC_WEIGHTS))
 
     /** Graine Classic's chat window, light (design.json → the first case's `light.chat`). */
     val CLASSIC_CHAT_LIGHT = ChatTokens(
@@ -259,15 +289,18 @@ internal object Surfaces {
         composerBackground = "#1F2024", composerText = "#F5F5F4", composerPlaceholder = "#A0A5AE", composerBorder = "#2C2E33",
     )
 
-    /** Classic's call screen in the scheme's accent. */
+    /** Classic's call screen in the scheme's accent (its look follows: Call back is the accent's). */
     fun defaultCall(c: ThemeColors): CallTokens =
-        CLASSIC_CALL.copy(avatarFill = c.accent, avatarText = c.onAccent, callbackFill = c.accent, callbackIcon = c.onAccent)
+        withLook(CLASSIC_CALL.copy(avatarFill = c.accent, avatarText = c.onAccent, callbackFill = c.accent, callbackIcon = c.onAccent))
 
     /** The chat window's tokens to draw: the server's, else derived. */
     fun chatOf(t: ThemeTokens): ChatTokens = t.chat ?: defaultChat(t.colors)
 
     /** The call screen's tokens to draw: the server's, else derived. */
     fun callOf(t: ThemeTokens): CallTokens = t.call ?: defaultCall(t.colors)
+
+    /** The call screen's look to draw: the server's, else today's screen in the look's terms. */
+    fun screenOf(t: ThemeTokens): CallScreenTokens = callOf(t).let { c -> c.screen ?: CallLooks.derive(c, t.font.weights) }
 
     // ── written back, as the session spelled them ──────────────────────────
 
@@ -295,7 +328,11 @@ internal object Surfaces {
         .put("captions", c.captions).put("timer", c.timer).put("controls", JSONArray(c.controls)).put("ringtone", c.ringtone)
         .put("statusText", JSONObject().put("ringing", c.statusText.ringing).put("connecting", c.statusText.connecting).put("ended", c.statusText.ended)
             .apply { c.statusText.scheduled?.let { put("scheduled", it) } }
-            .apply { c.statusText.missed?.let { put("missed", it) } })
+            .apply { c.statusText.missed?.let { put("missed", it) } }
+            .apply { c.statusText.outgoing?.let { put("outgoing", it) } }
+            .apply { c.statusText.reconnecting?.let { put("reconnecting", it) } })
+        // The look only when the server sent one: an older design writes back exactly as it was.
+        .apply { c.screen?.let { CallLooks.write(it, this) } }
 }
 
 /**
@@ -337,8 +374,20 @@ internal object CallScreen {
     /** A missed call's screen closes by itself after this, untouched. */
     const val MISSED_CLOSE_MS = 30_000L
 
-    /** The six moments, and the screen with nothing on it. */
-    enum class Moment { SCHEDULED_RING, RING, CONNECTING, ON_CALL, ENDED, MISSED }
+    /**
+     * The moments the screen shows, each with its name in the contract
+     * (`call.states`, `call.rings`): a scheduled ring, any other ring, a call
+     * the customer placed that is not through yet, an answered ring not
+     * through yet, the call, the call recovering its connection, its end, a
+     * ring nobody answered.
+     */
+    enum class Moment(val wire: String) {
+        SCHEDULED_RING("scheduled"), RING("incoming"), OUTGOING("outgoing"), CONNECTING("connecting"),
+        ON_CALL("connected"), RECONNECTING("reconnecting"), ENDED("ended"), MISSED("missed");
+
+        /** Ringing, either kind. */
+        val ringing: Boolean get() = this == SCHEDULED_RING || this == RING
+    }
 
     /** How a call that is over ended, for the status line's words. */
     enum class Ending { NORMAL, FAILED, DECLINED }
@@ -346,13 +395,20 @@ internal object CallScreen {
     /**
      * The moment the screen shows. [missed] wins (a ring nobody answered);
      * then a call that is not this screen's, or is over, is ended; then the
-     * call's own state.
+     * call's own state — connecting split by who placed it ([outgoing]), the
+     * call by whether it is recovering its connection ([reconnecting]:
+     * GraineCalls.reconnecting, from WebRTC's media watch).
      */
-    fun moment(state: GraineCallState, mine: Boolean, hosted: Boolean, missed: Boolean): Moment = when {
+    @JvmOverloads
+    fun moment(
+        state: GraineCallState, mine: Boolean, hosted: Boolean, missed: Boolean,
+        outgoing: Boolean = false, reconnecting: Boolean = false,
+    ): Moment = when {
         missed -> Moment.MISSED
         !mine || state == GraineCallState.IDLE || state == GraineCallState.ENDED -> Moment.ENDED
         state == GraineCallState.RINGING -> if (hosted) Moment.SCHEDULED_RING else Moment.RING
-        state == GraineCallState.CONNECTING -> Moment.CONNECTING
+        state == GraineCallState.CONNECTING -> if (outgoing) Moment.OUTGOING else Moment.CONNECTING
+        reconnecting -> Moment.RECONNECTING
         else -> Moment.ON_CALL
     }
 
@@ -406,7 +462,9 @@ internal object CallScreen {
         }
         Moment.SCHEDULED_RING -> look.statusText.scheduledText
         Moment.RING -> look.statusText.ringing
+        Moment.OUTGOING -> look.statusText.outgoingText
         Moment.CONNECTING -> look.statusText.connecting
+        Moment.RECONNECTING -> look.statusText.reconnectingText
         Moment.ON_CALL -> when {
             look.timer -> duration(connectedForMs ?: 0) + if (muted) " · Muted" else ""
             muted -> "Muted"

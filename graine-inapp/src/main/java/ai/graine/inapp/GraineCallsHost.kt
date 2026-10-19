@@ -504,6 +504,7 @@ object GraineCallsHost {
                 muted = c.muted,
                 speakerOn = c.speaker,
                 agentSpeaking = c.agentSpeaking,
+                reconnecting = c.reconnecting,
                 caption = c.caption?.let { CallsHostSnapshot.Caption(it.first, it.second, it.third) },
                 connectedAt = connected.epochMs(c.connectedAt, SystemClock.elapsedRealtime(), System.currentTimeMillis()),
                 agent = call?.let { c.agentFor(it.callId).name },
@@ -532,6 +533,8 @@ object GraineCallsHost {
         override fun onCallCaption(role: Role, text: String, live: Boolean) = core.engineChanged()
 
         override fun onAgentSpeaking(speaking: Boolean) = core.engineChanged()
+
+        override fun onCallReconnecting(reconnecting: Boolean) = core.engineChanged()
 
         override fun onCallControls(muted: Boolean, speaker: Boolean) = core.engineChanged()
     }

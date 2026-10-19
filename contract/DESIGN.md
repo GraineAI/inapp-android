@@ -64,7 +64,7 @@ iOS points, Android dp, Flutter logical pixels).
 | `bubbles` | `filled`, `outline`, `minimal` — see Chat window |
 | `chrome` | `none` or `window` — see Window chrome. Absent (an older server): `none` |
 | `chat` | The chat window's words and colours — see **Chat window**. Absent (an older server): draw the chat window as before |
-| `call` | The call screen's colours, buttons, words and ring — see **Call screen**. Absent: Graine Classic's (below) |
+| `call` | The call screen's colours, buttons, words and ring, and its look (version 2: backdrop, layout, rings, visualiser, caption style, type, a look per moment) — see **Call screen**. Absent: Graine Classic's (below) |
 
 ### `chat` and `call`
 
@@ -97,7 +97,8 @@ iOS points, Android dp, Flutter logical pixels).
 | `call.captions`, `call.timer` | booleans | The caption; the timer in the status |
 | `call.controls` | `mute` · `speaker` · `chat` · `end`, in order, always with `end` | The call's buttons |
 | `call.ringtone` | `system` · `graine` · `soft` | The ring |
-| `call.statusText.ringing`, `.scheduled`, `.connecting`, `.ended`, `.missed` | strings | The status line, per moment |
+| `call.statusText.ringing`, `.scheduled`, `.connecting`, `.ended`, `.missed`, `.outgoing`, `.reconnecting` | strings | The status line, per moment |
+| `call.preset`, `call.layout`, `call.backdrop`, `call.ink`, `call.avatarSize`, `call.rings`, `call.avatarRingColor`, `call.button*`, `call.actions`, `call.visualizer*`, `call.caption*`, `call.name*`, `call.status*`, `call.states` | the look (version 2) | See **Call screen** → **The look** |
 
 A value this build does not know (a newer server's) is drawn as the first one
 listed for it — `logo`, `circle`, `round`, `system`, `none`, `compact` — and an
@@ -444,14 +445,15 @@ new, so it reaches every shipped SDK as it is.
 
 ## Call screen
 
-The WhatsApp-style in-app call, in six moments: a **scheduled call** ringing
+The in-app call, in six moments (eight with **The look**'s placed call and reconnecting): a **scheduled call** ringing
 (Graine rang it at a time booked earlier — the push carries `hosted: "1"`),
 **any other incoming call** ringing, **connecting**, **on the call**, **ended**
 and **missed** (a ring nobody answered). Android draws it full screen — the
 incoming ring (over the lock screen) and the call. iOS draws it in the app once a call is answered or placed; the
 ring itself is CallKit's, the system's own screen with the call name, the app's
 CallKit icon and the ringtone (see **Ringtone**). React Native and Flutter show
-these native screens with `callScreen: "sdk"`.
+these native screens with `callScreen: "sdk"`, and Kotlin Multiplatform's
+`GraineCallScreen()` hosts them on both platforms.
 
 It reads `call` from the token set picked as everywhere (`config.scheme`, else
 the device's appearance). **Keep the last session's `design` on the device**: a
@@ -572,6 +574,284 @@ motion:
 
 **Fonts** as everywhere: the design's families (**Fonts**), the system font
 until they arrive.
+
+### The look (version 2)
+
+The screen above, in a look the brand chooses in the Garage: a ready preset,
+a backdrop (a gradient, a mesh of glows, the avatar blurred), a layout, the
+avatar's size and ring, the buttons' style, shape, size and labels, a colour
+per button, the agent's voice drawn, the caption's style, the type, and a
+look per moment. `theme.ts` resolves it on the server (`withCallLook`); an SDK
+draws the resolved tokens and never resolves a preset.
+
+**Old designs, old SDKs.** Every look knob is optional. With none set, the
+server writes today's screen out in the look's terms (below) and an SDK that
+draws the look draws exactly the screen above. The flat tokens above keep
+their names and types; a look that changes what they describe rewrites them
+as its nearest flat stand-in (`background` = the first stop, `backgroundTo`
+= the last, `buttonFill` = a glass button flattened over the bottom of the
+screen, …), so an SDK that predates the look draws something close.
+
+**An older server** sends `call` without the look's keys. Derive them, as the
+server would for a design with no look knob: `preset` "classic", `layout`
+"classic"; `backdrop` `{ type: backgroundTo ? "linear" : "solid", stops:
+[background at 0, backgroundTo at 1], angle: 180, motion: "none", intensity:
+0.5, scrim: 1 }`; `ink` "light" when `text`'s luminance is above 0.5, else
+"dark"; `avatarSize` 112; `rings` `pulse` for `incoming` and `scheduled`,
+`none` for the rest; `avatarRingColor` = `textMuted`; `buttonStyle` "solid",
+`buttonShape` "circle", `buttonSize` 64, `buttonLabels` "below"; `actions`
+from the flat colours (mute, speaker, chat and close from `buttonFill` /
+`buttonIcon` / `buttonActive*`; end, answer = accept, decline, callback their
+own, `activeFill`/`activeIcon` = `fill`/`icon`, `fillAlpha` 1, `stroke`
+null); `visualizer` "none", `visualizerColor` = `text`, sensitivity 0.5;
+`captionStyle` "plain", `captionPosition` "middle", `captionFill` black (light
+ink) or white, `captionFillAlpha` 0; `nameSize` 28, `nameWeight` =
+`font.weights.title`, `statusSize` 16, `statusWeight` = `font.weights.body`;
+`states` `{}`; `statusText.outgoing` = `statusText.connecting`,
+`.reconnecting` "Reconnecting…". A key this build does not know is ignored; a
+word it does not know is the first one listed for it below.
+
+#### The tokens
+
+| Token | Value | Drawn as |
+|---|---|---|
+| `preset` | `classic` · `aurora` · `midnight` · `glass` · `orbit` · `daylight` · `bloom` · `studio` · `minimal` · `mono` | Informational: the preset it was resolved from |
+| `layout` | `classic` · `full-bleed` · `card` · `orb` · `minimal` | **Layouts** |
+| `backdrop` | `{ type, stops, angle, motion, intensity, scrim }` | **Backdrop** |
+| `ink` | `light` · `dark` | Whether `text` is light: the status bar's icons follow it |
+| `avatarSize` | 72–160 | The avatar, before its layout's share |
+| `rings` | `{ <moment>: none · pulse · ripple · glow }` for each of the eight moments | **Avatar** |
+| `avatarRingColor` | colour | The ring |
+| `buttonStyle`, `buttonShape`, `buttonSize`, `buttonLabels` | `solid` · `glass` · `outline`; `circle` · `squircle` · `pill`; 52–80; `below` · `none` | **Buttons** |
+| `actions` | `{ answer, decline, end, callback, mute, speaker, chat, close }`, each `{ fill, fillAlpha, icon, stroke, activeFill, activeIcon }` | **Buttons** |
+| `visualizer`, `visualizerColor`, `visualizerSensitivity` | `none` · `bars` · `wave` · `orb`; colour; 0–1 | **The voice** |
+| `captionStyle`, `captionPosition`, `captionFill`, `captionFillAlpha` | `plain` · `card` · `subtitle` · `bubble`; `middle` · `bottom`; colour; 0–1 | **Caption** |
+| `nameSize`, `nameWeight`, `statusSize`, `statusWeight` | points; 100–900 | The name (the heading family) and the status line (the body family) |
+| `states` | `{ <moment>: look }` | **Moments** |
+
+A **look** is the keys that change from one moment to another: `backdrop`,
+`ink`, `text`, `textMuted`, `avatarRingColor`, `actions`, `visualizerColor`,
+`captionFill`, `captionFillAlpha`. The screen's own look is those keys on
+`call` itself.
+
+The server guarantees, on every look: `text`, `textMuted` and every icon at
+least 4.5:1 on every colour of the backdrop — each stop, the colour halfway
+between neighbouring stops (in a mesh, between any two and among all), a
+blurred avatar's scrim over the brightest (light ink) or darkest (dark ink)
+avatar it could cover, and under a glass button. A forced ink is kept and
+the backdrop gives way (a blurred avatar's scrim thickens; the stops deepen
+toward black for light ink, lighten toward white for dark ink); an automatic
+ink is whichever asks the backdrop to change least. Answer,
+Decline, End and Call back keep a white icon at 4.5:1 by taking a deeper shade
+of their colour where it allows. An SDK draws the colours as they arrive.
+
+#### Moments
+
+The screen shows one of eight moments (`callMoment()` in theme.ts;
+`design.json` → `callVectors.moments`), first match winning:
+
+- `missed` — a ring this screen drew ended unanswered;
+- `ended` — the call is over (or the screen is not this call's);
+- `scheduled` / `incoming` — ringing, a call Graine rang at a booked time
+  (`hosted: "1"`) / any other;
+- `outgoing` / `connecting` — not through yet, a call the customer placed /
+  an answered ring;
+- `reconnecting` / `connected` — on the call, recovering its connection /
+  otherwise. A WebRTC call is recovering from its connection's drop (ICE
+  `disconnected` or `failed`, or its restart starting) after media was up
+  until it is connected again; the SDKs report it (Android
+  `GraineCalls.reconnecting`, iOS `GraineCalls.isReconnecting`, the calls
+  host snapshot's `reconnecting`). A call that never had media never is. The
+  WebSocket path opens one socket per call and a lost one ends the call, so it
+  never shows this moment.
+
+**The look of a moment** is `call.states[moment]` when present, complete,
+else the screen's own (`callLook()`). The server already writes a scheduled
+ring's look from a ring's and a placed call's from connecting's where they
+have none of their own, so an SDK only ever looks up the moment itself. When
+the moment changes, the backdrop and the colours fade from one look to the
+other over `motion.durationMs` (at once with no motion).
+
+**Status words** as in **Top to bottom** → 3, with `outgoing` →
+`statusText.outgoing` and `reconnecting` → `statusText.reconnecting`
+(`callStatusWords()`; `design.json` → `callVectors.status`). Drawn at
+`statusSize`, the body family at `statusWeight`.
+
+#### Layouts
+
+Measured inside the safe area, 24 in from each side (`CALL_LAYOUTS`;
+`design.json` → `callScreen.layouts`). The buttons are placed the same in
+every layout (**Top to bottom** → 5).
+
+| Layout | Align | Top | Avatar | Name | Then |
+|---|---|---|---|---|---|
+| `classic` | centred | 72 | `avatarSize` | 20 below the avatar, 28, one line | status 6 below; the voice; a middle caption |
+| `full-bleed` | leading edge | 32 | half of `avatarSize` | 24 below, 40, up to two lines | as classic, everything against the leading edge |
+| `card` | centred | 48 | 80% of `avatarSize` | 16 below, 24, one line | as classic, on one card: padding 24, corners 28, fill `captionFill` at `max(captionFillAlpha, 0.16)` |
+| `orb` | centred | 40 | 75% of `avatarSize`, at the centre of an orb `avatarSize` × 2 across | first, 24, one line | status 6 below; the voice; then the orb, centred in the space left above the buttons; a middle caption 24 under it |
+| `minimal` | centred | 120 | none (and no ring) | 34, up to two lines | as classic |
+
+`nameSize` replaces the layout's name size when the brand set one; the name
+is drawn in the heading family at `nameWeight` with `letterSpacing.title`.
+
+#### Backdrop
+
+The screen's fill, edge to edge (`callBackdropFrame()`; `design.json` →
+`callVectors.frames`). Stops are `{ color, at }`, `at` 0–1, in order.
+
+- `solid` — the first stop.
+- `linear` — the gradient along `callGradientLine(angle, w, h)`: through the
+  centre, angle read as CSS reads it (0 bottom to top, 90 left to right, 180
+  top to bottom), long enough that the end stops reach the corners. Android's
+  `LinearGradient` from its two points, iOS's gradient points divided by the
+  screen's size, CSS's `linear-gradient(<angle>deg, …)`: the same ramp.
+- `radial` — a circle centred at 50% across, 28% down, radius `(0.35 + 0.4 ×
+  intensity) ×` the screen's diagonal; the last stop beyond it.
+- `mesh` — glows at fixed places (shares of the screen: 0.15/0.12,
+  0.85/0.2, 0.8/0.85, 0.18/0.78, and 0.5/0.48 for a fifth stop) in the stops'
+  colours in turn (two stops: corner to corner). A pixel at (u, v) is every
+  glow's colour weighted by `max(0, 0.9 − distance)⁴` (distance in shares of
+  the screen) and averaged (`callMeshColor()`). Fill a bitmap of at least 32
+  × 64 at the pixels' centres and draw it scaled up smoothly.
+- `blurred-avatar` — the stops as a linear gradient at `angle`; over it the
+  avatar as drawn in its slot (its plate or fill, its mark) at 4 ×
+  `avatarSize`, centred on the avatar (in the orb and minimal layouts, 42% of
+  the way down the screen, centred across), blurred by 48 points; over that the
+  stops again at `scrim` opacity. Without a blur (Android before API 31), the
+  avatar drawn into a bitmap 16 across and scaled up smoothly; before the
+  avatar's image arrives, the stops alone.
+
+**Motion** (`motion`), from the moment the screen shows, `t` in ms; at rest
+with `none`:
+
+- `drift` — a linear gradient's angle sways by `(6 + 18 × intensity) ×
+  sin(2πt / 14000)` degrees; a radial's centre circles at `(0.03 + 0.06 ×
+  intensity) ×` the width over 16 s; each mesh glow circles at `0.05 + 0.1 ×
+  intensity` (shares) over 17, 19, 23, 29 and 31 s, glow *i* starting at
+  phase `i × π / 2.5`; the blurred avatar circles at `(0.02 + 0.05 ×
+  intensity) ×` the width over 18 s.
+- `breathe` — `s = 1 + (0.05 + 0.12 × intensity) × sin(2πt / 7000)`: a
+  linear gradient's line scaled by `s` about the centre, a radial's radius
+  and the mesh's glows' distances from the centre likewise; the blurred
+  avatar scaled by `1 + (0.04 + 0.08 × intensity) × sin(2πt / 7000)`.
+- **Battery.** Nothing moves while the screen is not visible, when
+  `motion.durationMs` is 0, or when the OS asks for reduced motion. On a
+  connected call nobody has touched for 10 s, the backdrop comes to rest over
+  600 ms; a touch starts it again from rest. A still backdrop is drawn once.
+
+#### Avatar
+
+`avatarSize` × the layout's share, in `avatarShape`, drawn as **Top to
+bottom** → 1. While the agent's line is arriving on a connected call it
+scales to 1.06 and back, as before.
+
+**Rings** — `rings[moment]` in `avatarRingColor` (the moment's look's), behind
+the avatar, in its shape. With no motion, none is drawn.
+
+- `pulse` — a ring 2 wide grows from the avatar's edge to 1.35 × its size
+  while fading from 60% to nothing, over 1600 ms, again and again (today's).
+- `ripple` — three such rings, 1.5 wide, to 1.6 × while fading from 50%, over
+  2400 ms, each starting a third of it after the one before.
+- `glow` — a soft disc behind the avatar, 1.45 × its size across: the colour
+  at 70% opacity out to 62% of the disc's radius, fading to nothing at its
+  edge; breathing from half strength to full and 1 to 1.08 × over 2000 ms and
+  back. On a connected
+  call it follows the voice instead: strength `0.5 + 0.5 × level`, size `1 +
+  0.08 × level`.
+
+On a connected call a `pulse` or a `ripple` only runs while the agent's voice
+is heard; every other moment wearing one runs it throughout.
+
+#### The voice
+
+On a connected call, `visualizer` in `visualizerColor` (`CALL_VISUALIZER`):
+
+- `bars` — five bars 4 wide, 4 apart, fully round, centred in a strip 28 high
+  16 under the status line (against the leading edge in `full-bleed`). Each
+  stands between 4 and 28 high by `level ×` 0.5, 0.8, 1, 0.8, 0.5, and each
+  wobbles between 35% and 100% of that over 600 ms, bar *i* starting *i* ×
+  110 ms late, while `level` is above 0. At silence, 4 high and still.
+- `wave` — a line 160 wide, 2 thick, round caps, in the same strip: `1.5`
+  cycles of a sine across it, amplitude `12 × level ×` `sin(π x / 160)` (it
+  tapers to its ends), moving left one cycle every 900 ms. At silence a flat
+  line at 40% opacity, still.
+- `orb` — two soft discs centred on the avatar, behind it and its ring,
+  `(1.6 + 0.5 × level) ×` the avatar as drawn (its layout's share of
+  `avatarSize`) across, or `(2 + 0.4 × level) × avatarSize` in the orb
+  layout; the colour at 50% at the centre, 35% at 55% of the radius,
+  nothing at the edge; the inner disc 72% of the outer. At silence, at rest
+  and still. The orb layout draws its orb in every moment, still unless
+  connected.
+
+**The level** (0–1) is the agent's voice as the call hears it, on every
+transport: over WebRTC the inbound audio level (five readings a second); over
+the WebSocket the RMS of each 100 ms of the agent audio the SDK decodes, taken
+when the speaker reaches it (at most ten a second, 0 once it has played out)
+— Android `GraineCalls.agentLevel`, iOS `GraineCalls.agentLevel`. It is drawn
+as `callVoiceLevel(level, visualizerSensitivity)` — the level in dB between a
+floor (−30 dB at sensitivity 0, −60 at 1) and −6 dB. Until a call's first
+level arrives: `callSpeakingLevel(t)` while the agent speaks, 0 otherwise. The drawn level follows it up over 60 ms and down over 240 ms
+(exponential). With no motion the voice is drawn at rest.
+
+#### Caption
+
+On a connected call with `captions`, the latest line (as before, the agent's
+in `text`, the customer's in `textMuted`, 75% while arriving):
+
+- `plain` — as **Top to bottom** → 4.
+- `card` — 16, at most four lines, on a rounded rectangle (corners 20,
+  padding 16 × 12) in `captionFill` at `captionFillAlpha`, the width of the
+  layout.
+- `subtitle` — 15, centred, at most three lines, on a band hugging the words
+  (corners 10, padding 10 × 6) in `captionFill` at `captionFillAlpha`.
+- `bubble` — 15, at most four lines, on a bubble at most 85% wide (corners
+  18, the speaker's lower corner 6): the agent's at the leading edge, the
+  customer's at the trailing edge.
+
+`captionPosition` `middle` puts it where **Top to bottom** → 4 does (under
+the voice when there is one); `bottom`, 24 above the top of the buttons' row.
+The caption's fill is the ink's opposite (black under light ink), so it only
+ever adds contrast.
+
+#### Buttons
+
+Sizes from `callButtonSizes()`: the call's buttons `buttonSize`, the ring's
+and the missed call's `round(buttonSize × 9/8)`, icons `round(buttonSize ×
+30/64)` (64, 72 and 30 by default). The box of each from `callButtonFrame()`
+(`design.json` → `callVectors.buttons`):
+
+- `circle` — round, as before;
+- `squircle` — continuous corners at 30% of the size (iOS `.continuous`,
+  elsewhere a 30% radius);
+- `pill` — `min(share − 8, 1.5 × size)` wide, at least `size`, round ends; a
+  toggle that is on (muted, speaker on) draws its corners at 30% instead,
+  changing shape over `motion.durationMs`;
+- End with `endShape` `pill` is `max(size, share − 8)` wide in every shape,
+  as before.
+
+Each button's colours are `actions[<button>]` in the moment's look:
+
+- `fillAlpha` 1 — filled with `fill`, the icon in `icon`.
+- `fillAlpha` between 0 and 1 — glass: `fill` at that opacity over the
+  backdrop, which is blurred behind the button by 20 where the platform can
+  (Android API 31+ `RenderEffect` on a copy of the backdrop clipped to the
+  button; iOS a material; elsewhere the translucent fill alone).
+- `fillAlpha` 0 — an outline: 1.5 wide in `stroke`, nothing inside.
+- Mute and speaker while on: `activeFill` (opaque), the icon in `activeIcon`.
+
+Answer, Decline, End and Call back are always filled. Labels per
+`buttonLabels`: `below` as before; `none` draws no label — the screen reader
+still reads it.
+
+#### What every SDK tests
+
+`design.json` → `callScreen` holds the numbers (`layouts`, `screen`,
+`rings`, `visualizer`, `motion`, `limits`, `moments`, the presets' ids and
+names, the recommended one), and `callVectors` the answers: gradient lines,
+backdrop frames at times, mesh colours, button boxes and sizes, voice levels,
+the speaking level, moments, status words, and each moment's look on a design
+with every knob turned. Each SDK's tests parse every case's look and agree
+with every vector.
 
 ## Icons
 

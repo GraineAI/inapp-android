@@ -1,7 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The live call's test APK only: an activity in front, as an app's own screen is when it calls the agent. -->
+<!-- The test APK only: an activity in front for the live call, as an app's own screen is when it calls the agent; the call screen's gallery. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
         <activity android:name="ai.graine.inapp.RtcLiveActivity" android:exported="false" />
+        <!-- The call screen in any design and moment, for screenshots (CallScreenGalleryActivity.kt). -->
+        <activity
+            android:name="ai.graine.inapp.CallScreenGalleryActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
     </application>
 </manifest>

@@ -129,6 +129,18 @@ internal interface CallSessionEvents {
     fun onEnded(reason: GraineCallOutcome.EndReason, error: String?) {}
     fun onCaption(role: Role, text: String, live: Boolean) {}
     fun onAgentSpeaking(speaking: Boolean) {}
+    /**
+     * The far side's audio as measured: its level now (0–1), and on WebRTC its
+     * energy so far and over how long. The WebSocket reports the level of the
+     * agent's audio it decoded, as it is heard.
+     */
+    fun onAgentAudio(level: Double?, energy: Double?, seconds: Double?) {}
+    /**
+     * The call's media path is being recovered after the call was up (true),
+     * or is back (false). WebRTC only: the WebSocket holds one socket for the
+     * whole call and never reconnects inside it.
+     */
+    fun onReconnecting(reconnecting: Boolean) {}
 }
 
 /** Everything outside the session, injected. */
@@ -163,6 +175,12 @@ internal class SocketRows(val requested: String?, val fallbackReason: String?, v
  *   the agent's audio down through the decoder and the player, marks acked
  *   when heard, actions answered within 6 s, and stop + close to hang up.
  *   Nothing arriving for two ping periods ends the call as dropped.
+ *
+ * One socket carries the whole call: a close or a failure once it is open
+ * ends the call, and nothing reconnects inside it — so the call screen's
+ * reconnecting moment is WebRTC's alone. The agent's voice level is measured
+ * here, from the audio decoded for the player (HeardLevels), and reported as
+ * it is heard.
  *
  * With [rows], the call says how it connected (CallAnalytics): the transport
  * and where the tap's wait went once the conversation starts — with whatever a
@@ -211,6 +229,11 @@ internal class VoiceCallSession(
     private var audibleUntil = Long.MIN_VALUE / 4
     private var speaking = false
     private var speakingTimer: (() -> Unit)? = null
+    /** The agent's voice level as it will be heard — each window of decoded audio, due when it plays. */
+    private val heard = HeardLevels()
+    private var levelTimer: (() -> Unit)? = null
+    /** The level last reported; 0 is reported once when the voice has played out. */
+    private var levelShown = 0.0
     /** One barge_in per agent turn. */
     private var bargedIn = false
     private var muted = false
@@ -279,7 +302,10 @@ internal class VoiceCallSession(
     fun setOnHold(value: Boolean) = scheduler.post {
         if (onHold == value) return@post
         onHold = value
-        if (value) runCatching { audio.clear() }
+        if (value) {
+            runCatching { audio.clear() }
+            levelsCleared()
+        }
     }
 
     /** A newer screen while the call is up. */
@@ -507,6 +533,9 @@ internal class VoiceCallSession(
         pingTimer?.invoke(); pingTimer = null
         livenessTimer?.invoke(); livenessTimer = null
         speakingTimer?.invoke(); speakingTimer = null
+        levelTimer?.invoke(); levelTimer = null
+        heard.clear()
+        levelShown = 0.0
         runCatching { audio.clear() }
         releaseAudio()
         if (speaking) { speaking = false; events.onAgentSpeaking(false) }
@@ -538,6 +567,7 @@ internal class VoiceCallSession(
             Inbound.Clear -> {
                 // The customer talked over the agent: what is queued must not play out behind them.
                 audio.clear()
+                levelsCleared()
                 speakingTimer?.invoke(); speakingTimer = null
                 setSpeaking(false)
                 endCaptionTurn()
@@ -553,13 +583,20 @@ internal class VoiceCallSession(
         val decoded = AgentAudio.decode(bytes, f.format, f.sampleRate, format) ?: return
         decoded.latch?.let { format = it }
         val zero = AgentAudio.isAllZero(bytes)
+        // It starts to be heard when what the player already holds has played.
+        val startsAt = scheduler.now() + Math.round(audio.bufferedSeconds() * 1000)
         if (decoded.latch == null && zero) {
             // Digital silence decides nothing, and its mu-law reading is a full-scale DC step
             // lasting six times the frame's real length. In PCM it is what it is: silence.
-            audio.play(ShortArray(bytes.size / 2), f.sampleRate?.takeIf { it > 0 } ?: AgentAudio.PCM_RATE)
+            val rate = f.sampleRate?.takeIf { it > 0 } ?: AgentAudio.PCM_RATE
+            val silence = ShortArray(bytes.size / 2)
+            audio.play(silence, rate)
+            heard.add(silence, rate, startsAt)
         } else {
             audio.play(decoded.pcm16, decoded.sampleRate)
+            heard.add(decoded.pcm16, decoded.sampleRate, startsAt)
         }
+        levelsDue()
         // Its voice is audio that is not digital silence, whatever the frame declared itself to be.
         voiceRow(zero, decoded.kind, decoded.sampleRate)
         // Queued: the agent stays audible until what the player now holds has been heard.
@@ -598,6 +635,37 @@ internal class VoiceCallSession(
         if (speaking == value) return
         speaking = value
         events.onAgentSpeaking(value)
+    }
+
+    /**
+     * THE VOICE LEVEL, AS IT IS HEARD: at most every HeardLevels.WINDOW_MS
+     * while any is queued, the level of the window playing now — its silences
+     * too, so a pause inside the voice reads 0 rather than a level gone stale;
+     * once the voice has played out, 0, and the ticks stop — a quiet call
+     * schedules nothing.
+     */
+    private fun levelsDue() {
+        if (levelTimer == null) levelTimer = scheduler.schedule(0) { levelTick() }
+    }
+
+    private fun levelTick() {
+        levelTimer = null
+        if (phase != Phase.OPEN) return
+        val due = heard.due(scheduler.now())
+        if (due != null) reportLevel(due)
+        else if (heard.isEmpty && levelShown > 0) reportLevel(0.0)
+        if (!heard.isEmpty || levelShown > 0) levelTimer = scheduler.schedule(HeardLevels.WINDOW_MS) { levelTick() }
+    }
+
+    /** What was queued will not play (a barge-in, a hold): its levels go, and the voice is silent now. */
+    private fun levelsCleared() {
+        heard.clear()
+        if (levelShown > 0) reportLevel(0.0)
+    }
+
+    private fun reportLevel(level: Double) {
+        levelShown = level
+        events.onAgentAudio(level, null, null)
     }
 
     /** Phrases joined with their spaces; `<end_of_stream>` closes the line. */
@@ -696,6 +764,60 @@ internal data class CallAgentIds(val agentId: String, val webcallAgentId: String
             val host = k.wsHost?.takeIf { it.isNotBlank() } ?: return null
             val agent = k.agentId?.takeIf { it.isNotBlank() } ?: k.webcallAgentId?.takeIf { it.isNotBlank() } ?: return null
             return CallAgentIds(agent, k.webcallAgentId, host)
+        }
+    }
+}
+
+/**
+ * THE AGENT'S VOICE LEVEL AS IT IS HEARD, on the WebSocket: the RMS (0–1 of
+ * full scale) of each [WINDOW_MS] of the decoded audio, due when the player
+ * reaches it. The server sends a reply far faster than real time, so a level
+ * read on arrival would move seconds ahead of the voice and stop before it
+ * does. Pure: the session gives it the audio and the clock.
+ */
+internal class HeardLevels {
+    /** (due at, level), in the order they play. */
+    private val queue = ArrayDeque<Pair<Long, Double>>()
+
+    /** [pcm] at [sampleRate], heard from [startsAt] on: one level per window, each due when it starts to play. */
+    fun add(pcm: ShortArray, sampleRate: Int, startsAt: Long) {
+        if (pcm.isEmpty() || sampleRate <= 0) return
+        val window = Math.max(1, (sampleRate * WINDOW_MS / 1000).toInt())
+        var from = 0
+        var at = startsAt.toDouble()
+        while (from < pcm.size) {
+            val to = Math.min(pcm.size, from + window)
+            queue.addLast(Math.round(at) to rms(pcm, from, to))
+            at += (to - from) * 1000.0 / sampleRate
+            from = to
+        }
+    }
+
+    /** Takes every level due by [now] and returns the latest of them; null when none is due yet. */
+    fun due(now: Long): Double? {
+        var latest: Double? = null
+        while (queue.isNotEmpty() && queue.first().first <= now) latest = queue.removeFirst().second
+        return latest
+    }
+
+    val isEmpty: Boolean get() = queue.isEmpty()
+
+    fun clear() = queue.clear()
+
+    companion object {
+        /** One level per this much audio, and at most one report per this long: about ten a second. */
+        const val WINDOW_MS = 100L
+
+        /** The root mean square of [pcm] from [from] until [to], as a share of full scale. */
+        @JvmStatic
+        fun rms(pcm: ShortArray, from: Int = 0, to: Int = pcm.size): Double {
+            if (to <= from) return 0.0
+            var sum = 0.0
+            for (k in from until to) {
+                val v = pcm[k].toDouble()
+                sum += v * v
+            }
+            return Math.min(1.0, Math.sqrt(sum / (to - from)) / 32768.0)
         }
     }
 }

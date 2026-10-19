@@ -106,6 +106,20 @@ interface GraineCallListener {
     fun onAgentSpeaking(speaking: Boolean) {}
     /** Muted or speaker changed — from this app, or from the call screen. */
     fun onCallControls(muted: Boolean, speaker: Boolean) {}
+    /**
+     * The agent's voice level, 0–1 (linear), as it is heard: about five times
+     * a second on a call carried over WebRTC, about ten times a second on the
+     * WebSocket while the agent's audio plays (0 once it has played out) —
+     * what the call screen's visualiser follows.
+     */
+    fun onAgentLevel(level: Float) {}
+    /**
+     * The call's connection dropped after the call was up and is being
+     * recovered (true), or it is back (false). On calls carried over WebRTC;
+     * false is told again if the call ends while recovering. The SDK's call
+     * screen shows its reconnecting moment meanwhile.
+     */
+    fun onCallReconnecting(reconnecting: Boolean) {}
 }
 
 /** How native calls look and ring. Pass to GraineCalls.configure once, in Application.onCreate. */

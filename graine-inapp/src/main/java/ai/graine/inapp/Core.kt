@@ -1993,6 +1993,7 @@ object Design {
             agentBubbleText = hex(c, "agentBubbleText", dc.agentBubbleText),
             scrim = hex(c, "scrim", dc.scrim),
         )
+        val fontWeights = FontWeights(weight("body", d.font.weights.body), weight("strong", d.font.weights.strong), weight("title", d.font.weights.title))
         return ThemeTokens(
             v = Js.finite(o?.opt("v"))?.toInt() ?: 1,
             preset = text(o, "preset", d.preset),
@@ -2007,7 +2008,7 @@ object Design {
                     title = num(scale, "title", d.font.scale.title, 6.0, 96.0),
                     display = num(scale, "display", d.font.scale.display, 6.0, 128.0),
                 ),
-                weights = FontWeights(weight("body", d.font.weights.body), weight("strong", d.font.weights.strong), weight("title", d.font.weights.title)),
+                weights = fontWeights,
                 letterSpacing = FontPair(
                     num(spacingO, "body", d.font.letterSpacing.body, -0.5, 1.0),
                     num(spacingO, "title", d.font.letterSpacing.title, -0.5, 1.0),
@@ -2060,7 +2061,7 @@ object Design {
             // Absent (an older server) or a word this build does not know: a plain surface.
             chrome = word(o, "chrome", CHROMES, d.chrome),
             chat = Surfaces.chat(o?.opt("chat"), colors),
-            call = Surfaces.call(o?.opt("call"), colors),
+            call = Surfaces.call(o?.opt("call"), colors, fontWeights),
         )
     }
 

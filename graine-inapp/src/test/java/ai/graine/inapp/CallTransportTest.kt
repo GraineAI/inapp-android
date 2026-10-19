@@ -75,6 +75,7 @@ class CallTransportTest {
         override fun onOpen() { events += "open" }
         override fun onFailed(error: String) { events += "failed: $error" }
         override fun onEnded(reason: GraineCallOutcome.EndReason, error: String?) { events += "ended ${reason.wire}${error?.let { ": $it" } ?: ""}" }
+        override fun onReconnecting(reconnecting: Boolean) { events += "reconnecting $reconnecting" }
     }
 
     /** Plans a WebRTC call and dials a fresh RtcCallSession for it. */
@@ -120,6 +121,19 @@ class CallTransportTest {
         assertTrue("no ticket: the WebSocket never ran", tickets.isEmpty())
         s.hangUp(); pump()
         assertEquals(1, sipSockets.single().requests("BYE").size)
+    }
+
+    @Test fun aWebRtcCallRecoveringItsPathSaysSoAndSaysWhenItIsBack() {
+        plan()
+        val s = CallTransportSession(config, deps, sessionEvents)
+        s.start(); pump()
+        peers.single().candidate("srflx"); pump()
+        peers.single().ice("connected"); pump()
+        peers.single().ice("disconnected"); pump()
+        assertEquals(listOf("open", "reconnecting true"), events)
+        peers.single().ice("connected"); pump()
+        assertEquals(listOf("open", "reconnecting true", "reconnecting false"), events)
+        s.hangUp(); pump()
     }
 
     @Test fun aFailureBeforeMediaContinuesOnTheWebSocketInsideTheSameCall() {

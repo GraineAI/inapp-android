@@ -85,11 +85,18 @@ class CallSessionTest {
         val log = mutableListOf<String>()
         val captions = mutableListOf<Triple<Role, String, Boolean>>()
         val speaking = mutableListOf<Boolean>()
+        val levels = mutableListOf<Double>()
+        val reconnects = mutableListOf<Boolean>()
         override fun onOpen() { log += "open" }
         override fun onFailed(error: String) { log += "failed:$error" }
         override fun onEnded(reason: GraineCallOutcome.EndReason, error: String?) { log += "ended:${reason.wire}:${error ?: ""}" }
         override fun onCaption(role: Role, text: String, live: Boolean) { captions += Triple(role, text, live) }
         override fun onAgentSpeaking(speaking: Boolean) { this.speaking += speaking }
+        override fun onAgentAudio(level: Double?, energy: Double?, seconds: Double?) {
+            assertNull("the socket measures no energy", energy)
+            levels += level!!
+        }
+        override fun onReconnecting(reconnecting: Boolean) { reconnects += reconnecting }
     }
 
     private val audio = FakeAudio()
@@ -643,5 +650,109 @@ class CallSessionTest {
         audio.onFailed!!(); sched.drain()
         assertEquals(listOf("open", "ended:remote:"), events.log)
         assertFalse("no stop down a line the agent closed", socket.sent.any { it.contains("client_hangup") })
+    }
+
+    // ── the agent's voice level, as it is heard (HeardLevels) ───────────────
+
+    /** The RMS of [speech]'s 9000-amplitude sine at 140 Hz — 14 whole cycles in every 100 ms window. */
+    private val speechLevel = 9000 / Math.sqrt(2.0) / 32768
+
+    @Test fun theVoiceLevelIsTheRmsOfTheDecodedAudioAsItIsHeard() {
+        open()
+        audio.buffered = 0.0
+        agentAudio()
+        sched.advance(0)
+        assertEquals(1, events.levels.size)
+        assertEquals(speechLevel, events.levels[0], 1e-4)
+        sched.advance(100)
+        assertEquals(speechLevel, events.levels[1], 1e-4)
+        sched.advance(100)
+        assertEquals("played out: silent once", listOf(speechLevel, speechLevel, 0.0).map { Math.round(it * 1e4) }, events.levels.map { Math.round(it * 1e4) })
+        sched.advance(5_000)
+        assertEquals("a quiet call reports nothing more", 3, events.levels.size)
+    }
+
+    @Test fun theLevelFollowsThePlayerNotTheArrival() {
+        open()
+        // The server sends faster than real time: 1.5 s is still to play before this audio.
+        audio.buffered = 1.5
+        agentAudio()
+        sched.advance(1_499)
+        assertTrue("nothing before it is heard", events.levels.isEmpty())
+        sched.advance(1)
+        assertEquals(speechLevel, events.levels.single(), 1e-4)
+    }
+
+    @Test fun silenceIsZeroWhileItPlaysAndAQuietCallSchedulesNothing() {
+        open()
+        audio.buffered = 0.0
+        // 200 ms of digital silence: two windows, each heard as 0.
+        agentAudio(B64.encode(ByteArray(9600)))
+        sched.advance(0)
+        sched.advance(100)
+        assertEquals(listOf(0.0, 0.0), events.levels)
+        sched.advance(5_000)
+        assertEquals("played out, nothing more", 2, events.levels.size)
+        assertEquals(0.0, HeardLevels.rms(ShortArray(2400)), 0.0)
+    }
+
+    @Test fun aPauseInsideTheVoiceIsZeroWhileItPlays() {
+        open()
+        // 200 ms of voice, 800 ms of silence, 200 ms of voice, all queued at once.
+        audio.buffered = 0.0; agentAudio()
+        audio.buffered = 0.2; agentAudio(B64.encode(ByteArray(38_400)))
+        audio.buffered = 1.0; agentAudio()
+        sched.advance(0)
+        repeat(12) { sched.advance(100) }
+        val heard = events.levels.map { if (it > 0) "voice" else "0" }
+        assertEquals("a level every window, the pause's included: none goes stale", listOf("voice", "voice") + List(8) { "0" } + listOf("voice", "voice", "0"), heard)
+        sched.advance(5_000)
+        assertEquals(13, events.levels.size)
+    }
+
+    @Test fun atMostTenLevelsASecond() {
+        open()
+        // Two seconds of speech queued at once.
+        for (k in 0 until 10) { audio.buffered = k * 0.2; agentAudio() }
+        sched.advance(1_000)
+        assertTrue("${events.levels.size} reports in a second", events.levels.size <= 11)
+        assertTrue(events.levels.size >= 9)
+    }
+
+    @Test fun aBargeInOrAHoldSilencesTheVoiceAtOnce() {
+        val call = open()
+        audio.buffered = 0.0
+        agentAudio()
+        sched.advance(0)
+        frame(JSONObject().put("type", "clear"))
+        assertEquals(0.0, events.levels.last(), 0.0)
+        val n = events.levels.size
+        sched.advance(2_000)
+        assertEquals("what was queued will not play", n, events.levels.size)
+        agentAudio()
+        sched.advance(0)
+        assertEquals(speechLevel, events.levels.last(), 1e-4)
+        call.setOnHold(true); sched.drain()
+        assertEquals("on hold nothing plays", 0.0, events.levels.last(), 0.0)
+    }
+
+    @Test fun theLevelsOfAWindowAreItsRootMeanSquare() {
+        val square = ShortArray(2400) { if (it % 2 == 0) 16384 else -16384 }
+        assertEquals(0.5, HeardLevels.rms(square), 1e-9)
+        val h = HeardLevels()
+        h.add(square + ShortArray(2400), 24_000, startsAt = 1_000)
+        assertNull("not yet heard", h.due(999))
+        assertEquals(0.5, h.due(1_000)!!, 1e-9)
+        assertEquals("the silent second window", 0.0, h.due(1_100)!!, 0.0)
+        assertTrue(h.isEmpty)
+        h.add(ShortArray(0), 24_000, 0)
+        assertTrue("nothing to measure", h.isEmpty)
+    }
+
+    @Test fun theSocketNeverReconnectsInsideACall() {
+        open()
+        listener!!.onFailure(java.io.IOException("connection reset")); sched.drain()
+        assertEquals("ended:failed:connection reset", events.log.last())
+        assertTrue("a broken socket ends the call: nothing reconnects", events.reconnects.isEmpty())
     }
 }

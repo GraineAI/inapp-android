@@ -120,6 +120,22 @@ class GraineCalls internal constructor(
     @Volatile var agentSpeaking = false
         private set
 
+    /**
+     * The agent's voice level, 0–1, as it is heard — on WebRTC from the
+     * received audio, on the WebSocket from the audio decoded for the player;
+     * 0 with no call. Changes reach [GraineCallListener.onAgentLevel].
+     */
+    @Volatile var agentLevel = 0f
+        private set
+
+    /**
+     * The call's connection dropped after the call was up and is being
+     * recovered (a call carried over WebRTC); false again once its audio is
+     * back, or when the call ends. Changes reach [GraineCallListener.onCallReconnecting].
+     */
+    @Volatile var reconnecting = false
+        private set
+
     /** The last line on the call, for a screen that opens mid-call: role, words, still arriving. */
     @Volatile var caption: Triple<Role, String, Boolean>? = null
         private set
@@ -746,6 +762,19 @@ class GraineCalls internal constructor(
                 agentSpeaking = speaking
                 report { it.onAgentSpeaking(speaking) }
             }
+            private val meter = AgentLevelMeter()
+            override fun onAgentAudio(level: Double?, energy: Double?, seconds: Double?) {
+                val v = meter.read(level, energy, seconds) ?: return
+                onMain {
+                    if (machine.call?.callId != c.callId) return@onMain
+                    agentLevel = v
+                    report { it.onAgentLevel(v) }
+                }
+            }
+            override fun onReconnecting(reconnecting: Boolean) = onMain {
+                if (machine.call?.callId != c.callId) return@onMain
+                setReconnecting(reconnecting)
+            }
         }
         val sess = CallTransportSession(
             CallSessionConfig(
@@ -818,8 +847,18 @@ class GraineCalls internal constructor(
         muted = false
         speaker = false
         agentSpeaking = false
+        agentLevel = 0f
+        // A call that ends while recovering is no longer recovering: said once, so no screen stays on the moment.
+        setReconnecting(false)
         caption = null
         connectedAt = 0L
+    }
+
+    /** Recovering the call's connection, or not: set on the main thread, told only when it changes. */
+    private fun setReconnecting(value: Boolean) {
+        if (reconnecting == value) return
+        reconnecting = value
+        report { it.onCallReconnecting(value) }
     }
 
     private fun onResumed(a: Activity) {

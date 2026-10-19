@@ -3,6 +3,7 @@
 package ai.graine.inapp
 
 import android.content.Context
+import android.os.Build
 
 /*
  * THE PLUG BETWEEN THE SDK AND ITS WEBRTC MODULE.
@@ -32,9 +33,10 @@ annotation class GraineRtcInternal
 interface GraineRtcMedia {
     /**
      * A peer connection for one call, with the microphone and the speaker
-     * behind it, on [iceServers]. Throws when the device cannot run it (its
-     * native library did not load) — the call then goes over the WebSocket.
-     * Never on the main thread.
+     * behind it, on [iceServers], its candidate pool gathering at once — the
+     * microphone itself joins with the first offer ([GraineRtcPeer.createOffer]).
+     * Throws when the device cannot run it (its native library did not load) —
+     * the call then goes over the WebSocket. Never on the main thread.
      */
     fun createPeer(context: Context, iceServers: List<GraineRtcIceServer>, listener: GraineRtcPeer.Listener): GraineRtcPeer
 }
@@ -62,7 +64,13 @@ interface GraineRtcPeer {
         fun onAudioError(message: String)
     }
 
-    /** Create an offer (an ICE restart when [iceRestart]) and set it as the local description: gathering starts. */
+    /**
+     * Create an offer (an ICE restart when [iceRestart]) and set it as the
+     * local description: gathering starts, the candidate pool's first. The
+     * SDK makes the first one at the dial, never before: the microphone's
+     * track joins the connection with it, and until then nothing is set up to
+     * send and nothing records.
+     */
     fun createOffer(iceRestart: Boolean, done: (error: String?) -> Unit)
 
     /** The local description as it stands — every candidate gathered so far inside it — or null before there is one. */
@@ -89,7 +97,7 @@ interface GraineRtcPeer {
 
 /** What the peer connection measured about the call's audio. */
 @GraineRtcInternal
-class GraineRtcStats(
+class GraineRtcStats @JvmOverloads constructor(
     /** Received from the far side. */
     val bytesReceived: Long,
     val packetsReceived: Long,
@@ -106,6 +114,8 @@ class GraineRtcStats(
     val codec: String?,
     /** host, srflx, prflx or relay: how this side reaches the far side. */
     val localCandidateType: String?,
+    /** The codec's clock rate — 8000, 48000 — when the report says. */
+    val clockRate: Int? = null,
 )
 
 /** Finds the WebRTC module, once. */
@@ -118,6 +128,15 @@ internal object RtcModule {
 
     /** For the tests: a module that is not one. */
     @Volatile var override: GraineRtcMedia? = null
+
+    /** For the tests, whose Build.VERSION reads 0: whether this phone runs the module. */
+    @Volatile var runsHereOverride: Boolean? = null
+
+    /** Whether this phone runs the module: the WebRTC library's floor is the SDK's own (Android 7), so every phone the SDK installs on. */
+    fun runsHere(): Boolean = runsHereOverride ?: (Build.VERSION.SDK_INT >= CallTransportChoice.MIN_SDK)
+
+    /** Whether the app added the module — for code that only needs to know. Never throws. */
+    fun added(): Boolean = media() != null
 
     /** The module, or null when the app did not add it. Cheap after the first call; never throws. */
     fun media(): GraineRtcMedia? {

@@ -8,8 +8,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Person
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.drawable.Icon
 import android.media.AudioAttributes
@@ -140,14 +142,30 @@ class GraineCalls internal constructor(
     /** The agent the call in progress is with — for an app's own call screen to draw in its design. Null with no call. */
     val callAgent: GraineInApp? get() = call?.let { agentFor(it.callId) }
 
-    private val scheduler by lazy { ExecutorScheduler("graine-call") }
-    /** WebRTC or the WebSocket, per call: decided and prepared at the tap or the ring (CallTransport.kt). */
-    private val transports by lazy { CallTransports(app, { config }, ::agentFor, { scheduler }) }
+    private val scheduler by lazy { home.env.scheduler ?: ExecutorScheduler("graine-call") }
+    /** The phone under the call: its lock screen, the call's place in its audio, its microphone and speaker. */
+    private val phone: CallPhone by lazy { home.env.callPhone ?: AndroidCallPhone(app) }
+    /** WebRTC or the WebSocket, per call: decided and prepared at the tap or the ring — or before the tap, when asked (CallTransport.kt). */
+    private val transports by lazy {
+        CallTransports(
+            app, { config }, ::agentFor, { scheduler },
+            mainAfter = { delayMs, task -> val r = Runnable { task() }; main.postDelayed(r, delayMs); ({ main.removeCallbacks(r) }) },
+            clock = { android.os.SystemClock.elapsedRealtime() },
+        )
+    }
+    /** The phone's time zone changing, watched from the first prepareCall: a call prepared under the old one goes. */
+    private var zoneWatch: BroadcastReceiver? = null
     private var session: CallTransportSession? = null
-    private var route: AudioRoute? = null
+    private var route: CallRoute? = null
     private var unwatchContext: (() -> Unit)? = null
     private var service = WeakReference<GraineCallService>(null)
     private var resumed = WeakReference<Activity>(null)
+    /** The app's screen in front now, as the activities themselves say: the one resumed, if any. */
+    private var front = WeakReference<Activity>(null)
+    /** The call in progress was placed or answered from a notification's button: it waits for its service. */
+    private var tapFromNotification = false
+    /** The tap — the call placed, or its ring answered — by call id, on the calls' clock: its analytics rows count from it. */
+    private var tap: Pair<String, Long>? = null
     private var micPending = false
     private var micAsked = false
     private val micGiveUp = Runnable {
@@ -162,14 +180,19 @@ class GraineCalls internal constructor(
         CallLog.enabled = home.config.debug || AppShared.all().any { it.config.debug }
         CallLog.sink = { message, t -> if (t != null) Log.e(GraineInApp.TAG, message, t) else Log.d(GraineInApp.TAG, message) }
         app.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
-            override fun onActivityResumed(a: Activity) { onResumed(a) }
-            override fun onActivityPaused(a: Activity) { if (resumed.get() === a) resumed = WeakReference(null) }
+            override fun onActivityResumed(a: Activity) { front = WeakReference(a); onResumed(a) }
+            override fun onActivityPaused(a: Activity) {
+                if (resumed.get() === a) resumed = WeakReference(null)
+                if (front.get() === a) front = WeakReference(null)
+            }
             override fun onActivityCreated(a: Activity, b: Bundle?) {}
             override fun onActivityStarted(a: Activity) {}
             override fun onActivityStopped(a: Activity) {}
             override fun onActivitySaveInstanceState(a: Activity, b: Bundle) {}
             override fun onActivityDestroyed(a: Activity) {}
         })
+        // In the background, a call prepared ahead of the tap is let go: nobody is about to tap.
+        home.foregroundWatchers.add { inFront -> if (!inFront) onMain { transports.releasePrepared() } }
     }
 
     fun addListener(l: GraineCallListener) { listeners.add(l) }
@@ -180,6 +203,8 @@ class GraineCalls internal constructor(
         this.config = config
         runCatching { ensureChannels() }
         startSetupCheck()
+        // Calls moved off WebRTC: what was prepared for them goes.
+        onMain { transports.transportChanged() }
     }
 
     // ── permissions and setup ───────────────────────────────────────────────
@@ -279,6 +304,8 @@ class GraineCalls internal constructor(
     }
 
     private fun incoming(push: AgentCallPush.Call) {
+        // The ring wins: a call prepared ahead of a tap goes.
+        transports.releasePrepared()
         // The agent it is for: its rules ring it, its key reports it, its design draws it.
         val agent = route(push)
         callAgents[push.callId] = agent
@@ -317,6 +344,10 @@ class GraineCalls internal constructor(
 
     /** The agent a call is with: the one it was placed or rung with, else the default. */
     internal fun agentFor(callId: String?): GraineInApp = callId?.let { callAgents[it] } ?: AppShared.primary() ?: home
+
+    /** The id of a call ringing with [agent] now, or null — its grant follows who the user is (RtcDirect.kt). A read: any thread. */
+    internal fun ringingCallOf(agent: GraineInApp): String? =
+        call?.takeIf { state == GraineCallState.RINGING && it.direction == GraineCall.Direction.INCOMING && agentFor(it.callId) === agent }?.callId
 
     /**
      * The outcome with what the app and Graine are told about it: the call's
@@ -415,11 +446,11 @@ class GraineCalls internal constructor(
         callBack(activity, missedCallId, reason, null)
 
     /** callBack(), with the missed call's agent by name when the screen was opened for it (a launch later). */
-    internal fun callBack(activity: Activity, missedCallId: String?, reason: String?, agent: String?): String? {
+    internal fun callBack(activity: Activity, missedCallId: String?, reason: String?, agent: String?, fromNotification: Boolean = false): String? {
         notifications()?.cancel(MISSED_ID)
         CallLog.debug("calling back after a missed call${if (missedCallId != null) "" else " (no id)"}")
         val with = agent?.takeIf { AppShared.find(it) != null } ?: missedCallId?.let { callAgents[it]?.name } ?: GraineInApp.DEFAULT
-        return startCall(activity, reason?.takeIf { it.isNotBlank() } ?: MISSED_REASON, emptyMap(), with)
+        return place(activity, reason?.takeIf { it.isNotBlank() } ?: MISSED_REASON, emptyMap(), with, fromNotification)
     }
 
     /** The missed-call notification has been seen (its screen opened). */
@@ -434,10 +465,13 @@ class GraineCalls internal constructor(
     }
 
     /** Pick up the ringing call. The SDK's call screen does this; an app's own screen calls it. */
-    fun answer() = onMain {
+    fun answer() = answer(fromNotification = false)
+
+    /** answer() — [fromNotification]: the ring notification's Answer button, so the call waits for its foreground service. */
+    internal fun answer(fromNotification: Boolean) = onMain {
         if (!machine.answer()) return@onMain
         GraineInApp.endWebViewCalls()
-        begin()
+        begin(fromNotification)
     }
 
     /** Decline the ringing call. */
@@ -461,7 +495,11 @@ class GraineCalls internal constructor(
      * be in the foreground (the microphone service may only start from there).
      */
     @JvmOverloads
-    fun startCall(activity: Activity, reason: String? = null, variables: Map<String, Any?> = emptyMap(), agent: String = GraineInApp.DEFAULT): String? {
+    fun startCall(activity: Activity, reason: String? = null, variables: Map<String, Any?> = emptyMap(), agent: String = GraineInApp.DEFAULT): String? =
+        place(activity, reason, variables, agent, fromNotification = false)
+
+    /** startCall() — [fromNotification]: placed from a notification (the missed call's Call back), so it waits for its service. */
+    private fun place(activity: Activity, reason: String?, variables: Map<String, Any?>, agent: String, fromNotification: Boolean): String? {
         check(Looper.myLooper() == Looper.getMainLooper()) { "GraineCalls.startCall must be called on the main thread" }
         val with = AppShared.find(agent) ?: (if (AppShared.key(agent) == GraineInApp.DEFAULT) AppShared.primary() else null) ?: run {
             Log.e(GraineInApp.TAG, "No agent is named \"$agent\", so no call was placed: GraineInApp.init(application, config, name = \"$agent\") first.")
@@ -469,15 +507,78 @@ class GraineCalls internal constructor(
         }
         if (machine.live) return null
         GraineInApp.endWebViewCalls()
-        val id = "call_" + UUID.randomUUID().toString()
         val vars = VariableStore.flatten(variables).mapValues { Masking.mask(it.value) }
+        val callReason = reason?.takeIf { it.isNotBlank() }
+        // Prepared for exactly this call (prepareCall): it dials at once, under the id it was prepared with. Else the id
+        // its warm grant was asked for, when the agent holds one: the call mints at the telephony gateway (RtcDirect.kt).
+        val id = transports.takePrepared(with, callReason, vars) ?: with.nextCallId() ?: CallIds.next()
         callAgents[id] = with
-        val c = machine.outgoing(id, reason?.takeIf { it.isNotBlank() }, vars) ?: return null
+        val c = machine.outgoing(id, callReason, vars) ?: run {
+            transports.dropTaken(id)
+            return null
+        }
         resumed = WeakReference(activity)
         openCallScreen(activity, c, ACTION_SHOW)
-        begin()
+        begin(fromNotification)
         return id
     }
+
+    /**
+     * Get the customer's next call to [agent] ready before they tap, so that
+     * when they do, [startCall] connects almost at once. Call it when the
+     * screen with your call button appears; calling it again is cheap — while
+     * a call prepared for the same agent, customer, [reason] and [variables]
+     * is ready, nothing more happens. A [startCall] with the same reason and
+     * variables within four minutes uses it; any other call is prepared at the
+     * tap, as without this.
+     *
+     * Nothing is dialled and no conversation starts — nothing is billed —
+     * until [startCall], and the microphone is not touched. What was prepared
+     * is let go when the app goes to the background, when the signed-in
+     * customer changes ([GraineInApp.identify], sign-out, their memory choice,
+     * the phone's time zone), after four minutes, when calls stop using WebRTC,
+     * or when a call rings in.
+     *
+     * For calls over WebRTC (with `ai.graine:inapp-android-rtc`); otherwise,
+     * before the agent's settings have loaded, or while a call is ringing or
+     * live, it does nothing. Any thread.
+     */
+    @JvmOverloads
+    fun prepareCall(reason: String? = null, variables: Map<String, Any?> = emptyMap(), agent: String = GraineInApp.DEFAULT) = onMain {
+        val with = AppShared.find(agent) ?: (if (AppShared.key(agent) == GraineInApp.DEFAULT) AppShared.primary() else null) ?: run {
+            Log.w(GraineInApp.TAG, "No agent is named \"$agent\", so no call was prepared: GraineInApp.init(application, config, name = \"$agent\") first.")
+            return@onMain
+        }
+        // A call or a ring holds the line: nothing is prepared beside it.
+        if (machine.live) return@onMain
+        watchTimeZone()
+        transports.prepare(with, reason?.takeIf { it.isNotBlank() }, VariableStore.flatten(variables).mapValues { Masking.mask(it.value) })
+    }
+
+    /** Who the user is changed for [agent] — identify, sign-out, the memory choice: a call prepared for anyone else goes. */
+    internal fun whoChanged(agent: GraineInApp, who: IdentityEnvelope) = onMain { transports.whoChanged(agent, who) }
+
+    /** The phone's time zone changed: it is part of who every call is minted for, so a call prepared under the old one goes. */
+    internal fun timeZoneChanged() = onMain {
+        val zone = IdentityRules.timezone()
+        transports.releasePrepared { it.key.identity?.timezone != zone }
+    }
+
+    /** From the first prepareCall: the time zone's changes, as the system broadcasts them. */
+    private fun watchTimeZone() {
+        if (zoneWatch != null) return
+        val r = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) = timeZoneChanged()
+        }
+        zoneWatch = r
+        runCatching {
+            val filter = IntentFilter(Intent.ACTION_TIMEZONE_CHANGED)
+            if (Build.VERSION.SDK_INT >= 33) app.registerReceiver(r, filter, Context.RECEIVER_NOT_EXPORTED) else app.registerReceiver(r, filter)
+        }
+    }
+
+    /** [agent]'s call prepared ahead of the tap, if any — for the tests. Main thread. */
+    internal fun preparedFor(agent: GraineInApp): PreparedCall? = transports.preparedFor(agent)
 
     /** Hang up — or, while ringing, decline. */
     /** The phone took the call's audio, gave it back, or the customer answered a phone call during the hold. */
@@ -530,16 +631,17 @@ class GraineCalls internal constructor(
             val screen = resumed.get()
             CallPermissions.record(app, Manifest.permission.RECORD_AUDIO, granted) { screen != null && !screen.shouldShowRequestPermissionRationale(it) }
             if (!granted) machine.fail("The microphone permission was denied.")
-            else if (machine.state == GraineCallState.CONNECTING) startService()
+            else if (machine.state == GraineCallState.CONNECTING) startCallAudio()
         }
         return true
     }
 
     // ── connecting ──────────────────────────────────────────────────────────
 
-    /** The call is CONNECTING: microphone permission, then the foreground service, then the session. */
-    private fun begin() {
-        if (hasMic()) { startService(); return }
+    /** The call is CONNECTING: microphone permission, then the foreground service and the session ([startCallAudio]). */
+    private fun begin(fromNotification: Boolean) {
+        tapFromNotification = fromNotification
+        if (hasMic()) { startCallAudio(); return }
         micPending = true
         micAsked = false
         main.removeCallbacks(micGiveUp)
@@ -556,6 +658,23 @@ class GraineCalls internal constructor(
     private fun hasMic(): Boolean =
         app.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
+    /**
+     * THE MICROPHONE IS THE CALL'S: its foreground service starts, and its
+     * conversation with the service or after it. A tap made in the app in
+     * front — one of its screens resumed, the phone unlocked, not a
+     * notification's button — may record already (Android lets an app in front
+     * use the microphone), so the conversation starts now, beside the service:
+     * the INVITE no longer waits for the service on a busy main thread (0.44 s
+     * measured). Anything else — the lock screen, a notification's Answer or
+     * Call back, nothing of the app in front — waits for the service
+     * ([serviceStarted]), as every call did before ([CallStart]).
+     */
+    private fun startCallAudio() {
+        startService()
+        if (machine.state != GraineCallState.CONNECTING || session != null) return
+        if (CallStart.atOnce(appInFront = front.get() != null, locked = phone.locked(), fromNotification = tapFromNotification)) connect()
+    }
+
     private fun startService() {
         val intent = Intent(app, GraineCallService::class.java)
         try {
@@ -566,7 +685,7 @@ class GraineCalls internal constructor(
         }
     }
 
-    /** GraineCallService is in the foreground: the call may record now. */
+    /** GraineCallService is in the foreground: a call that waited for it starts now; one begun at the tap goes on under it. */
     internal fun serviceStarted(s: GraineCallService) {
         service = WeakReference(s)
         if (!machine.live || machine.state == GraineCallState.RINGING) { s.stopNow(); return }
@@ -605,7 +724,7 @@ class GraineCalls internal constructor(
     /** Call [c]'s conversation with [graine]'s agent, at [ids]. Main thread. */
     private fun open(c: GraineCall, graine: GraineInApp, ids: CallAgentIds) {
         if (machine.call?.callId != c.callId || machine.state != GraineCallState.CONNECTING || session != null) return
-        route = AudioRoute(app) { i -> onMain { interrupted(c.callId, i) } }.also { it.acquire(speaker) }
+        route = phone.route { i -> onMain { interrupted(c.callId, i) } }.also { it.acquire(speaker) }
         val events = object : CallSessionEvents {
             override fun onOpen() = onMain {
                 if (machine.call?.callId == c.callId && machine.connected()) {
@@ -640,10 +759,12 @@ class GraineCalls internal constructor(
                 // Who the user is and which call this is, so the call record carries the user and memory works.
                 identity = graine.identityEnvelope(),
                 callId = c.callId,
+                // The tap, on the session's own clock: where the analytics rows' setup and total begin.
+                tapAt = tap?.takeIf { it.first == c.callId }?.second,
             ),
             CallSessionDeps(
                 scheduler = scheduler,
-                audio = AndroidCallAudio(),
+                audio = phone.audio(),
                 http = graine.env.http,
                 // The SDK's own runner, on the main thread as every handler expects; it always answers.
                 runAction = { name, args, answer -> main.post { graine.executeAction(name, args, answer) } },
@@ -662,6 +783,7 @@ class GraineCalls internal constructor(
     private fun onState(s: GraineCallState, c: GraineCall?) {
         state = s
         call = c
+        if (s == GraineCallState.CONNECTING && c != null && tap?.first != c.callId) tap = c.callId to scheduler.now()
         val live = s != GraineCallState.IDLE && s != GraineCallState.ENDED
         if (live != nativeLive) { nativeLive = live; GraineInApp.nativeCallChanged(live) }
         transports.onState(s, c)
@@ -707,14 +829,14 @@ class GraineCalls internal constructor(
         // Call back, from the missed-call notification: the screen opened to place the call.
         if (intent?.action == ACTION_CALL_BACK) {
             a.intent = Intent(intent).setAction(ACTION_MISSED)
-            if (!machine.live) callBack(a, intent.getStringExtra(EXTRA_CALL_ID), intent.getStringExtra(EXTRA_REASON), intent.getStringExtra(EXTRA_AGENT))
+            if (!machine.live) callBack(a, intent.getStringExtra(EXTRA_CALL_ID), intent.getStringExtra(EXTRA_REASON), intent.getStringExtra(EXTRA_AGENT), fromNotification = true)
             return
         }
         val c = machine.call
         // Answer from the notification: the call screen opened with ACTION_ANSWER for this call.
         if (intent?.action == ACTION_ANSWER && c != null && intent.getStringExtra(EXTRA_CALL_ID) == c.callId) {
             a.intent = Intent(intent).setAction(ACTION_SHOW)
-            if (machine.state == GraineCallState.RINGING) answer()
+            if (machine.state == GraineCallState.RINGING) answer(fromNotification = true)
         }
         if (micPending) askForMic(a)
     }
@@ -1000,4 +1122,22 @@ class GraineCalls internal constructor(
         private const val RECENT_CALLS = 16
         private val VIBRATION = longArrayOf(0, 900, 700)
     }
+}
+
+/**
+ * WHEN A CALL'S CONVERSATION STARTS AT THE TAP, before its foreground service
+ * is up — the rule, pure. Android lets an app use the microphone while one of
+ * its screens is in front; the foreground service is what keeps a call
+ * recording once none is. So a tap in the app in front, with the phone
+ * unlocked, starts the conversation at once, and anything else — the lock
+ * screen, a notification's button, the app not in front — waits for the
+ * service.
+ */
+internal object CallStart {
+    fun atOnce(appInFront: Boolean, locked: Boolean, fromNotification: Boolean): Boolean = appInFront && !locked && !fromNotification
+}
+
+/** The id of a call this app places, as every outcome carries it: `call_` and a random UUID. */
+internal object CallIds {
+    fun next(): String = "call_" + UUID.randomUUID().toString()
 }

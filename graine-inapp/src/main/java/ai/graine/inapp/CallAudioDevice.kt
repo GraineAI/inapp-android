@@ -1,6 +1,7 @@
 package ai.graine.inapp
 
 import android.annotation.SuppressLint
+import android.app.KeyguardManager
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioDeviceCallback
@@ -409,6 +410,34 @@ internal object CallFocus {
 }
 
 /**
+ * WHAT A NATIVE CALL NEEDS FROM THE PHONE ITSELF — its lock screen, the call's
+ * place in its audio, its microphone and speaker. [AndroidCallPhone] in an
+ * app; a fake in the tests, whose JVM has none of them (AgentEnv.callPhone).
+ */
+internal interface CallPhone {
+    /** The lock screen is up — a call answered over it waits for its foreground service (CallStart). */
+    fun locked(): Boolean
+    /** The call's place in the phone's audio, for one call: acquired when its conversation opens, released at its end. */
+    fun route(onInterruption: (CallInterruption) -> Unit): CallRoute
+    /** The microphone and the speaker, for one call. */
+    fun audio(): CallAudioIO
+}
+
+/** The call's place in the phone's audio, as GraineCalls holds it: [AudioRoute]. */
+internal interface CallRoute {
+    fun acquire(speaker: Boolean)
+    fun setSpeaker(on: Boolean)
+    fun release()
+}
+
+internal class AndroidCallPhone(private val context: Context) : CallPhone {
+    /** Unknown counts as locked: the call then waits for its service, as every call did before. */
+    override fun locked(): Boolean = (context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager)?.isKeyguardLocked ?: true
+    override fun route(onInterruption: (CallInterruption) -> Unit): CallRoute = AudioRoute(context, onInterruption)
+    override fun audio(): CallAudioIO = AndroidCallAudio()
+}
+
+/**
  * THE CALL'S PLACE IN THE PHONE'S AUDIO: communication mode for the call's
  * length, transient focus (other apps duck or pause), and the device it is
  * heard on — [CallRouting]'s choice, made again whenever a device comes or
@@ -420,7 +449,7 @@ internal object CallFocus {
  * both off, the platform itself prefers a wired headset or a hearing aid to
  * the earpiece. Main thread only, the device callback included.
  */
-internal class AudioRoute(context: Context, private val onInterruption: (CallInterruption) -> Unit = {}) {
+internal class AudioRoute(context: Context, private val onInterruption: (CallInterruption) -> Unit = {}) : CallRoute {
     private val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val main = Handler(Looper.getMainLooper())
     private var focusRequest: AudioFocusRequest? = null
@@ -443,7 +472,7 @@ internal class AudioRoute(context: Context, private val onInterruption: (CallInt
         override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>?) = reroute()
     }
 
-    fun acquire(speaker: Boolean) {
+    override fun acquire(speaker: Boolean) {
         if (held) return
         held = true
         this.speaker = speaker
@@ -468,7 +497,7 @@ internal class AudioRoute(context: Context, private val onInterruption: (CallInt
     }
 
     /** The loudspeaker on, or off: back to the device the call prefers — a headset if one is connected, else the earpiece. */
-    fun setSpeaker(on: Boolean) {
+    override fun setSpeaker(on: Boolean) {
         if (!held) return
         speaker = on
         reroute()
@@ -558,7 +587,7 @@ internal class AudioRoute(context: Context, private val onInterruption: (CallInt
         }
     }
 
-    fun release() {
+    override fun release() {
         if (!held) return
         held = false
         main.removeCallbacks(watchForPhoneCall)

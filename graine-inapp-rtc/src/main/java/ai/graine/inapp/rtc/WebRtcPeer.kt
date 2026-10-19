@@ -29,11 +29,17 @@ import livekit.org.webrtc.audio.JavaAudioDeviceModule
  *                    platform runs its echo canceller on), mono, the phone's
  *                    hardware echo canceller and noise suppressor when it has them
  *                    (WebRTC's own otherwise), automatic gain off as the voice bar
- *                    has it; recording starts only once the call is connected
+ *                    has it. Its track joins the connection with the first offer,
+ *                    which the SDK makes at the dial: setting an offer is what
+ *                    starts the recording in this library (turning recording off
+ *                    does not hold it back), so a call prepared ahead of the tap
+ *                    has no track and no offer — nothing records before the tap
  *   the speaker      voice-communication audio, routed by the SDK as every call is
- *   the connection   unified plan, one audio transceiver sending and receiving,
+ *   the connection   unified plan, one audio transceiver sending and receiving
+ *                    (added with the microphone's track, at the first offer),
  *                    bundle balanced (as the browser), RTCP multiplexed, candidates
- *                    gathered continually with a pool of one, so the offer can carry them
+ *                    gathered continually with a pool of one — from the moment the
+ *                    connection is made, so the offer at the dial carries them at once
  *
  * Each call has its own factory and audio device, released with it: nothing
  * of one call outlives it. Every method is called from the call's own thread,
@@ -43,13 +49,17 @@ import livekit.org.webrtc.audio.JavaAudioDeviceModule
 internal class WebRtcPeer private constructor(
     private val factory: PeerConnectionFactory,
     private val adm: JavaAudioDeviceModule,
-    private val source: AudioSource,
-    private val track: AudioTrack,
 ) : GraineRtcPeer {
     private lateinit var pc: PeerConnection
     @Volatile private var closed = false
+    /** The microphone's source and track: made with the first offer, at the dial — never before. */
+    private var source: AudioSource? = null
+    private var track: AudioTrack? = null
+    private var micEnabled = true
 
     override fun createOffer(iceRestart: Boolean, done: (error: String?) -> Unit) {
+        if (closed) { done("closed"); return }
+        if (track == null) addMicrophone()
         val constraints = MediaConstraints()
         if (iceRestart) constraints.mandatory.add(MediaConstraints.KeyValuePair("IceRestart", "true"))
         pc.createOffer(object : Sdp() {
@@ -99,8 +109,22 @@ internal class WebRtcPeer private constructor(
         }, SessionDescription(SessionDescription.Type.OFFER, sdp))
     }
 
+    /**
+     * The microphone's track and its transceiver, sending and receiving — at
+     * the first offer, so nothing of the microphone exists before the dial.
+     */
+    private fun addMicrophone() {
+        val s = factory.createAudioSource(MICROPHONE)
+        val t = factory.createAudioTrack("graine-microphone", s)
+        t.setEnabled(micEnabled)
+        source = s
+        track = t
+        pc.addTransceiver(t, RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_RECV, listOf("graine")))
+    }
+
     override fun setMicrophoneEnabled(enabled: Boolean) {
-        if (!closed) track.setEnabled(enabled)
+        micEnabled = enabled
+        if (!closed) track?.setEnabled(enabled)
     }
 
     override fun setAudioActive(recording: Boolean, playout: Boolean) {
@@ -121,8 +145,8 @@ internal class WebRtcPeer private constructor(
         closed = true
         // In the library's order: the connection, then what fed it, then the factory and the audio device.
         runCatching { pc.dispose() }
-        runCatching { track.dispose() }
-        runCatching { source.dispose() }
+        runCatching { track?.dispose() }
+        runCatching { source?.dispose() }
         runCatching { factory.dispose() }
         runCatching { adm.release() }
     }
@@ -205,16 +229,7 @@ internal class WebRtcPeer private constructor(
                 adm.release()
                 throw e
             }
-            // The microphone as the voice bar asks for it: echo cancellation and noise suppression on, gain control off.
-            val constraints = MediaConstraints().apply {
-                mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
-                mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
-                mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl", "false"))
-                mandatory.add(MediaConstraints.KeyValuePair("googHighpassFilter", "true"))
-            }
-            val source = factory.createAudioSource(constraints)
-            val track = factory.createAudioTrack("graine-microphone", source)
-            val peer = WebRtcPeer(factory, adm, source, track)
+            val peer = WebRtcPeer(factory, adm)
             val iceServers = servers.map { s ->
                 PeerConnection.IceServer.builder(s.urls).apply {
                     s.username?.let { setUsername(it) }
@@ -235,15 +250,21 @@ internal class WebRtcPeer private constructor(
             val pc = factory.createPeerConnection(config, Events(listener))
             if (pc == null) {
                 peer.closed = true
-                runCatching { track.dispose() }
-                runCatching { source.dispose() }
                 runCatching { factory.dispose() }
                 runCatching { adm.release() }
                 throw IllegalStateException("WebRTC made no peer connection")
             }
             peer.pc = pc
-            pc.addTransceiver(track, RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_RECV, listOf("graine")))
             return peer
         }
+
+        /** The microphone as the voice bar asks for it: echo cancellation and noise suppression on, gain control off. */
+        private val MICROPHONE: MediaConstraints
+            get() = MediaConstraints().apply {
+                mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
+                mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
+                mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl", "false"))
+                mandatory.add(MediaConstraints.KeyValuePair("googHighpassFilter", "true"))
+            }
     }
 }

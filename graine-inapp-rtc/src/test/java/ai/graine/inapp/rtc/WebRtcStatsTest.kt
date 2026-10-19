@@ -16,7 +16,7 @@ class WebRtcStatsTest {
             e("IT01A", "inbound-rtp", "kind" to "audio", "bytesReceived" to BigInteger.valueOf(48_000), "packetsReceived" to 300L,
                 "packetsLost" to 2, "audioLevel" to 0.21, "totalAudioEnergy" to 0.5, "totalSamplesDuration" to 6.0, "jitter" to 0.012, "codecId" to "CIT01_0"),
             e("OT01A", "outbound-rtp", "kind" to "audio", "bytesSent" to BigInteger.valueOf(51_000)),
-            e("CIT01_0", "codec", "mimeType" to "audio/PCMU"),
+            e("CIT01_0", "codec", "mimeType" to "audio/PCMU", "clockRate" to 8000L),
             e("T01", "transport", "selectedCandidatePairId" to "CP1"),
             e("CP1", "candidate-pair", "localCandidateId" to "IL1", "currentRoundTripTime" to 0.038, "state" to "succeeded"),
             e("IL1", "local-candidate", "candidateType" to "relay"),
@@ -29,6 +29,7 @@ class WebRtcStatsTest {
         assertEquals(51_000, s.bytesSent)
         assertEquals(0.038, s.roundTripSeconds!!, 1e-9)
         assertEquals("audio/PCMU", s.codec)
+        assertEquals(8000, s.clockRate)
         assertEquals("relay", s.localCandidateType)
     }
 
@@ -41,6 +42,7 @@ class WebRtcStatsTest {
         assertEquals(0, s.bytesReceived)
         assertNull(s.audioLevel)
         assertNull(s.codec)
+        assertNull(s.clockRate)
         assertEquals("srflx", s.localCandidateType)
     }
 

@@ -777,6 +777,8 @@ internal interface CallsHostPlatform {
     /** startCall(), with the app's agent [agent] (GraineInApp.init's name). */
     fun startCall(activity: Any?, reason: String?, variables: Map<String, Any?>, agent: String): String? =
         if (agent == GraineInApp.DEFAULT) startCall(activity, reason, variables) else null
+    /** Get [agent]'s next call ready before the tap (GraineCalls.prepareCall): nothing is dialled. */
+    fun prepareCall(reason: String?, variables: Map<String, Any?>, agent: String) {}
     /** Make the app's other agents the options name — those not made already. */
     fun makeAgents(agents: Map<String, CallsHostAgent>, options: CallsHostOptions) {}
     fun answer()
@@ -905,6 +907,17 @@ internal class CallsHostCore(private val platform: CallsHostPlatform, private va
         }
         changed()
         return id
+    }
+
+    /**
+     * The customer's next call, ready before the tap: `startCall`'s options
+     * (`{reason?, variables?, agent?}`). Nothing when the calls are not
+     * configured or a call is live; the engine decides the rest.
+     */
+    fun prepareCall(raw: Any?) {
+        if (options == null || platform.callFields().state != GraineCallState.IDLE) return
+        val request = CallsHostValues.callRequest(raw)
+        platform.prepareCall(request.first, request.second, CallsHostValues.callAgent(raw))
     }
 
     fun answer() = platform.answer()

@@ -145,6 +145,16 @@ object GraineCallsHost {
     @JvmStatic
     fun startCall(activity: Activity?, options: Map<*, *>?): String? = onMainSync { core.startCall(options, activity) }
 
+    /**
+     * Get the customer's next call ready before they tap — `startCall`'s
+     * options, `{reason?, variables?, agent?}` — so a `startCall` with the
+     * same reason and variables connects almost at once. Nothing is dialled
+     * and nothing is billed until then, and the microphone is not touched.
+     * Cheap to call whenever the call button appears (GraineCalls.prepareCall).
+     */
+    @JvmStatic
+    fun prepareCall(options: Map<*, *>?) = onMain { core.prepareCall(options) }
+
     @JvmStatic
     fun answer() = onMain { core.answer() }
 
@@ -434,6 +444,10 @@ object GraineCallsHost {
         override fun startCall(activity: Any?, reason: String?, variables: Map<String, Any?>, agent: String): String? {
             val from = activity as? Activity ?: return null
             return calls?.startCall(from, reason, variables, agent)
+        }
+
+        override fun prepareCall(reason: String?, variables: Map<String, Any?>, agent: String) {
+            calls?.prepareCall(reason, variables, agent)
         }
 
         override fun answer() { calls?.answer() }

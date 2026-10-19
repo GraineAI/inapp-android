@@ -18,23 +18,36 @@ internal class FakePeer(var offer: String = Trace.OFFER) : GraineRtcPeer {
     var offerImmediately = true
     private var pendingOffer: ((String?) -> Unit)? = null
     private var hasLocal = false
+    /**
+     * Candidates found before the first offer — the pool's, as a connection
+     * made with iceCandidatePoolSize gathers them — and handed to that offer
+     * once it is set, as the library hands them over.
+     */
+    private val pool = mutableListOf<String>()
 
     override fun createOffer(iceRestart: Boolean, done: (error: String?) -> Unit) {
         calls += if (iceRestart) "createOffer(restart)" else "createOffer"
         if (failOffer) { done("no"); return }
         hasLocal = true
-        if (offerImmediately) done(null) else pendingOffer = done
+        if (offerImmediately) { done(null); flushPool() } else pendingOffer = done
     }
-    fun completeOffer() { pendingOffer?.invoke(null); pendingOffer = null }
+    fun completeOffer() { pendingOffer?.invoke(null); pendingOffer = null; flushPool() }
+    private fun flushPool() { val found = pool.toList(); pool.clear(); for (c in found) listener!!.onCandidate(c) }
     override fun localDescription(): String? = if (hasLocal) offer else null
     override fun setRemoteAnswer(sdp: String, done: (error: String?) -> Unit) { calls += "setRemoteAnswer"; remoteAnswer = sdp; done(null) }
     override fun answerOffer(sdp: String, done: (answer: String?, error: String?) -> Unit) { calls += "answerOffer"; answeredOffer = sdp; done("v=0\r\ns=answer\r\n", null) }
     override fun setMicrophoneEnabled(enabled: Boolean) { micEnabled = enabled }
-    override fun setAudioActive(recording: Boolean, playout: Boolean) { this.recording = recording; this.playout = playout }
+    /** Every setAudioActive, in order: (recording, playout). A peer starts recording and playing, as the library's does. */
+    val audioActive = mutableListOf<Pair<Boolean, Boolean>>()
+    override fun setAudioActive(recording: Boolean, playout: Boolean) { audioActive += recording to playout; this.recording = recording; this.playout = playout }
     override fun stats(done: (GraineRtcStats?) -> Unit) = done(stats)
     override fun close() { closed = true; calls += "close" }
 
-    fun candidate(typ: String) = listener!!.onCandidate("candidate:9 1 udp 1 192.0.2.1 9 typ $typ")
+    /** A candidate found: signalled now once there is an offer, else kept in the pool for the first one. */
+    fun candidate(typ: String) {
+        val c = "candidate:9 1 udp 1 192.0.2.1 9 typ $typ"
+        if (hasLocal) listener!!.onCandidate(c) else pool += c
+    }
     fun ice(state: String) = listener!!.onIceState(state)
 }
 

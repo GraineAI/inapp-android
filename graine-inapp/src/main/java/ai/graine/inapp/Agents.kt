@@ -133,4 +133,10 @@ internal class AgentEnv(
     val sessionCache: SessionCache? = null,
     /** Fetch the design's typefaces. Off in tests: nothing reaches a font host. */
     val fonts: Boolean = true,
+    /** WebRTC calls' grants to mint at the telephony gateway (RtcDirect.kt): the process's one in an app, a fake in a test. */
+    val directMint: RtcDirectMint = RtcDirectMint.shared,
+    /** A WebRTC call's world — its thread, sockets, peer and HTTP — for this agent's calls. Null: the platform's; fakes in a test. */
+    val rtcEnv: ((GraineInApp) -> RtcEnv)? = null,
+    /** The phone under a native call — its lock screen, audio route, microphone and speaker. Null: the phone's own; a fake in a test. */
+    val callPhone: CallPhone? = null,
 )

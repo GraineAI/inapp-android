@@ -181,14 +181,26 @@ internal class CallMachine(
     /** The customer places a call. Null when another call is live. */
     fun outgoing(callId: String, reason: String?, variables: Map<String, String>): GraineCall? {
         if (live) return null
-        val vars = LinkedHashMap<String, String>()
-        vars["who_called"] = "customer"
-        reason?.let { vars["call_reason"] = it }
-        for ((k, v) in variables) if (k != "who_called" && !(k == "call_reason" && reason != null)) vars[k] = v
-        val c = GraineCall(callId, GraineCall.Direction.OUTGOING, null, reason, vars)
+        val c = GraineCall(callId, GraineCall.Direction.OUTGOING, null, reason, outgoingVariables(reason, variables))
         call = c
         move(GraineCallState.CONNECTING)
         return c
+    }
+
+    companion object {
+        /**
+         * A call the customer places carries these as its own: `who_called` is
+         * "customer", [reason] is `call_reason`, and the app's [variables] fill
+         * the rest. One rule for the call and for the call prepared ahead of it
+         * (GraineCalls.prepareCall), so the two compare alike.
+         */
+        fun outgoingVariables(reason: String?, variables: Map<String, String>): Map<String, String> {
+            val vars = LinkedHashMap<String, String>()
+            vars["who_called"] = "customer"
+            reason?.let { vars["call_reason"] = it }
+            for ((k, v) in variables) if (k != "who_called" && !(k == "call_reason" && reason != null)) vars[k] = v
+            return vars
+        }
     }
 
     fun answer(): Boolean {

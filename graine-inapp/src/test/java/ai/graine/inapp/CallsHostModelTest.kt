@@ -113,6 +113,10 @@ private class FakeCallsHostPlatform : CallsHostPlatform {
 
     override fun makeAgents(agents: Map<String, CallsHostAgent>, options: CallsHostOptions) { agentsMade += agents }
 
+    /** Every call the host asked the engine to prepare: reason, variables, agent. */
+    val prepared = mutableListOf<Triple<String?, Map<String, Any?>, String>>()
+    override fun prepareCall(reason: String?, variables: Map<String, Any?>, agent: String) { prepared += Triple(reason, variables, agent) }
+
     /** The agent each call (by id) is with, as GraineCalls knows it. */
     val callAgents = HashMap<String, String>()
     override fun agentOf(callId: String): String? = callAgents[callId]
@@ -1107,6 +1111,31 @@ class CallsHostCoreTest {
         next.kept = rig.kept
         assertTrue(next.core.restore())
         assertEquals(rig.platform.agentsMade, next.platform.agentsMade)
+    }
+
+    @Test fun prepareCallHandsTheEngineStartCallsOptionsAndNothingElse() {
+        val rig = HostRig()
+        rig.core.prepareCall(mapOf("reason" to "support"))
+        assertTrue("not configured: nothing", rig.platform.prepared.isEmpty())
+        rig.configure(mapOf("agents" to mapOf("sales" to mapOf("publishableKey" to "pk_test_sales"))))
+        rig.core.prepareCall(mapOf("reason" to " card_blocked ", "variables" to mapOf("order" to "A-1043")))
+        rig.core.prepareCall(mapOf("reason" to "upgrade", "agent" to " sales "))
+        rig.core.prepareCall(null)
+        assertEquals(
+            listOf(Triple("card_blocked", mapOf("order" to "A-1043"), "default"), Triple("upgrade", emptyMap(), "sales"), Triple(null, emptyMap(), "default")),
+            rig.platform.prepared,
+        )
+        assertTrue("nothing is placed", rig.platform.placed.isEmpty())
+        rig.platform.runTurns()
+        assertTrue("and nothing changes on screen", rig.events.payloads("state").none { it["state"] != "idle" })
+    }
+
+    @Test fun nothingIsPreparedWhileACallIsLive() {
+        val rig = HostRig()
+        rig.configure()
+        rig.core.startCall(mapOf("reason" to "first"), "activity")
+        rig.core.prepareCall(mapOf("reason" to "next"))
+        assertTrue(rig.platform.prepared.isEmpty())
     }
 
     @Test fun noSecondCallWhileOneIsLive() {

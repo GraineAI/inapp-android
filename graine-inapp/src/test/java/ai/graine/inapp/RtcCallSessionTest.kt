@@ -158,15 +158,17 @@ class RtcCallSessionTest {
         val sent = control.sent.map { JSONObject(it) }
         assertEquals(listOf("app_context", "app_event", "app_event"), sent.map { it.getString("type") })
         assertEquals("kyc", sent[0].getJSONObject("context").getString("screen"))
-        val connect = sent[1].getJSONObject("event")
-        assertEquals("connect", connect.getString("name"))
-        assertTrue(connect.getBoolean("quiet") && connect.getBoolean("telemetry"))
-        assertTrue("prepared before the dial", connect.getString("detail").startsWith("warm · "))
-        assertEquals(true, connect.getJSONObject("data").getBoolean("warm"))
-        val transport = sent[2].getJSONObject("event")
+        // The analytics rows (CallAnalytics): the transport, then the connect.
+        val transport = sent[1].getJSONObject("event")
         assertEquals("transport", transport.getString("name"))
         assertEquals("WebRTC", transport.getString("detail"))
         assertEquals("rtc", transport.getJSONObject("data").getString("transport"))
+        val connect = sent[2].getJSONObject("event")
+        assertEquals("connect", connect.getString("name"))
+        assertTrue(connect.getBoolean("quiet") && connect.getBoolean("telemetry"))
+        assertTrue("prepared before the dial", connect.getString("detail").startsWith("prepared · "))
+        assertEquals("prepared", connect.getJSONObject("data").getString("mode"))
+        assertEquals(true, connect.getJSONObject("data").getBoolean("warm"))
         assertEquals(listOf("media", "control"), log)
         assertTrue(sbc.badDigests.isEmpty())
     }
@@ -378,6 +380,19 @@ class RtcCallSessionTest {
         assertTrue(sip.requests("INVITE").isNotEmpty())
     }
 
+    /** The offer is the dial's now: a stale registration is asked beside it, so the INVITE waits for the slower, not for both. */
+    @Test fun aStaleRegistrationIsProbedBesideTheOfferNotAfterIt() {
+        val s = prepared()
+        sched.advance(20_000); pump()
+        peer.offerImmediately = false
+        val before = sip.requests("REGISTER").size
+        s.dial(deps, listener); pump()
+        assertTrue("asked again while the offer is still being made", sip.requests("REGISTER").size > before)
+        assertTrue("no INVITE before the offer", sip.requests("INVITE").isEmpty())
+        peer.completeOffer(); pump()
+        assertTrue("both in: the INVITE", sip.requests("INVITE").isNotEmpty())
+    }
+
     @Test fun aSilentStaleSocketIsReplacedBeforeTheInvite() {
         val s = prepared()
         sched.advance(20_000); sched.drain()
@@ -444,6 +459,88 @@ class RtcCallSessionTest {
         val early = RtcCallSession(request, env)
         early.setMuted(true); early.prepare(); pump()
         assertFalse(peer.micEnabled)
+    }
+
+    /**
+     * A PREPARED CALL HOLDS NO MICROPHONE (found on a device, 19 Oct: the
+     * library recorded from the moment the offer was set, so a call prepared
+     * on the Home screen lit the privacy dot). Off as the peer is made; on
+     * with the dial, before the INVITE leaves.
+     */
+    @Test fun nothingIsRecordedOrPlayedUntilTheDial() {
+        val s = prepared()
+        assertEquals("off as soon as the peer is made", listOf(false to false), peer.audioActive)
+        assertFalse(peer.recording || peer.playout)
+        var onAtInvite: Boolean? = null
+        sip.onSend = { if (it.startsWith("INVITE ") && onAtInvite == null) onAtInvite = peer.recording && peer.playout }
+        s.dial(deps, listener); pump()
+        assertEquals("on with the dial, before the INVITE left", true, onAtInvite)
+        assertEquals(listOf(false to false, true to true), peer.audioActive)
+    }
+
+    /**
+     * NO OFFER BEFORE THE DIAL (the device again, 19 Oct: the library starts
+     * the microphone when the offer is set, whatever setAudioActive says). A
+     * prepared call has its peer — its candidate pool gathering — and nothing
+     * else: no offer, so no track and no recording. The dial sets the offer,
+     * the pooled candidates arrive at once, and the INVITE follows.
+     */
+    @Test fun aPreparedCallMakesNoOfferUntilTheDial() {
+        val s = prepared()
+        assertFalse("no offer while it waits for the tap", peer.calls.contains("createOffer"))
+        assertEquals(null, peer.localDescription())
+        assertTrue("ready all the same", steps.any { it.startsWith("register:") })
+        s.dial(deps, listener); pump()
+        assertEquals("the offer, at the dial", 1, peer.calls.count { it == "createOffer" })
+        assertTrue("its cost at the dial, the pooled candidate in it", steps.any { it.matches(Regex("offer: \\d+ ms at the dial \\(pooled candidates: 1\\)")) })
+        assertEquals("then the INVITE: the first, and the one with credentials", 2, sip.requests("INVITE").size)
+    }
+
+    @Test fun aColdCallsOfferFollowsItsPeerAtOnce() {
+        val s = RtcCallSession(request, env)
+        s.dial(deps, listener); pump()
+        assertEquals("made after the dial: its offer at once", 1, peer.calls.count { it == "createOffer" })
+        peer.candidate("srflx"); pump()
+        assertEquals(2, sip.requests("INVITE").size)
+    }
+
+    @Test fun aPreparedCallLetGoNeverTurnedTheMicrophoneOn() {
+        val s = prepared()
+        sched.advance(60_000); pump()
+        s.hangUp(); pump()
+        assertTrue(peer.closed)
+        assertTrue(sip.requests("INVITE").isEmpty())
+        assertEquals("turned off as it was made, and never on", listOf(false to false), peer.audioActive)
+        assertFalse("and it never made an offer", peer.calls.contains("createOffer"))
+    }
+
+    @Test fun aRedialsFreshPeerIsOffUntilItsOwnInvite() {
+        sbc.inviteAnswer = FakeSbc.Answer.SILENT
+        val s = prepared()
+        s.dial(deps, listener); pump()
+        sched.advance(4_000); pump()
+        assertEquals("a fresh peer", 2, peers.size)
+        assertEquals("off as it is made", listOf(false to false), peer.audioActive)
+        var onAtInvite: Boolean? = null
+        sip.onSend = { if (it.startsWith("INVITE ") && onAtInvite == null) onAtInvite = peer.recording && peer.playout }
+        peer.candidate("srflx"); pump()
+        assertEquals(true, onAtInvite)
+    }
+
+    @Test fun aHoldBeforeTheDialTurnsNothingOnAndTheInviteKeepsItOff() {
+        val s = prepared()
+        s.setOnHold(true); pump()
+        s.setOnHold(false); pump()
+        assertEquals("a hold and its end before the dial turn nothing on", listOf(false to false), peer.audioActive)
+        s.setOnHold(true); pump()
+        s.dial(deps, listener); pump()
+        assertEquals("the phone still has the audio: the INVITE keeps it off", false to false, peer.audioActive.last())
+        assertFalse(peer.recording || peer.playout)
+        peer.ice("checking"); peer.ice("connected"); pump()
+        s.setOnHold(false); pump()
+        assertEquals("back: both on", true to true, peer.audioActive.last())
+        s.setOnHold(true); pump()
+        assertEquals("and off again, as a hold always did", false to false, peer.audioActive.last())
     }
 
     @Test fun theAgentSpeaksWhileItsAudioIsLoud() {

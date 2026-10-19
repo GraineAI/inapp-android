@@ -38,6 +38,7 @@ internal object WebRtcStats {
             roundTripSeconds = double(pair?.members?.get("currentRoundTripTime")),
             codec = codec?.members?.get("mimeType") as? String,
             localCandidateType = local?.members?.get("candidateType") as? String,
+            clockRate = (codec?.members?.get("clockRate") as? Number)?.toInt()?.takeIf { it > 0 },
         )
     }
 

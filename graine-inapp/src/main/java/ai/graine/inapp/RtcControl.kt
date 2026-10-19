@@ -150,9 +150,16 @@ internal class RtcControl(
     }
 
     /** Send [text] (a frame of [type]) now if joined, else queue it. */
-    fun send(type: String, text: String) = scheduler.post {
-        if (closed) return@post
-        if (joined && socket?.send(text) == true) return@post
+    fun send(type: String, text: String) = scheduler.post { sendHere(type, text) }
+
+    /**
+     * [send], from [scheduler]'s own thread, done before the caller's next
+     * line: a call's quality row is written before the BYE that follows it in
+     * the same task, and before the close that follows the BYE.
+     */
+    fun sendHere(type: String, text: String) {
+        if (closed) return
+        if (joined && socket?.send(text) == true) return
         if (type == "app_context") queue.removeAll { it.type == "app_context" }
         queue.addLast(Queued(type, text))
         while (queue.size > QUEUE_LIMIT) queue.removeFirst()

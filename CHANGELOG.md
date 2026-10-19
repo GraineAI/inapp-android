@@ -1,3 +1,9 @@
+## 0.11.0
+
+- **Calls connect faster.** The SDK now sets each WebRTC call up with Graine's call servers directly, with a short-lived permission it fetches ahead in the background, instead of an extra hop through Graine's web service. A call that can't use it connects exactly as before. Nothing to change in your app. In `ai.graine:inapp-android` and `ai.graine:inapp-android-rtc` 0.11.0.
+- **New, optional: `GraineCalls.prepareCall(reason, variables, agent)` — the next call set up before the tap.** Call it on a screen with a call button, each time the screen appears; the tap then only dials. Pass the same reason and variables you will pass to `startCall` — anything different and the call is set up at the tap, as before. Nothing is dialled, recorded or billed before the tap: the microphone stays off until the user taps Call. The prepared call is let go when the app goes to the background, when the signed-in user, their memory choice or their time zone changes, after 4 minutes, or when a call rings.
+- **Every call reports how it connected**, shown in Execution Logs: WebRTC or the standard connection (and why), whether it was set up ahead, the time from the tap to the agent's first words, and the call's audio quality. Timings only — nothing personal. Nothing to change in your app.
+
 ## 0.10.3
 
 - **A stalled WebRTC dial is redialled after half a second, not 3 seconds.** A dial the server has acknowledged is answered within a few dozen milliseconds; one still unanswered half a second after that is cancelled and made once more on a fresh connection, and a second stalled dial continues on the standard connection, with `transportFallbackReason` `no_answer`. 0.10.2's 3 seconds only delayed that fallback. Nothing to change in your app. Update `ai.graine:inapp-android` and `ai.graine:inapp-android-rtc` together.

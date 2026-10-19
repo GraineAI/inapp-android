@@ -111,6 +111,12 @@ internal data class CallSessionConfig(
     val identity: IdentityEnvelope? = null,
     /** The call's id on the ticket, so its record links back to the ring and the user (contract §3.6, §3.7). */
     val callId: String? = null,
+    /**
+     * When the customer tapped — placed the call, or answered its ring — on
+     * the session scheduler's clock: the analytics rows (CallAnalytics) count
+     * from it, a WebRTC attempt before the WebSocket included.
+     */
+    val tapAt: Long? = null,
 )
 
 /** What a session reports, on its scheduler thread. */
@@ -142,6 +148,14 @@ internal class CallSessionDeps(
 )
 
 /**
+ * The call's analytics rows on the voice socket (CallAnalytics), from the
+ * conversation that opened it: what the app asked for ("auto", "rtc", "ws"),
+ * why WebRTC is not carrying the call (null when it was never meant to), and
+ * the rows a WebRTC attempt left before it fell back.
+ */
+internal class SocketRows(val requested: String?, val fallbackReason: String?, val carried: List<String> = emptyList())
+
+/**
  * ONE NATIVE CALL ON THE VOICE SOCKET — sdk/NATIVE-CALLS.md "The wire protocol".
  *
  *   ticket (or the direct URL, with context_token) → socket → init →
@@ -149,6 +163,11 @@ internal class CallSessionDeps(
  *   the agent's audio down through the decoder and the player, marks acked
  *   when heard, actions answered within 6 s, and stop + close to hang up.
  *   Nothing arriving for two ping periods ends the call as dropped.
+ *
+ * With [rows], the call says how it connected (CallAnalytics): the transport
+ * and where the tap's wait went once the conversation starts — with whatever a
+ * WebRTC attempt before it left — and the agent's voice when it is first heard.
+ * Nothing is sent before the socket opens, and nothing waits for a row.
  *
  * Every piece of state lives on [CallSessionDeps.scheduler]'s thread: socket
  * callbacks, microphone frames and the public methods all hop onto it — but
@@ -159,6 +178,7 @@ internal class VoiceCallSession(
     private val config: CallSessionConfig,
     private val deps: CallSessionDeps,
     private val events: CallSessionEvents,
+    private val rows: SocketRows? = null,
 ) {
     private enum class Phase { NEW, CONNECTING, OPEN, CLOSED }
 
@@ -198,12 +218,21 @@ internal class VoiceCallSession(
     /** The agent's caption turn so far, its phrases joined (spokenJoinGap). */
     private var spokenTurn = ""
 
+    // The analytics rows: when the ticket was asked for and how long it took, when the socket was asked for and opened.
+    private var ticketAskedAt = 0L
+    private var ticketMs: Long? = null
+    private var socketAt = 0L
+    private var openedAt = 0L
+    private var firstAudioAt: Long? = null
+    private var voiceTold = false
+
     /** The agent's voice is being heard (playout-based). Read on the scheduler thread. */
     val agentSpeaking: Boolean get() = speaking
 
     fun start() = scheduler.post {
         if (phase != Phase.NEW) return@post
         phase = Phase.CONNECTING
+        ticketAskedAt = scheduler.now()
         deps.io {
             val ticket = fetchTicket()
             scheduler.post { connect(ticket) }
@@ -284,6 +313,7 @@ internal class VoiceCallSession(
 
     private fun connect(ticket: Ticket?) {
         if (phase != Phase.CONNECTING) return
+        if (ticket != null) ticketMs = scheduler.now() - ticketAskedAt
         val url: String
         val protocols: List<String>
         if (ticket != null) {
@@ -300,6 +330,7 @@ internal class VoiceCallSession(
         openTimer = scheduler.schedule(CallFrames.OPEN_TIMEOUT_MS) {
             if (phase == Phase.CONNECTING) failBeforeOpen("The call could not connect within ${CallFrames.OPEN_TIMEOUT_MS / 1000} seconds.")
         }
+        socketAt = scheduler.now()
         val s = try {
             deps.openSocket(full, protocols, Listener())
         } catch (e: Exception) {
@@ -341,6 +372,8 @@ internal class VoiceCallSession(
         openTimer?.invoke(); openTimer = null
         send(CallFrames.init(variables))
         runCatching { deps.contextFrame() }.getOrNull()?.let { send(CallFrames.appContext(it)) }
+        openedAt = scheduler.now()
+        openRows()
         schedulePing()
         lastInboundAt = scheduler.now()
         armLiveness(CallFrames.LIVENESS_MS)
@@ -360,6 +393,46 @@ internal class VoiceCallSession(
         // A hang-up on another thread released the audio while it was starting: release it again.
         if (audioReleased.get()) runCatching { audio.stop() }
         events.onOpen()
+    }
+
+    /** When the customer tapped, on this clock: as the call says, else when this session was asked to start. */
+    private val tapAt: Long get() = config.tapAt?.takeIf { it <= ticketAskedAt } ?: ticketAskedAt
+
+    /**
+     * THE CONVERSATION STARTED: the transport row — the WebSocket, what the app
+     * asked for, and why WebRTC is not carrying it — then where the tap's wait
+     * went (a socket's call is never prepared: setup is tap → the socket asked
+     * for, its ticket inside; dial is → open), then what a WebRTC attempt
+     * before it left.
+     */
+    private fun openRows() {
+        val r = rows ?: return
+        CallAnalytics.frame(CallAnalytics.TRANSPORT, mapOf("transport" to "ws", "requested" to r.requested, "fallback_reason" to r.fallbackReason))?.let { send(it) }
+        CallAnalytics.frame(CallAnalytics.CONNECT, mapOf(
+            "mode" to "cold",
+            "warm" to false,
+            "total_ms" to openedAt - tapAt,
+            "setup_ms" to socketAt - tapAt,
+            "dial_ms" to openedAt - socketAt,
+            "mint_ms" to ticketMs,
+            "mint_route" to ticketMs?.let { "web" },
+        ))?.let { send(it) }
+        for (f in r.carried) send(f)
+    }
+
+    /** The agent's first audio, voice or not; then its voice — the first audio that is not digital silence — said once. */
+    private fun voiceRow(silence: Boolean, kind: AgentAudioFormat.Kind, sampleRate: Int) {
+        if (rows == null || voiceTold) return
+        val now = scheduler.now()
+        val first = firstAudioAt ?: now.also { firstAudioAt = it }
+        if (silence) return
+        voiceTold = true
+        CallAnalytics.frame(CallAnalytics.VOICE, mapOf(
+            "tap_to_voice_ms" to now - tapAt,
+            "answer_to_voice_ms" to now - openedAt,
+            "first_audio_ms" to first - openedAt,
+            "codec" to "${if (kind == AgentAudioFormat.Kind.MULAW) "PCMU" else "L16"}/$sampleRate",
+        ))?.let { send(it) }
     }
 
     /**
@@ -479,13 +552,16 @@ internal class VoiceCallSession(
         val bytes = B64.decode(f.data)
         val decoded = AgentAudio.decode(bytes, f.format, f.sampleRate, format) ?: return
         decoded.latch?.let { format = it }
-        if (decoded.latch == null && AgentAudio.isAllZero(bytes)) {
+        val zero = AgentAudio.isAllZero(bytes)
+        if (decoded.latch == null && zero) {
             // Digital silence decides nothing, and its mu-law reading is a full-scale DC step
             // lasting six times the frame's real length. In PCM it is what it is: silence.
             audio.play(ShortArray(bytes.size / 2), f.sampleRate?.takeIf { it > 0 } ?: AgentAudio.PCM_RATE)
         } else {
             audio.play(decoded.pcm16, decoded.sampleRate)
         }
+        // Its voice is audio that is not digital silence, whatever the frame declared itself to be.
+        voiceRow(zero, decoded.kind, decoded.sampleRate)
         // Queued: the agent stays audible until what the player now holds has been heard.
         audibleUntil = scheduler.now() + Math.round(audio.bufferedSeconds() * 1000)
     }

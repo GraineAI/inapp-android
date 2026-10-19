@@ -509,6 +509,68 @@ class GraineInApp private constructor(
     private fun announceIdentity() {
         val env = identity.envelope()
         main.post { identityWatchers.forEach { runCatching { it(env) } } }
+        // A call prepared for anyone else — another user, another memory choice — is let go before anything else.
+        AppShared.callsIfMade()?.whoChanged(this, env)
+        warmCalls(env)
+    }
+
+    /**
+     * THE FIRST TAP OF A WEBRTC CALL, FAST. With the WebRTC module in the app,
+     * the grant this agent's next call needs to mint at the telephony gateway —
+     * beside the SBC, not an ocean away (RtcDirect.kt) — is kept ready: checked
+     * once the session has said who the user is, whenever that changes
+     * (identify, sign-out, the memory choice) — it is what a grant carries —
+     * and when the app comes back to the foreground. A check sends nothing while
+     * the grant in hand holds. Here because every start and every identify
+     * passes through: the session's arrival and identify() both announce the
+     * identity, from an app's own code or a bridge's (Kotlin Multiplatform,
+     * React Native, Flutter). A call ringing with this agent has its own grant
+     * asked for again under the new identity. Never before the session — a
+     * grant carries who the user is, as a ticket does, and neither is asked for
+     * before it says — and never for calls that go over the WebSocket. Nothing
+     * waits on it and nothing fails without it: a call with no grant mints
+     * through the web route, as it always did. Never the microphone.
+     */
+    private fun warmCalls(who: IdentityEnvelope) {
+        if (!callsMayMintDirect()) return
+        runCatching { env.directMint.warm(config.baseUrl, config.publishableKey, who) }
+        runCatching { AppShared.callsIfMade()?.ringingCallOf(this) }.getOrNull()?.let { callId ->
+            runCatching { env.directMint.warmCall(config.baseUrl, config.publishableKey, who, callId) }
+        }
+    }
+
+    /**
+     * A ring for this agent has arrived: its own grant is wanted, for exactly
+     * its call id, so the mint at the answer can go to the gateway
+     * (RtcDirect.kt). The ring's call, prepared now, brings it with its own
+     * mint's answer; only an answer without one has it asked for apart. Before
+     * the session there is nobody to want it for — the session's arrival asks,
+     * for the ring still ringing.
+     */
+    internal fun warmRing(callId: String) {
+        if (!callsMayMintDirect()) return
+        val who = runCatching { identityEnvelope() }.getOrNull() ?: return
+        runCatching { env.directMint.expectCall(config.publishableKey, who, callId) }
+    }
+
+    /** The session has said who the user is, the WebRTC module is here, and the app and the dashboard let calls use WebRTC. */
+    private fun callsMayMintDirect(): Boolean {
+        if (session == null || !RtcModule.added()) return false
+        val app = AppShared.callsIfMade()?.config?.callTransport ?: GraineCallTransport.AUTO
+        return CallTransportChoice.decide(app, schedulingRules.audioTransport, moduleAvailable = true, osSupported = RtcModule.runsHere()).webrtc
+    }
+
+    /**
+     * The id the call about to be placed with this agent carries: the one its
+     * warm grant was asked for (RtcDirect.kt), so it mints at the gateway and
+     * names itself exactly as a call minted through the web route would — else
+     * null, and the call takes an id of its own. The next call's grant follows
+     * this call's mint.
+     */
+    internal fun nextCallId(): String? {
+        if (!RtcModule.added()) return null
+        val who = runCatching { identityEnvelope() }.getOrNull() ?: return null
+        return runCatching { env.directMint.takeCallId(config.publishableKey, who) }.getOrNull()
     }
 
     /** Release this device for a user who left it. Best effort: the server also releases a device unused for 30 days. */
@@ -1268,6 +1330,8 @@ class GraineInApp private constructor(
         // The call engine's log follows the agents: any one of them in debug turns it on.
         if (config.debug) CallLog.enabled = true
         watchLifecycle()
+        // Back in the foreground: the next call's grant is checked — nothing is sent while it holds (RtcDirect.kt).
+        foregroundWatchers.add { inFront -> if (inFront) warmCalls(identityEnvelope()) }
         loadSession { }
         // With Firebase in the app, this install's push token reaches the SDK by itself — once a process.
         FirebasePush.start(application, config.debug)

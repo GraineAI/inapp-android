@@ -104,9 +104,13 @@ internal class FakeSipSocket(private val scheduler: CallScheduler? = null) : Cal
     var url: String? = null
     var protocols: List<String>? = null
 
+    /** Told of every frame as it is sent — what else was true at that moment. */
+    var onSend: ((String) -> Unit)? = null
+
     override fun send(text: String): Boolean {
         if (closed != null) return false
         sent += text
+        onSend?.invoke(text)
         return true
     }
     override fun close(code: Int, reason: String) {

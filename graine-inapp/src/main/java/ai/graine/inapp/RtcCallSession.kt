@@ -3,7 +3,6 @@
 package ai.graine.inapp
 
 import org.json.JSONObject
-import java.util.Locale
 
 /** What a WebRTC call is for: who it reaches and what the agent is told — the mint's inputs. */
 internal class RtcCallRequest(
@@ -50,6 +49,8 @@ internal class RtcEnv(
     val sipTrace: (direction: Char, text: String) -> Unit = { _, _ -> },
     /** Every step, from the first (the mint, before any dial) — the live test's timings. */
     val steps: (step: String, detail: String) -> Unit = { _, _ -> },
+    /** The direct mint (RtcDirect.kt): the credential from the telephony gateway, with a grant. Null: the web route only. */
+    val direct: RtcDirectMint? = null,
 )
 
 /** What the call needs from the app once it dials: its actions and its screen. */
@@ -58,26 +59,47 @@ internal class RtcDialDeps(
     val contextFrame: () -> JSONObject?,
     /** Where the agent's sockets live, as the session now says (a ring may have been prepared before it arrived). */
     val wsHost: String? = null,
+    /**
+     * When the customer tapped — placed the call, or answered its ring — on
+     * the scheduler's clock: the analytics rows count from it. Null: from the
+     * dial.
+     */
+    val tapAt: Long? = null,
+    /** What the app asked for — "auto", "rtc" or "ws" — for the transport row. */
+    val requested: String? = null,
 )
 
 /**
  * ONE NATIVE CALL ON WEBRTC — the voice bar's own sequence, done natively
  * (WEBRTC-CALLS.md §1; the bar's lib/webcall-rtc.ts).
  *
- *   prepare  the mint (credentials, ICE servers) → a peer connection gathering
- *            its candidates, and the signalling socket registering — together
- *   dial     the control channel, then an INVITE carrying the gathered offer →
- *            100 → 200 → ACK → the answer applied → ICE connected: the call is up
+ *   prepare  the mint (credentials, ICE servers — at the telephony gateway with
+ *            the call's grant, else through the web route: RtcDirect.kt) → a peer
+ *            connection whose candidate pool gathers — no microphone track, no
+ *            offer, so nothing can record — and the signalling socket
+ *            registering, together
+ *   dial     the control channel; the microphone's track and the offer, the
+ *            pooled candidates in it at once; the microphone and speaker on, and
+ *            an INVITE carrying the offer → 100 → 200 → ACK → the answer applied
+ *            → ICE connected: the call is up
  *
  * [prepare] runs at the tap, or when a ring arrives; [dial] runs once the
- * call's foreground service is up, so the INVITE never leaves before the
- * phone may record. A dial that is not answered in time is tried once more on
- * a fresh connection when the failure was the network's; anything else before
- * media — the mint refused, no registration, no reply, no answer, no media
- * path, any error — is [Listener.onFallback]: the call goes on, on the
- * WebSocket, inside the same ring and screen. The whole attempt has 12 s.
+ * phone may record — at the tap when it was made in the app in front, else
+ * once the call's foreground service is up (GraineCalls, CallStart) — so the
+ * INVITE never leaves before then. A dial that is not answered in time is
+ * tried once more on a fresh connection when the failure was the network's;
+ * anything else before media — the mint refused, no registration, no reply,
+ * no answer, no media path, any error — is [Listener.onFallback]: the call
+ * goes on, on the WebSocket, inside the same ring and screen. The whole
+ * attempt has 12 s.
  * After media nothing falls back: a lost path gets one ICE restart, then the
  * call ends as dropped.
+ *
+ * On its control channel the call says how it went, as analytics rows
+ * (CallAnalytics): at media the transport and where the tap's wait went, then
+ * the agent's voice first heard, each time the connection heals, and the
+ * audio's quality at the end. What happened before a fallback — no audio path
+ * after the answer, a socket replaced — goes with the call to the WebSocket.
  *
  * All state lives on the scheduler's thread.
  */
@@ -103,6 +125,25 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
         fun onControlJoined() {}
         /** The far side's audio, measured about five times a second while the call is up. */
         fun onAudioStats(stats: GraineRtcStats) {}
+        /**
+         * Just before [onFallback]: the analytics rows (CallAnalytics frames)
+         * of what happened on the way — the socket replaced, the answer with no
+         * audio path — for the conversation that carries the call instead.
+         */
+        fun onRows(frames: List<String>) {}
+    }
+
+    /**
+     * A CALL PREPARED AHEAD OF THE TAP (GraineCalls.prepareCall), watched
+     * until its dial: told once it is ready to dial — minted, its peer made,
+     * registered — and once if it can no longer be: the mint failed
+     * or was refused, the media could not start, the registration failed or
+     * lapsed, or the socket dropped. Its owner lets it go then, silently; the
+     * tap prepares as it always did. Nothing is said after the dial.
+     */
+    interface Preparation {
+        fun onReady(ms: Long, direct: Boolean) {}
+        fun onLost(why: String) {}
     }
 
     private enum class Phase { IDLE, PREPARING, DIALING, ANSWERED, LIVE, DONE }
@@ -120,6 +161,13 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
     private var dialAt = 0L
     private var preparedBeforeDial = false
 
+    // Prepared ahead of the tap: who watches it until the dial, and since when.
+    private var preparation: Preparation? = null
+    private var aheadOfTap = false
+    private var preparedAt = 0L
+    private var readyTold = false
+    private var mintedDirect = false
+
     // The mint.
     private var creds: RtcCredentials? = null
     private var minting = false
@@ -130,6 +178,8 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
 
     // The peer.
     private var peer: GraineRtcPeer? = null
+    /** The ICE servers the peer was made with: whether its offer waits for a relay. */
+    private var peerServers: List<GraineRtcIceServer> = emptyList()
     private var peerGen = 0
     private var offerReady = false
     private var mediaFailure: String? = null
@@ -162,6 +212,8 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
     private var iceState = "new"
     private var muted = false
     private var onHold = false
+    /** The peer's microphone and speaker were turned on, at its INVITE: until then a hold has nothing to turn off. */
+    private var audioOn = false
     private var dropStartedAt: Long? = null
     private var restartTried = false
     private var restarting = false
@@ -173,15 +225,42 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
     private var firstAudioSeen = false
     private var firstVoiceSeen = false
 
+    // The analytics rows (CallAnalytics): when each step happened, on the scheduler's clock.
+    private var tapAt = 0L
+    /** When the mint, the peer and the registration were all in: before the tap, the call was prepared. */
+    private var readyAt: Long? = null
+    private var mintMs: Long? = null
+    private var gatherMs: Long? = null
+    private var uaRegisterMs: Long? = null
+    private var mediaAt = 0L
+    private var firstAudioAt: Long? = null
+    /** The INVITE of a dial that was given up and dialled again: the redial's trouble began there. */
+    private var redialFrom: Long? = null
+    /** A silent socket found before the dial, being replaced; and the socket lost under the answered call. */
+    private var replacingSince: Long? = null
+    private var sipLostAt: Long? = null
+    /** Rows from before media: the control channel's at media, or, on a fallback, the WebSocket's. */
+    private val early = ArrayList<String>()
+    private val quality = QualitySamples()
+    private var qualitySent = false
+
     /** The credential is still good for a while (rtc-warm.ts): one about to expire is minted again. */
     private fun credsUsable(c: RtcCredentials): Boolean = c.expiresAtMs == null || c.expiresAtMs - env.wallClock() >= RtcMint.MIN_REMAINING_MS
 
     // ── prepare ─────────────────────────────────────────────────────────────
 
-    /** Mint, then gather and register — everything a call needs before the INVITE. Safe to call once; later calls do nothing. */
-    fun prepare() = scheduler.post {
+    /**
+     * Mint, then make the peer and register — everything a call needs before
+     * its offer and its INVITE, which are the dial's. Safe to call once; later
+     * calls do nothing. [watch]: the call is prepared ahead of the tap, and
+     * told how that goes until its dial.
+     */
+    fun prepare(watch: Preparation? = null) = scheduler.post {
         if (phase != Phase.IDLE) return@post
         phase = Phase.PREPARING
+        preparation = watch
+        aheadOfTap = watch != null
+        preparedAt = now()
         mint()
     }
 
@@ -192,6 +271,19 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
         val body = RtcMint.body(request.publishableKey, sessionId, request.variables, request.identity, request.callId).toString()
         val started = now()
         env.io {
+            if (released) return@io
+            /*
+             * THE GATEWAY FIRST, THE WEB ROUTE SECOND (RtcDirect.kt). With a grant
+             * asked for exactly this call in hand, the credential — or a gate's
+             * refusal — comes from the telephony gateway beside the SBC, in a
+             * fraction of the web route's time. Anything else is null, and the
+             * web route mints below exactly as it always has.
+             */
+            val direct = env.direct?.let { d -> runCatching { d.mint(request, sessionId) }.getOrNull() }
+            if (direct != null) {
+                scheduler.post { minted(direct, null, now() - started, DIRECT) }
+                return@io
+            }
             var reply: HttpReply? = null
             var error: String? = null
             // A request the network lost is sent again (after 1 s, then 2 s); an answer, whatever its status, is final.
@@ -206,16 +298,20 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
                     if (attempt < RtcMint.RETRY_DELAYS_MS.size) try { Thread.sleep(RtcMint.RETRY_DELAYS_MS[attempt]) } catch (_: InterruptedException) { break }
                 }
             }
+            // The grant that may ride in with the answer is this call's own: a redial's mint — a ring's at its answer — takes it to the gateway.
+            env.direct?.let { d -> runCatching { d.webMinted(request, reply) } }
             scheduler.post { minted(reply, error, now() - started) }
         }
     }
 
-    private fun minted(reply: HttpReply?, error: String?, ms: Long) {
+    /** The mint's answer — the web route's, or the gateway's ([via] [DIRECT]), read alike. */
+    private fun minted(reply: HttpReply?, error: String?, ms: Long, via: String? = null) {
         minting = false
         if (phase == Phase.DONE) return
+        val at = via?.let { " ($it)" }.orEmpty()
         if (reply != null && reply.code != 200) RtcMint.refusal(reply.code, reply.body)?.let { message ->
             refusal = message
-            step("mint", "refused after $ms ms: HTTP ${reply.code}${errorCode(reply.body)?.let { " $it" } ?: ""}")
+            step("mint", "refused after $ms ms$at: HTTP ${reply.code}${errorCode(reply.body)?.let { " $it" } ?: ""}")
             maybeProceed()
             return
         }
@@ -226,12 +322,14 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
                 reply.code != 200 -> "HTTP ${reply.code}${errorCode(reply.body)?.let { " $it" } ?: ""}"
                 else -> "the credentials could not be read (or name no agent)"
             }
-            step("mint", "failed after $ms ms: $mintFailure")
+            step("mint", "failed after $ms ms$at: $mintFailure")
             maybeProceed()
             return
         }
         creds = c
-        step("mint", "$ms ms, ${c.iceServers.size} ICE server(s)")
+        mintedDirect = via == DIRECT
+        mintMs = ms
+        step("mint", "$ms ms$at, ${c.iceServers.size} ICE server(s)")
         startPeer(c.iceServers)
         startSignalling(c)
     }
@@ -243,8 +341,10 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
     // ── the peer and its candidates ─────────────────────────────────────────
 
     /** One gathering — the first offer's, or an ICE restart's: when it began, how long it may run, and what to do after. */
-    private inner class Gather(val gen: Int, val wantRelay: Boolean, val after: () -> Unit) {
+    private inner class Gather(val gen: Int, val wantRelay: Boolean, val restart: Boolean, val after: () -> Unit) {
         val startedAt = now()
+        /** Candidates that came during it: at the dial, the pool's, at once. */
+        var candidates = 0
         val cap = RtcIce.capFor(wantRelay)
         var timer: (() -> Unit)? = null
         var done = false
@@ -264,15 +364,41 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
         }
         peer = p
         p.setMicrophoneEnabled(!muted)
-        if (onHold) p.setAudioActive(recording = false, playout = false)
-        gather(gen, RtcIce.hasTurn(servers), iceRestart = false) {
+        /*
+         * NOTHING RECORDED, NOTHING PLAYED, UNTIL THE DIAL. The library starts
+         * the microphone as soon as the offer is set — and a call prepared
+         * ahead of the tap (prepareCall's, a ring's) sets its offer long before
+         * anyone tapped: the phone would show its microphone in use, for a call
+         * nobody placed. Both stay off until the INVITE ([invite]); a fresh
+         * peer, a redial's, starts off too.
+         */
+        audioOn = false
+        p.setAudioActive(recording = false, playout = false)
+        peerServers = servers
+        // A redial's fresh peer, or a cold call's, is made after the dial: its offer now. A prepared one waits for the dial.
+        if (dialWanted) offer()
+    }
+
+    /**
+     * THE OFFER, AT THE DIAL AND NEVER BEFORE — the voice bar's pooled peer.
+     * Setting an offer is what starts the phone's microphone in the WebRTC
+     * library (found on a device, 19 Oct: turning recording off does not hold
+     * it back), so a call prepared ahead of the tap — prepareCall's, or a
+     * ring's until its answer — has only its peer, whose candidate pool
+     * gathers without one. Here, after the tap, the microphone's track joins
+     * and the offer is set; the pooled candidates arrive at once, and the
+     * gathering ends by the bar's rule. What it cost at the dial is logged.
+     */
+    private fun offer() {
+        if (peer == null || offerReady || gathering != null) return
+        gather(peerGen, RtcIce.hasTurn(peerServers), iceRestart = false) {
             offerReady = true
             maybeProceed()
         }
     }
 
     private fun gather(gen: Int, wantRelay: Boolean, iceRestart: Boolean, after: () -> Unit) {
-        val g = Gather(gen, wantRelay, after)
+        val g = Gather(gen, wantRelay, iceRestart, after)
         gathering = g
         val p = peer ?: return
         p.createOffer(iceRestart) { error ->
@@ -297,6 +423,7 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
     private fun candidate(gen: Int, kind: RtcIce.Kind) {
         val g = gathering ?: return
         if (g.gen != gen || g.done) return
+        if (kind != RtcIce.Kind.END) g.candidates++
         if (RtcIce.stopNow(kind, now() - g.startedAt, g.cap, g.wantRelay)) gathered(g, kind.name.lowercase())
     }
 
@@ -305,7 +432,9 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
         g.done = true
         g.timer?.invoke()
         if (gathering === g) gathering = null
+        if (!g.restart) gatherMs = now() - g.startedAt
         step("gather", "${now() - g.startedAt} ms ($why): ${RtcSdp.candidateTypes(peer?.localDescription())}")
+        if (!g.restart) step("offer", "${now() - g.startedAt} ms at the dial (pooled candidates: ${g.candidates})")
         g.after()
     }
 
@@ -342,18 +471,37 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
 
     private inner class UaEvents(private val gen: Int) : SipUserAgent.Listener {
         override fun onRegistered(elapsedMs: Long) {
-            if (gen != uaGen || registered) return
+            if (gen != uaGen) return
+            // The signalling socket lost under the answered call is back and registered again: healed.
+            sipLostAt?.let { lost ->
+                sipLostAt = null
+                recovered(SOCKET_REPLACED, lost)
+            }
+            if (registered) return
             registered = true
             registerTimer?.invoke(); registerTimer = null
             if (registerMs == null) registerMs = elapsedMs
+            uaRegisterMs = elapsedMs
             step("register", "$elapsedMs ms")
+            // A silent socket, replaced before the INVITE, registered: healed.
+            replacingSince?.let { since ->
+                replacingSince = null
+                recovered(SOCKET_REPLACED, since)
+            }
             maybeProceed()
         }
         override fun onRegistrationFailed(failure: SipFailure) {
-            if (gen == uaGen && !registered) registrationFailed(failure)
+            if (gen != uaGen) return
+            if (!registered) registrationFailed(failure)
+            // A refresh refused while the call waits for its tap: its registration is gone.
+            else lostPreparation("the registration lapsed")
         }
         override fun onConnectionLost(error: String) {
-            if (gen == uaGen) step("signalling", "connection lost${if (phase == Phase.LIVE) "; reconnecting" else ""}")
+            if (gen != uaGen) return
+            step("signalling", "connection lost${if (phase == Phase.LIVE) "; reconnecting" else ""}")
+            // Answered, the user agent reopens it and registers again (keepConnected): the trouble starts now.
+            if ((phase == Phase.ANSWERED || phase == Phase.LIVE) && sipLostAt == null) sipLostAt = now()
+            lostPreparation("the signalling socket dropped")
         }
         override fun onMessage(direction: Char, text: String) = env.sipTrace(direction, text)
     }
@@ -379,9 +527,10 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
     // ── dial ────────────────────────────────────────────────────────────────
 
     /**
-     * The call's foreground service is up: dial — at once when prepared, else
-     * as soon as the mint, the candidates and the registration are in. The
-     * 12-second budget starts now.
+     * The phone may record — the tap was made in the app in front, or the
+     * call's foreground service is up: dial — at once when prepared, else as
+     * soon as the mint, the candidates and the registration are in. The
+     * 12-second budget starts now; the analytics rows count from the tap.
      */
     fun dial(deps: RtcDialDeps, listener: Listener) = scheduler.post {
         this.listener = listener
@@ -390,25 +539,69 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
         if (phase == Phase.IDLE) { phase = Phase.PREPARING; mint() }
         dialWanted = true
         dialAt = now()
-        preparedBeforeDial = registered && offerReady
+        tapAt = deps.tapAt?.takeIf { it <= dialAt } ?: dialAt
+        preparedBeforeDial = registered && peer != null
+        preparation = null
+        if (aheadOfTap) step("dial", "prepared ${CallAnalytics.seconds(dialAt - preparedAt)} ago")
         budgetTimer = scheduler.schedule(RtcDial.ATTEMPT_BUDGET_MS) { budgetSpent() }
         openControl()
         runCatching { deps.contextFrame() }.getOrNull()?.let { control?.send("app_context", CallFrames.appContext(it)) }
+        offer()
         maybeProceed()
+    }
+
+    /**
+     * Before the dial, a call prepared ahead of the tap says how it stands:
+     * lost — the mint failed or was refused, the media or the registration
+     * failed — or ready to dial, once.
+     */
+    private fun watchPreparation() {
+        val w = preparation ?: return
+        if (dialWanted || phase != Phase.PREPARING) return
+        val lost = when {
+            refusal != null -> "the mint was refused"
+            mintFailure != null -> "the mint failed"
+            mediaFailure != null -> mediaFailure
+            registerFailure != null -> "the registration failed"
+            else -> null
+        }
+        if (lost != null) {
+            lostPreparation(lost)
+            return
+        }
+        // Ready to dial: minted, registered, and its peer made — the offer is the dial's.
+        if (readyTold || creds == null || !registered || peer == null) return
+        readyTold = true
+        val ms = now() - preparedAt
+        step("prepared", "$ms ms (${if (mintedDirect) "direct" else "web"})")
+        runCatching { w.onReady(ms, mintedDirect) }
+    }
+
+    /** A call prepared ahead of the tap can no longer be dialled: said once, before any dial. */
+    private fun lostPreparation(why: String) {
+        val w = preparation ?: return
+        if (dialWanted || phase == Phase.DONE) return
+        preparation = null
+        step("prepared", "lost: $why")
+        runCatching { w.onLost(why) }
     }
 
     /** Whatever the call is waiting for has come: fall back on a failure, else send the INVITE once everything is in. */
     private fun maybeProceed() {
+        if (readyAt == null && creds != null && registered && peer != null) readyAt = now()
+        watchPreparation()
         if (!dialWanted || phase != Phase.PREPARING && phase != Phase.DIALING || call != null || probing) return
         refusal?.let { refused(it); return }
         mintFailure?.let { fallback(RtcFallback.MINT_FAILED, it); return }
         val c = creds ?: return
         mediaFailure?.let { fallback(RtcFallback.ERROR, it); return }
         registerFailure?.let { fallback(RtcFallback.REGISTER_FAILED, it.toString()); return }
-        if (!registered || !offerReady) return
+        if (!registered) return
         val u = ua ?: return
-        // A registration made a while ago — a ring answered after twenty seconds — is asked first.
+        // A registration made a while ago — a call prepared before the tap, a ring answered after twenty seconds —
+        // is asked first, beside the offer the dial is making: the INVITE waits for the slower of the two, not both.
         if (!probed && now() - u.heardAt > RtcDial.PROBE_SKIP_MS) { probe(u, c); return }
+        if (!offerReady) return
         invite(c)
     }
 
@@ -426,6 +619,7 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
             } else {
                 // Silent: replaced at once on the credential it already has (or a fresh one near its expiry).
                 step("probe", "the socket was silent for ${now() - began} ms; registering again")
+                replacingSince = began
                 stopSignalling()
                 if (credsUsable(c)) startSignalling(c) else { creds = null; mint() }
             }
@@ -443,6 +637,9 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
         phase = Phase.DIALING
         heard = false
         inviteAt = now()
+        // The dial: the microphone and the speaker come on now — unless the phone has the audio (a hold keeps them off).
+        audioOn = true
+        p.setAudioActive(recording = !onHold, playout = !onHold)
         step("invite", "dial $dials, candidates: ${RtcSdp.candidateTypes(sdp)}")
         val headers = listOf(
             "X-Graine-Session-Id" to sessionId,
@@ -564,6 +761,7 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
         cancelDialTimers()
         phase = Phase.DIALING
         probed = true
+        if (redialFrom == null) redialFrom = inviteAt
         stopSignalling()
         closePeer()
         val c = creds
@@ -615,29 +813,112 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
         phase = Phase.LIVE
         cancelDialTimers()
         budgetTimer?.invoke(); budgetTimer = null
-        val t = now()
-        step("media", "ICE connected ${t - answeredAt} ms after the answer")
+        mediaAt = now()
+        step("media", "ICE connected ${mediaAt - answeredAt} ms after the answer")
         listener.onMedia()
-        telemetry()
+        connectedRows()
         statsTimer = scheduler.schedule(STATS_MS) { pollStats() }
     }
 
-    /** The two rows the voice bar records on every WebRTC call: how the connect went, and the transport. */
-    private fun telemetry() {
-        val setup = inviteAt - dialAt
-        val dialMs = answeredAt - inviteAt
-        val total = answeredAt - dialAt
-        val data = JSONObject().put("warm", preparedBeforeDial).put("setup_ms", setup).put("dial_ms", dialMs).put("total_ms", total)
-        if (dials > 1) data.put("redials", dials - 1)
-        fun s(ms: Long) = String.format(Locale.US, "%.1fs", ms / 1000.0)
-        val detail = "${if (preparedBeforeDial) "warm" else "cold"} · ${s(total)} (setup ${s(setup)}, answer ${s(dialMs)})"
-        sendEvent("connect", detail, data)
-        sendEvent("transport", "WebRTC", JSONObject().put("transport", "rtc").put("requested", "rtc"))
+    // ── the analytics rows ──────────────────────────────────────────────────
+
+    /**
+     * ONE ANALYTICS ROW (CallAnalytics) ON THE CALL'S OWN CHANNEL. Once the
+     * call is up it goes to the control channel at once — written before this
+     * task's next line, so a quality row precedes the BYE that follows it —
+     * where it waits until the channel joins, and is dropped if it never does.
+     * Before media it waits here: for the control channel at media, or, if the
+     * call falls back, for the WebSocket conversation that carries it
+     * ([Listener.onRows]). Nothing ever waits for a row.
+     */
+    private fun row(name: String, data: Map<String, Any?>) {
+        val frame = CallAnalytics.frame(name, data) ?: return
+        if (phase == Phase.LIVE) control?.sendHere("app_event", frame)
+        else if (early.size < EARLY_ROWS) early += frame
     }
 
-    private fun sendEvent(name: String, detail: String, data: JSONObject) {
-        val event = JSONObject().put("name", name).put("detail", detail).put("quiet", true).put("telemetry", true).put("data", data)
-        control?.send("app_event", JSONObject().put("type", "app_event").put("event", event).toString())
+    /** The connection healed: [what] ended a trouble that began at [since]. */
+    private fun recovered(what: String, since: Long) = row(CallAnalytics.RECOVERY, mapOf("what" to what, "after_ms" to now() - since))
+
+    /**
+     * AT MEDIA: the transport, then where the tap's wait went — tap → INVITE
+     * (setup) → answer (dial) → ICE connected — then whatever healed on the
+     * way. PREPARED is a call that was minted, registered and had its peer
+     * before the tap (prepareCall's, or a ring's, ready by its answer); its
+     * mint and registration are its preparation's own times, and its age at
+     * the tap rides along. A cold call's are inside its setup. The gathering is
+     * always the dial's: the offer is never made before it.
+     */
+    private fun connectedRows() {
+        val prepared = preparedBeforeDial && readyAt.let { it != null && it <= tapAt }
+        row(CallAnalytics.TRANSPORT, mapOf("transport" to "rtc", "requested" to deps?.requested))
+        row(CallAnalytics.CONNECT, mapOf(
+            "mode" to if (prepared) "prepared" else "cold",
+            "warm" to prepared,
+            "total_ms" to answeredAt - tapAt,
+            "setup_ms" to inviteAt - tapAt,
+            "dial_ms" to answeredAt - inviteAt,
+            "mint_ms" to mintMs,
+            "mint_route" to creds?.let { if (mintedDirect) "direct" else "web" },
+            "gather_ms" to gatherMs,
+            "register_ms" to uaRegisterMs,
+            "redials" to Math.max(0, dials - 1),
+            "prepared_age_s" to if (prepared) (tapAt - preparedAt) / 1000.0 else null,
+            "ice_ms" to mediaAt - answeredAt,
+        ))
+        for (f in early) control?.sendHere("app_event", f)
+        early.clear()
+        // Dialled again on a fresh connection, and connected: the trouble lasted from the INVITE that went unanswered.
+        redialFrom?.let { recovered(REDIAL, it) }
+    }
+
+    /** Once, at the end of a call that had media — before the BYE, or at the far side's: the audio, from the readings so far. */
+    private fun qualityRow() {
+        if (qualitySent || phase != Phase.LIVE) return
+        qualitySent = true
+        row(CallAnalytics.QUALITY, mapOf(
+            "duration_s" to (now() - mediaAt) / 1000.0,
+            "loss_pct" to quality.lossPct(),
+            "jitter_avg_ms" to quality.jitterAvgMs(),
+            "jitter_max_ms" to quality.jitterMaxMs(),
+            "rtt_avg_ms" to quality.rttAvgMs(),
+        ))
+    }
+
+    /**
+     * The far side's audio across the call, from the readings taken five
+     * times a second — for its quality row. The counters are the call's
+     * running totals, so the latest reading is the whole call's; jitter and
+     * the round trip are averaged over the readings that had one.
+     */
+    private class QualitySamples {
+        private var lost = 0L
+        private var received = 0L
+        private var jitterSum = 0.0
+        private var jitterMax = 0.0
+        private var jitters = 0
+        private var rttSum = 0.0
+        private var rtts = 0
+
+        fun add(s: GraineRtcStats) {
+            lost = Math.max(lost, s.packetsLost)
+            received = Math.max(received, s.packetsReceived)
+            s.jitterSeconds?.takeIf { s.packetsReceived > 0 && it.isFinite() && it >= 0 }?.let {
+                jitterSum += it
+                jitterMax = Math.max(jitterMax, it)
+                jitters++
+            }
+            s.roundTripSeconds?.takeIf { it.isFinite() && it >= 0 }?.let {
+                rttSum += it
+                rtts++
+            }
+        }
+
+        /** Lost of all the far side sent, in percent; null before any packet. */
+        fun lossPct(): Double? = (lost + received).takeIf { it > 0 }?.let { lost * 100.0 / it }
+        fun jitterAvgMs(): Double? = if (jitters > 0) jitterSum / jitters * 1000 else null
+        fun jitterMaxMs(): Double? = if (jitters > 0) jitterMax * 1000 else null
+        fun rttAvgMs(): Double? = if (rtts > 0) rttSum / rtts * 1000 else null
     }
 
     /**
@@ -650,7 +931,11 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
     private fun watch(state: String) {
         when (state) {
             "connected", "completed" -> {
-                if (dropStartedAt != null) step("media", "back after ${now() - dropStartedAt!!} ms")
+                dropStartedAt?.let { began ->
+                    step("media", "back after ${now() - began} ms")
+                    // Healed by the restart it was given; back on its own, it is no recovery of ours.
+                    if (restarting) recovered(ICE_RESTART, began)
+                }
                 dropStartedAt = null
                 restarting = false
                 restartTimer?.invoke(); restartTimer = null
@@ -714,7 +999,10 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
         when (phase) {
             Phase.LIVE -> end(GraineCallOutcome.EndReason.FAILED, "The microphone stopped working.")
             Phase.DONE, Phase.IDLE -> Unit
-            else -> if (dialWanted) fallback(RtcFallback.ERROR, "the audio could not start") else mediaFailure = "the audio could not start"
+            else -> if (dialWanted) fallback(RtcFallback.ERROR, "the audio could not start") else {
+                mediaFailure = "the audio could not start"
+                watchPreparation()
+            }
         }
     }
 
@@ -727,14 +1015,24 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
     }
 
     private fun onStats(s: GraineRtcStats) {
+        quality.add(s)
         if (!firstAudioSeen && s.bytesReceived > 0) {
             firstAudioSeen = true
+            firstAudioAt = now()
             step("audio", "first inbound audio ${now() - answeredAt} ms after the answer (${s.codec ?: "codec unknown"}, ${s.localCandidateType ?: "path unknown"})")
         }
         val level = speaking.level(s)
         if (!firstVoiceSeen && level != null && level > 0.01) {
             firstVoiceSeen = true
             step("audio", "the agent's voice ${now() - answeredAt} ms after the answer")
+            row(CallAnalytics.VOICE, mapOf(
+                "tap_to_voice_ms" to now() - tapAt,
+                "answer_to_voice_ms" to now() - answeredAt,
+                "first_audio_ms" to firstAudioAt?.let { it - answeredAt },
+                // "audio/opus" and 48000 → "audio/opus/48000", which the row writes as "opus/48000".
+                "codec" to s.codec?.let { c -> s.clockRate?.let { "$c/$it" } ?: c },
+                "candidate" to s.localCandidateType,
+            ))
         }
         speaking.update(level, now())?.let { listener.onAgentSpeaking(it) }
         listener.onAudioStats(s)
@@ -810,11 +1108,16 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
         peer?.setMicrophoneEnabled(!value)
     }
 
-    /** The phone took the call's audio (a phone call, another app): no recording and no playout until it is back. */
+    /**
+     * The phone took the call's audio (a phone call, another app): no
+     * recording and no playout until it is back. Before the dial there is
+     * nothing to stop — the audio is off until the INVITE, which keeps it off
+     * if the phone still has it.
+     */
     fun setOnHold(value: Boolean) = scheduler.post {
         if (onHold == value) return@post
         onHold = value
-        peer?.setAudioActive(recording = !value, playout = !value)
+        if (audioOn) peer?.setAudioActive(recording = !value, playout = !value)
     }
 
     /** A newer screen: queued until the control channel joins, replacing any screen still waiting. */
@@ -822,11 +1125,16 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
         if (phase != Phase.DONE) control?.send("app_context", CallFrames.appContext(frame))
     }
 
-    /** Hang up from this side — BYE, or CANCEL before the answer — and release everything. No event follows. */
+    /**
+     * Hang up from this side — BYE, or CANCEL before the answer — and release
+     * everything. A call that had media writes its quality row first, from the
+     * readings it already has: nothing is waited for. No event follows.
+     */
     fun hangUp() {
         released = true
         scheduler.post {
             if (phase == Phase.DONE) return@post
+            qualityRow()
             phase = Phase.DONE
             release()
         }
@@ -836,9 +1144,18 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
 
     private fun fallback(reason: String, detail: String) {
         if (phase == Phase.DONE || phase == Phase.LIVE) return
+        // Answered, and no audio path opened: a media row, which the conversation carrying the call instead records.
+        if (phase == Phase.ANSWERED && reason == RtcFallback.ICE_TIMEOUT) {
+            row(CallAnalytics.MEDIA, mapOf("reason" to if (iceState == "failed") "ice_failed" else "ice_timeout", "transport" to "rtc"))
+        }
         phase = Phase.DONE
         step("fallback", "$reason: $detail")
         release()
+        if (early.isNotEmpty()) {
+            val rows = early.toList()
+            early.clear()
+            listener.onRows(rows)
+        }
         listener.onFallback(reason, detail)
     }
 
@@ -853,6 +1170,8 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
 
     private fun end(reason: GraineCallOutcome.EndReason, error: String?) {
         if (phase == Phase.DONE) return
+        // The far side's BYE, or the path lost: the quality row at once, while the channel is still open.
+        qualityRow()
         phase = Phase.DONE
         release()
         endCaptionTurn()
@@ -886,5 +1205,13 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
         const val OFFER_ANSWER_WAIT_MS = 3_000L
         /** What the call says when the connection is lost after the call was up. */
         const val LOST = "The call's connection was lost."
+        /** A mint answered by the telephony gateway itself, as the step log names it. */
+        const val DIRECT = "direct"
+        /** How the connection healed, in the analytics rows' words. */
+        const val REDIAL = "redial"
+        const val ICE_RESTART = "ice_restart"
+        const val SOCKET_REPLACED = "socket_replaced"
+        /** Rows kept from before media — far more than a call makes: a guard, not a budget. */
+        const val EARLY_ROWS = 16
     }
 }

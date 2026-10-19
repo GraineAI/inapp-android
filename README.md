@@ -17,7 +17,7 @@ Integration guide: https://www.graine.ai/docs/in-app/android
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    implementation("ai.graine:inapp-android:0.10.3")
+    implementation("ai.graine:inapp-android:0.11.0")
 }
 ```
 
@@ -279,8 +279,8 @@ ring, the call screen or the outcomes.
 
 ```kotlin
 dependencies {
-    implementation("ai.graine:inapp-android:0.10.3")
-    implementation("ai.graine:inapp-android-rtc:0.10.3")   // same version as the SDK
+    implementation("ai.graine:inapp-android:0.11.0")
+    implementation("ai.graine:inapp-android-rtc:0.11.0")   // same version as the SDK
 }
 ```
 

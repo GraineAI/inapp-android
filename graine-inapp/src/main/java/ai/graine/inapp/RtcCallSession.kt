@@ -208,11 +208,15 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
     private var call: SipUserAgent.Call? = null
     private var dialSeq = 0
     private var dials = 0
+    /** The INVITE in flight has had a reply: a provisional one, or its answer. A challenge is not one — the INVITE it refuses is replaced. */
     private var heard = false
     private var inviteAt = 0L
     private var answeredAt = 0L
     private var heardTimer: (() -> Unit)? = null
+    /** The ceiling: ANSWER_DEADLINE_MS from the INVITE, whatever it heard. */
     private var answerTimer: (() -> Unit)? = null
+    /** ANSWER_AFTER_HEARD_MS from the first provisional reply to the INVITE in flight; stopped when that INVITE is challenged. */
+    private var answerClock: (() -> Unit)? = null
     private var iceTimer: (() -> Unit)? = null
     private var budgetTimer: (() -> Unit)? = null
 
@@ -659,6 +663,7 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
             "X-Application-Sid" to c.applicationSid,
         )
         call = u.invite(c.target, headers, sdp, CallEvents(seq))
+        // Silence is judged on the INVITE in flight when the deadline comes: after a challenge, the one with credentials.
         heardTimer = scheduler.schedule(RtcDial.heardDeadlineMs(registerMs)) {
             if (seq == dialSeq && phase == Phase.DIALING && !heard) dialFailed(null, "no_response")
         }
@@ -671,18 +676,28 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
         private val current: Boolean get() = seq == dialSeq && phase != Phase.DONE
 
         override fun onProvisional(code: Int) {
-            if (!current) return
-            if (!heard) {
-                step("provisional", "$code after ${now() - inviteAt} ms")
-                // The SBC has it: still only "trying" after ANSWER_AFTER_HEARD_MS is a stuck dial, cancelled and
-                // dialled once more on a fresh connection while the attempt's budget still has room.
-                answerTimer?.invoke()
-                answerTimer = scheduler.schedule(RtcDial.ANSWER_AFTER_HEARD_MS) {
+            if (!current || phase != Phase.DIALING) return
+            if (!heard) step("provisional", "$code after ${now() - inviteAt} ms")
+            heard = true
+            // THE ANSWER CLOCK. The SBC has the INVITE in flight: still only "trying" ANSWER_AFTER_HEARD_MS after its
+            // first provisional reply is a stuck dial, cancelled and dialled once more on a fresh connection while the
+            // attempt's budget still has room. Started once per INVITE — onChallenged stops it, and the INVITE with
+            // credentials starts it again from its own reply. An answer that has arrived is never stuck: onAnswered
+            // runs as the 200 is read, before its SDP is applied, and stops it.
+            if (answerClock == null) {
+                answerClock = scheduler.schedule(RtcDial.ANSWER_AFTER_HEARD_MS) {
+                    answerClock = null
                     if (seq == dialSeq && phase == Phase.DIALING) dialFailed(null, "no_answer")
                 }
             }
-            heard = true
-            heardTimer?.invoke(); heardTimer = null
+        }
+
+        override fun onChallenged(code: Int) {
+            if (!current || phase != Phase.DIALING) return
+            // Refused for its credentials and sent again with them: nothing heard so far was the INVITE now in flight.
+            step("challenged", "$code after ${now() - inviteAt} ms; sent again with credentials, the answer timed from its own reply")
+            heard = false
+            answerClock?.invoke(); answerClock = null
         }
 
         override fun onAnswered(sdp: String) {
@@ -690,6 +705,7 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
             heard = true
             heardTimer?.invoke(); heardTimer = null
             answerTimer?.invoke(); answerTimer = null
+            answerClock?.invoke(); answerClock = null
             phase = Phase.ANSWERED
             answeredAt = now()
             step("answered", "${answeredAt - inviteAt} ms after the INVITE${call?.serverCallId?.let { " (call $it)" } ?: ""}")
@@ -766,7 +782,12 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
         }
     }
 
-    /** The second dial: a fresh socket and registration (the same credential while it is good), a fresh peer. */
+    /**
+     * The second dial: a fresh socket and registration (the same credential while it is good), a fresh peer.
+     * The dial given up on is CANCELled — an answer that crosses the CANCEL is ACKed and ended with a BYE — on its
+     * own socket, which its user agent keeps until that dial has ended (SipUserAgent.stop): a leg left up on the
+     * server would run a second agent beside this call's.
+     */
     private fun redial() {
         dialSeq++
         cancelDialTimers()
@@ -788,6 +809,7 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
     private fun cancelDialTimers() {
         heardTimer?.invoke(); heardTimer = null
         answerTimer?.invoke(); answerTimer = null
+        answerClock?.invoke(); answerClock = null
         iceTimer?.invoke(); iceTimer = null
     }
 

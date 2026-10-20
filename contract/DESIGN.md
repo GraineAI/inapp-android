@@ -178,15 +178,20 @@ the app passes nothing about how it looks.
   connecting, reconnecting or thinking, draw the loader (Appearance → Loading)
   with that moment's words instead of the words above.
 - **Connecting.** The engine reports where a connect is with `graine:progress`
-  `{ stage }`: `registering`, `dialling`, `retrying` (the first attempt went
-  unanswered — on mobile data, usually a connection the phone dropped while
-  idle — and a fresh one is being made), `switching` (moving to the other
-  transport), `failed` (nothing could carry it; stop connecting). While
-  `retrying` or `switching`, draw the **reconnecting** moment. A connect the
-  customer has waited on for 4 s (their bar open, the page or the call not
-  there yet) says "Still connecting…" — but only while the brand's
-  connecting words are the default "Connecting…": a wording the brand chose,
-  often not English, is never replaced. Ignore stages you do not know.
+  `{ stage }`: `registering`, `dialling`, `retrying` (a fresh connection is
+  being made), `switching` (moving to the other transport), `failed` (nothing
+  could carry it; stop connecting). A call is connecting until it has been
+  answered with its audio flowing — `graine:call` says `connected` only then —
+  so the engine sends `retrying` and `switching` only for a call that was
+  connected and is recovering. A first connect that has to dial again (on
+  mobile data, usually a connection the phone dropped while idle) or move to
+  the other transport reports `registering` and `dialling`, and stays on the
+  connecting words. While `retrying` or `switching`, draw the **reconnecting**
+  moment. A connect the customer has waited on for 4 s (their bar open, the
+  page or the call not there yet) says "Still connecting…" — but only while
+  the brand's connecting words are the default "Connecting…": a wording the
+  brand chose, often not English, is never replaced. Ignore stages you do not
+  know.
 - **Meter.** Four bars 2.5 wide, 2 apart, bottoms aligned, heights 55%, 100%,
   70%, 40% of 12, fully round, `accent`. Each scales from its bottom between 35%
   and 100% and back, each leg `max(420, motion.durationMs × 3.2)` ms, bar *i*

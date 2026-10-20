@@ -79,7 +79,11 @@ internal object RtcDial {
         return Math.round(registerMs * 1.5).coerceIn(1_500, 4_000)
     }
 
-    /** From the INVITE leaving to ANY reply: the server sends 100 Trying at once, so silence past this is a dead socket. */
+    /**
+     * From the INVITE leaving to any reply to the INVITE in flight — after a challenge, the one with
+     * credentials. The server sends 100 Trying the moment it has a request, so silence past this is a
+     * dead socket, not an agent slow to pick up.
+     */
     fun heardDeadlineMs(registerMs: Long?): Long {
         if (registerMs == null || registerMs <= 0) return 4_000
         return Math.round(registerMs * 2.0).coerceIn(3_000, 8_000)
@@ -88,14 +92,30 @@ internal object RtcDial {
     /** From the INVITE to the answer. Production answers in 0.2–0.9 s. */
     const val ANSWER_DEADLINE_MS = 15_000L
     /**
-     * From the SBC's first reply to the answer. The SBC replies the moment it has the INVITE, and a
-     * healthy call is answered right after: 37 ms median on production, measured at the SBC on
-     * 18 Oct 2026. One that has said "trying" and then nothing for half a second is stuck — a feature
-     * server that took the call and never answered — so it is cancelled and dialled once more on a
-     * fresh connection. A seatbelt, and a short one: 0.10.2's 3 s was 80× a normal answer and only
-     * delayed the fallback; this is still ~13× the median, so a healthy call never trips it.
+     * From the SBC's first provisional reply to the AUTHENTICATED INVITE, to the answer. The SBC
+     * replies the moment it has the INVITE, and a healthy call is answered right after: 37 ms median
+     * on production, measured at the SBC on 18 Oct 2026. One that has said "trying" and then nothing
+     * for half a second is stuck — a feature server that took the call and never answered — so it is
+     * cancelled and dialled once more on a fresh connection. A seatbelt, and a short one: 0.10.2's 3 s
+     * was 80× a normal answer and only delayed the fallback; this is still ~13× the median, so a
+     * healthy call never trips it.
+     *
+     * The SBC challenges every INVITE (401 or 407) and the INVITE goes again with credentials, so the
+     * first reply a dial hears belongs to an INVITE that is about to be refused. Timed from there,
+     * this half second also had to hold the challenge, the second INVITE's whole round trip and the
+     * server's answer time, and a healthy call on a slow mobile link was dialled twice (20 Oct 2026).
+     * So a challenge is not "heard": a clock started before it stops there, and starts again at the
+     * first provisional reply to the INVITE with credentials (RtcCallSession, onChallenged).
      */
     const val ANSWER_AFTER_HEARD_MS = 500L
+    /**
+     * How long a dial given up on keeps its socket for its own ending: its CANCEL and the 487, or the
+     * ACK and BYE of an answer that crossed the CANCEL, all travel on the socket the dial was placed
+     * on. Closed sooner (the stack's usual two seconds), a late reply found it gone and the server's
+     * leg stayed up — its agent running beside the redial's — until the server gave up on its ACK.
+     * A few round trips on the slowest link a call still connects on. The registration goes at once.
+     */
+    const val ABANDONED_DIAL_GRACE_MS = 4_000L
     /** Answered, and still no media path after this: the customer's patience, not the library's ~30 s. */
     const val ICE_CONNECT_DEADLINE_MS = 8_000L
     /** Dials per call: the first, and one on a fresh connection. Then the WebSocket. */

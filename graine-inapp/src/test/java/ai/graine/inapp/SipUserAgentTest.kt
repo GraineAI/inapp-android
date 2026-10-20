@@ -41,6 +41,7 @@ class SipUserAgentTest {
 
     private val callEvents = object : SipCallListener {
         override fun onProvisional(code: Int) { events += "provisional $code" }
+        override fun onChallenged(code: Int) { events += "challenged $code" }
         override fun onAnswered(sdp: String) { events += "answered" }
         override fun onFailed(failure: SipFailure) { events += "failed: $failure" }
         override fun onRemoteBye() { events += "their bye" }
@@ -67,7 +68,7 @@ class SipUserAgentTest {
         val ua = registered()
         val call = ua.invite(target, headers, Trace.OFFER, callEvents)
         link.pump()
-        assertEquals(listOf("provisional 100", "answered"), events)
+        assertEquals(listOf("provisional 100", "challenged 401", "provisional 100", "answered"), events)
         events.clear()
         return ua to call
     }
@@ -232,7 +233,8 @@ class SipUserAgentTest {
         ), subs), shape(sent[3]))
         assertTrue("no Route anywhere: the 200 had no Record-Route", sent.none { it.contains("\r\nRoute:") })
         assertNotEquals("the 200's ACK is its own transaction", invite2.topViaBranch, ack200.topViaBranch)
-        assertEquals(listOf("provisional 100", "answered"), events)
+        // The challenge is said, and the INVITE with credentials' own 100 Trying is reported: it is the one the answer follows.
+        assertEquals(listOf("provisional 100", "challenged 401", "provisional 100", "answered"), events)
         assertTrue(sbc.badDigests.isEmpty())
     }
 
@@ -351,7 +353,7 @@ class SipUserAgentTest {
         val ack = socket.messages().last()
         assertEquals("ACK", ack.method)
         assertEquals(invite.topViaBranch, ack.topViaBranch)
-        assertEquals(listOf("provisional 100"), events)
+        assertEquals(listOf("provisional 100", "challenged 401", "provisional 100"), events)
     }
 
     @Test fun aCancelledCallAnsweredAnywayIsAckedAndHungUp() {
@@ -396,6 +398,71 @@ class SipUserAgentTest {
         socket.deliver(sbc.response(invite, 401, tag = true, extra = listOf("WWW-Authenticate: Digest realm=\"${Trace.REALM}\", qop=\"auth\", nonce=\"late\"")))
         sched.drain()
         assertEquals("no INVITE with credentials after the hang-up", 1, socket.requests("INVITE").size)
+    }
+
+    // ── a dial let go before its answer: CANCELled on a socket kept until the dial has ended ──
+
+    @Test fun aStoppedDialKeepsItsSocketUntilItsInviteHasItsFinalAnswer() {
+        val ua = registered()
+        sbc.inviteAnswer = FakeSbc.Answer.TRYING_ONLY
+        ua.invite(target, headers, Trace.OFFER, callEvents)
+        link.pump()
+        val invite = socket.requests("INVITE").last()
+        ua.stop(); link.pump()
+        assertEquals("the INVITE with credentials is the one cancelled", invite.topViaBranch, socket.requests("CANCEL").single().topViaBranch)
+        assertEquals("the registration went at once", "0", socket.requests("REGISTER").last().header("expires"))
+        sched.advance(SipUserAgent.CLOSE_AFTER_MS + 500); link.pump()
+        assertNull("the socket the dial's ending travels on went before it", socket.closed)
+        socket.deliver(sbc.response(invite, 487, tag = true)); sched.drain()
+        assertEquals("the 487 is ACKed", "ACK", socket.messages().last().method)
+        assertEquals("then the socket goes", 1000, socket.closed)
+    }
+
+    @Test fun aStoppedDialAnsweredAcrossItsCancelIsAckedAndEndedBeforeTheSocketGoes() {
+        val ua = registered()
+        sbc.inviteAnswer = FakeSbc.Answer.TRYING_ONLY
+        ua.invite(target, headers, Trace.OFFER, callEvents)
+        link.pump()
+        val invite = socket.requests("INVITE").last()
+        ua.stop(); link.pump()
+        assertEquals(1, socket.requests("CANCEL").size)
+        // The answer crosses the CANCEL: the server's leg exists now, and only an ACK and a BYE on this socket end it.
+        socket.deliver(sbc.answerTo(invite)); sched.drain()
+        val tail = socket.messages().filter { it.isRequest }.takeLast(2)
+        assertEquals(listOf("ACK", "BYE"), tail.map { it.method })
+        assertEquals("to the answer's Contact", "sip:${Trace.SBC}:5060;transport=tcp", tail[1].requestUri)
+        assertNull("the socket went before the BYE was answered", socket.closed)
+        link.pump()
+        assertEquals("the BYE answered, the socket goes", 1000, socket.closed)
+        assertFalse("never reported answered", "answered" in events)
+    }
+
+    @Test fun aStoppedDialThatNeverHearsBackLetsItsSocketGoAfterTheGrace() {
+        val ua = registered()
+        sbc.inviteAnswer = FakeSbc.Answer.TRYING_ONLY
+        ua.invite(target, headers, Trace.OFFER, callEvents)
+        link.pump()
+        ua.stop(); link.pump()
+        sched.advance(RtcDial.ABANDONED_DIAL_GRACE_MS - 100); link.pump()
+        assertNull(socket.closed)
+        sched.advance(100); link.pump()
+        assertEquals("a dial with no final answer held its socket for ever", 1000, socket.closed)
+    }
+
+    @Test fun aStoppedDialHeardOnlyAfterTheStopIsCancelledAtItsFirstReply() {
+        val ua = registered()
+        sbc.challenge = false
+        sbc.inviteAnswer = FakeSbc.Answer.SILENT
+        ua.invite(target, headers, Trace.OFFER, callEvents)
+        sched.drain()
+        val invite = socket.requests("INVITE").single()
+        ua.stop(); link.pump()
+        assertTrue("no CANCEL before a provisional", socket.requests("CANCEL").isEmpty())
+        sched.advance(SipUserAgent.CLOSE_AFTER_MS + 500); link.pump()
+        assertNull("the socket went before the INVITE could be cancelled", socket.closed)
+        socket.deliver(sbc.response(invite, 100)); sched.drain()
+        assertEquals("cancelled at its first reply", invite.topViaBranch, socket.requests("CANCEL").single().topViaBranch)
+        assertTrue("no event after a stop", events.isEmpty())
     }
 
     @Test fun answersAReinviteWithTheMediasAnswerAndAnUpdateWithoutOneWith200() {
@@ -550,6 +617,7 @@ class SipUserAgentTest {
             val callGot = LinkedBlockingQueue<String>()
             val call = ua.invite(target, headers, Trace.OFFER, object : SipCallListener {
                 override fun onProvisional(code: Int) { callGot.put("provisional $code") }
+                override fun onChallenged(code: Int) { callGot.put("challenged $code") }
                 override fun onAnswered(sdp: String) { callGot.put("answered") }
                 override fun onRemoteBye() { callGot.put("their bye") }
             })
@@ -562,6 +630,8 @@ class SipUserAgentTest {
             sbcReal.respond(inv2).forEach { server.send(it) }         // 100, then 200
             val ack = server.next("ACK")
             assertEquals("sip:${Trace.SBC}:5060;transport=tcp", ack.requestUri)
+            assertEquals("provisional 100", callGot.poll(5, TimeUnit.SECONDS))
+            assertEquals("challenged 401", callGot.poll(5, TimeUnit.SECONDS))
             assertEquals("provisional 100", callGot.poll(5, TimeUnit.SECONDS))
             assertEquals("answered", callGot.poll(5, TimeUnit.SECONDS))
             server.send(sbcReal.inDialog("BYE", inv2, ack, cseq = 1))

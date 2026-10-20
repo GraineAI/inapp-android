@@ -7,6 +7,7 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -285,6 +286,169 @@ class RtcCallSessionTest {
         sched.advance(500); pump()
         assertEquals("heard twice, never answered", listOf("fallback no_answer"), log)
         assertEquals("that INVITE was cancelled too", 1, sip.requests("CANCEL").size)
+    }
+
+    // ── the answer clock runs from the INVITE with credentials' own reply ──
+
+    /** Dialled, with the SBC silent: the test writes each reply to each INVITE, at the moment it says. */
+    private fun dialledByHand(): RtcCallSession {
+        sbc.inviteAnswer = FakeSbc.Answer.SILENT
+        val s = prepared()
+        s.dial(deps, listener); pump()
+        assertEquals(1, sip.requests("INVITE").size)
+        return s
+    }
+
+    /** The INVITE with credentials the challenge to [first] brought. */
+    private fun challenged(first: SipMessage, code: Int = 401): SipMessage {
+        sip.deliver(sbc.challengeTo(first, code)); pump()
+        val second = sip.requests("INVITE").last()
+        assertTrue("sent again with credentials", (second.header("authorization") ?: second.header("proxy-authorization")) != null)
+        return second
+    }
+
+    /** 20 Oct 2026, production: answered 181 ms after its own reply and dialled again anyway — timed from the first INVITE's 100 Trying. */
+    @Test fun aChallengedDialAnsweredInsideHalfASecondOfItsOwnReplyIsNeverDialledAgain() {
+        dialledByHand()
+        val first = sip.requests("INVITE").single()
+        sip.deliver(sbc.response(first, 100)); pump()       // 100 Trying to the first INVITE: a clock starts for it…
+        sched.advance(30); pump()
+        val second = challenged(first)                      // …and stops at the challenge
+        sched.advance(470); pump()
+        sip.deliver(sbc.response(second, 100)); pump()      // the INVITE with credentials' own reply, 500 ms in
+        sched.advance(425); pump()                          // answered 425 ms after it: 925 ms after the first reply
+        sip.deliver(sbc.answerTo(second)); pump()
+        peer.ice("checking"); peer.ice("connected"); pump()
+        assertEquals(listOf("media"), log)
+        assertEquals("a healthy, challenged call was dialled a second time", 1, sipSockets.size)
+        assertTrue("nothing was cancelled", sip.requests("CANCEL").isEmpty())
+        assertTrue(steps.any { it.startsWith("challenged: 401 after 30 ms") })
+    }
+
+    @Test fun aChallengeIsNotHeardEvenWithNoReplyBeforeIt() {
+        dialledByHand()
+        val first = sip.requests("INVITE").single()
+        sched.advance(10); pump()
+        val second = challenged(first, 407)                 // a proxy challenge, with no 100 Trying before it
+        sched.advance(600); pump()
+        assertEquals("the challenge started an answer clock", 1, sipSockets.size)
+        sip.deliver(sbc.response(second, 100)); pump()
+        sched.advance(400); pump()
+        sip.deliver(sbc.answerTo(second)); pump()
+        peer.ice("connected"); pump()
+        assertEquals(listOf("media"), log)
+        assertEquals(1, sipSockets.size)
+    }
+
+    @Test fun anInviteWithCredentialsThatHearsNothingIsNoResponseNotAStuckDial() {
+        dialledByHand()
+        val first = sip.requests("INVITE").single()
+        sip.deliver(sbc.response(first, 100)); pump()
+        challenged(first)
+        sched.advance(3_999); pump()
+        assertEquals("an answer clock ran for an INVITE that has heard nothing", 1, sipSockets.size)
+        sched.advance(1); pump()
+        assertTrue(steps.any { it.startsWith("dial: no reply to the INVITE: redial") })
+        assertEquals(2, sipSockets.size)
+    }
+
+    @Test fun anAnswerStillBeingAppliedWhenTheHalfSecondRunsOutIsNotAStuckDial() {
+        dialledByHand()
+        peer.holdAnswer = true
+        val second = challenged(sip.requests("INVITE").single())
+        sip.deliver(sbc.response(second, 100)); pump()
+        sched.advance(RtcDial.ANSWER_AFTER_HEARD_MS - 1); pump()
+        sip.deliver(sbc.answerTo(second)); pump()           // the 200 is in; its SDP is still being applied
+        sched.advance(1); pump()
+        sched.advance(1_000); pump()
+        assertEquals("an answered dial was dialled again while its answer was applied", 1, sipSockets.size)
+        assertTrue("an answered dial was cancelled", sip.requests("CANCEL").isEmpty())
+        assertTrue("an answered dial was hung up", sip.requests("BYE").isEmpty())
+        peer.completeAnswer()
+        peer.ice("connected"); pump()
+        assertEquals(listOf("media"), log)
+    }
+
+    // ── a dial given up on ends on the server, on its own socket ──
+
+    @Test fun aStuckDialIsCancelledOnItsOwnSocketWhichStaysUntilItsInviteHasItsFinalAnswer() {
+        dialledByHand()
+        val first = sip.requests("INVITE").single()
+        sip.deliver(sbc.response(first, 100)); pump()
+        sched.advance(40); pump()
+        val second = challenged(first)
+        sched.advance(200); pump()
+        sip.deliver(sbc.response(second, 100)); pump()      // its own reply — and then nothing
+        sched.advance(RtcDial.ANSWER_AFTER_HEARD_MS - 1); pump()
+        assertEquals(1, sipSockets.size)
+        sched.advance(1); pump()
+        assertEquals("dialled again on a fresh connection", 2, sipSockets.size)
+        val old = sipSockets[0]
+        assertEquals("the INVITE with credentials is the one cancelled", second.topViaBranch, old.requests("CANCEL").single().topViaBranch)
+        assertEquals("its registration went at once", "0", old.requests("REGISTER").last().header("expires"))
+        sched.advance(SipUserAgent.CLOSE_AFTER_MS + 500); pump()
+        assertNull("the socket the CANCEL's ending travels on went first", old.closed)
+        old.deliver(sbc.response(second, 487, tag = true)); pump()
+        assertEquals("the 487 is ACKed on its own socket", "ACK", old.messages().last().method)
+        assertEquals("then that socket goes", 1000, old.closed)
+        assertTrue("the old dial told this call nothing", log.isEmpty())
+    }
+
+    @Test fun anAnswerThatCrossesAnAbandonedDialsCancelIsAckedAndEndedOnItsOwnSocket() {
+        dialledByHand()
+        val second = challenged(sip.requests("INVITE").single())
+        sip.deliver(sbc.response(second, 100)); pump()
+        sched.advance(RtcDial.ANSWER_AFTER_HEARD_MS); pump()
+        val old = sipSockets[0]
+        assertEquals(2, sipSockets.size)
+        assertEquals(1, old.requests("CANCEL").size)
+        // The server answered as the CANCEL left: that leg exists now, and only an ACK and a BYE end it.
+        old.deliver(sbc.answerTo(second)); pump()
+        assertEquals("sip:${Trace.SBC}:5060;transport=tcp", old.requests("ACK").last().requestUri)
+        assertEquals("the crossing answer's leg was left up on the server", 1, old.requests("BYE").size)
+        assertEquals("the BYE answered, that socket goes", 1000, old.closed)
+        assertTrue("the abandoned dial's answer was taken for this call's", log.isEmpty())
+        assertTrue(peers.none { it.remoteAnswer != null })
+    }
+
+    @Test fun anAbandonedDialWhoseInviteNeverSettlesLetsItsSocketGoAfterTheGrace() {
+        dialledByHand()
+        val second = challenged(sip.requests("INVITE").single())
+        sip.deliver(sbc.response(second, 100)); pump()
+        sched.advance(RtcDial.ANSWER_AFTER_HEARD_MS); pump()
+        val old = sipSockets[0]
+        sched.advance(RtcDial.ABANDONED_DIAL_GRACE_MS - 100); pump()
+        assertNull(old.closed)
+        sched.advance(100); pump()
+        assertEquals("a dial with no final answer held its socket for ever", 1000, old.closed)
+    }
+
+    @Test fun aHangUpWhileItRingsCancelsTheDialOnTheServer() {
+        val s = dialledByHand()
+        val second = challenged(sip.requests("INVITE").single())
+        sip.deliver(sbc.response(second, 100)); pump()
+        s.hangUp(); pump()
+        assertEquals(second.topViaBranch, sip.requests("CANCEL").single().topViaBranch)
+        assertNull("the socket went before the CANCEL could finish", sip.closed)
+        sip.deliver(sbc.response(second, 487, tag = true)); pump()
+        assertEquals(1000, sip.closed)
+        assertTrue("nothing is told after a hang-up", log.isEmpty())
+    }
+
+    @Test fun aHangUpBeforeTheInviteWithCredentialsWasHeardCancelsItAtItsFirstReply() {
+        val s = dialledByHand()
+        val first = sip.requests("INVITE").single()
+        sip.deliver(sbc.response(first, 100)); pump()
+        val second = challenged(first)
+        s.hangUp(); pump()
+        assertTrue("a CANCEL for an INVITE nothing has replied to", sip.requests("CANCEL").isEmpty())
+        sched.advance(SipUserAgent.CLOSE_AFTER_MS + 500); pump()
+        sip.deliver(sbc.response(second, 100)); pump()
+        assertEquals("cancelled at its first reply", second.topViaBranch, sip.requests("CANCEL").single().topViaBranch)
+        sip.deliver(sbc.answerTo(second)); pump()           // and an answer that crossed that CANCEL is ended
+        assertEquals(1, sip.requests("BYE").size)
+        assertEquals(1000, sip.closed)
+        assertTrue(log.isEmpty())
     }
 
     @Test fun answeredWithNoMediaPathFallsBackAfterEightSeconds() {

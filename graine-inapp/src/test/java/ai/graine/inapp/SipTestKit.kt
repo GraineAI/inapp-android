@@ -165,7 +165,7 @@ internal class FakeSbc(
         val out = ArrayList<String>()
         if (method == "INVITE" && m.toTag == null) out += response(m, 100)
         if (challenge && (auth == null || refuseCredentials) && m.toTag == null) {
-            out += response(m, 401, extra = listOf("WWW-Authenticate: Digest realm=\"$realm\", algorithm=MD5, qop=\"auth\", nonce=\"n${++nonce}\""), tag = true)
+            out += challengeTo(m)
             return out
         }
         if (auth != null) checkDigest(m, auth)
@@ -177,8 +177,7 @@ internal class FakeSbc(
                 out += response(m, 200, extra = listOf("Contact: $contact", "Expires: $expires"), tag = true)
             }
             "INVITE" -> when (inviteAnswer) {
-                Answer.OK -> out += response(m, 200, tag = true, body = Trace.ANSWER, extra = listOf(
-                    "Contact: <sip:${Trace.SBC}:5060;transport=tcp>", "Content-Type: application/sdp"), after = listOf("X-Call-Sid: 208fd2fd"))
+                Answer.OK -> out += answerTo(m)
                 Answer.TRYING_ONLY, Answer.SILENT -> Unit
                 Answer.BUSY -> out += response(m, 486, tag = true)
                 Answer.UNAVAILABLE -> out += response(m, 503, tag = true)
@@ -187,6 +186,20 @@ internal class FakeSbc(
         }
         return out
     }
+
+    /**
+     * The challenge to [m]: a 401 with WWW-Authenticate, or a 407 with
+     * Proxy-Authenticate, each with a fresh nonce — also for a test that
+     * answers an INVITE itself, at the moment it chooses ([Answer.SILENT]).
+     */
+    fun challengeTo(m: SipMessage, code: Int = 401): String {
+        val header = if (code == 407) "Proxy-Authenticate" else "WWW-Authenticate"
+        return response(m, code, extra = listOf("$header: Digest realm=\"$realm\", algorithm=MD5, qop=\"auth\", nonce=\"n${++nonce}\""), tag = true)
+    }
+
+    /** The answer to an INVITE, as production's 200 carries it: the trace's SDP, the SBC's Contact, its call id. */
+    fun answerTo(m: SipMessage): String = response(m, 200, tag = true, body = Trace.ANSWER, extra = listOf(
+        "Contact: <sip:${Trace.SBC}:5060;transport=tcp>", "Content-Type: application/sdp"), after = listOf("X-Call-Sid: 208fd2fd"))
 
     private fun checkDigest(m: SipMessage, auth: String) {
         val p = SipText.authParams(auth.removePrefix("Digest").trim()) ?: run { badDigests += auth; return }

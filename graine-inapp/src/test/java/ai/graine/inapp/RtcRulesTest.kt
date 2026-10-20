@@ -66,6 +66,9 @@ class RtcRulesTest {
         assertTrue(RtcDial.MAX_DIALS * (RtcDial.ANSWER_AFTER_HEARD_MS + 1_000) < RtcDial.ATTEMPT_BUDGET_MS)
         assertEquals(8_000, RtcDial.ICE_CONNECT_DEADLINE_MS)
         assertEquals(12_000, RtcDial.ATTEMPT_BUDGET_MS)
+        // A dial given up on keeps its socket for its CANCEL's ending: the voice bar's grace, longer than the stack's usual close.
+        assertEquals(4_000, RtcDial.ABANDONED_DIAL_GRACE_MS)
+        assertTrue(RtcDial.ABANDONED_DIAL_GRACE_MS > SipUserAgent.CLOSE_AFTER_MS)
     }
 
     @Test fun redialsTheNetworksFailuresOnceAndFallsBackOnPolicy() {

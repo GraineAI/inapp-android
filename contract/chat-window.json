@@ -1,0 +1,2148 @@
+{
+  "generatedBy": "sdk/contract/generate-chat-window.mjs",
+  "comment": "Chat window v2 (DESIGN.md \"Chat window v2\"): inputs and the answers every SDK must give. `fold` steps use sdk/contract/chat.json's words plus {rate:{style,value}} (offered only after the end, one answer) and {clear}; expected: turns (role, text; agent turns live and proactive; restored when restored), typing, quickReplies [{label,text}], ended, rating ({value,scale,style} or null), sent (customer texts) and events (the app_event frames a rating sends). `groups`: positions per item and, per timestamps.show, whether each item's time is drawn. `markdown`: blocks [{kind: paragraph|bullet|number, n?, spans: [{text, bold?, italic?, code?, link?}]}] and their plain words. `ratingLayout`: the rating card's width and its choices' target, glyph and gap for a thread width and card padding (compare within 1e-6). Generated from the React Native SDK's code; regenerate, never edit.",
+  "limits": {
+    "quickReplies": 6,
+    "quickReplyLabel": 40,
+    "quickReplyText": 200,
+    "groupGapMs": 120000,
+    "revealMinCps": 90,
+    "revealCatchUpMs": 600,
+    "ratingMaxWidth": 300,
+    "ratingShare": 0.84,
+    "ratingGap": 8
+  },
+  "ratingChoices": {
+    "thumbs": {
+      "count": 2,
+      "size": 44,
+      "glyph": 22
+    },
+    "stars": {
+      "count": 5,
+      "size": 36,
+      "glyph": 28
+    },
+    "emoji": {
+      "count": 5,
+      "size": 44,
+      "glyph": 24
+    }
+  },
+  "ratingEvent": "chat_rating",
+  "ratingLabels": {
+    "thumbs": [
+      "Thumbs down",
+      "Thumbs up"
+    ],
+    "stars": [
+      "1 star",
+      "2 stars",
+      "3 stars",
+      "4 stars",
+      "5 stars"
+    ],
+    "emoji": [
+      "Very unhappy",
+      "Unhappy",
+      "Neutral",
+      "Happy",
+      "Very happy"
+    ]
+  },
+  "ratingEmoji": [
+    "😞",
+    "🙁",
+    "😐",
+    "🙂",
+    "😄"
+  ],
+  "ratingThanks": "Thanks for your feedback",
+  "quickReplies": [
+    {
+      "name": "words alone: the label is what a tap sends",
+      "frame": {
+        "type": "quick_replies",
+        "replies": [
+          "Track my order",
+          "Talk to a person"
+        ]
+      },
+      "replies": [
+        {
+          "label": "Track my order",
+          "text": "Track my order"
+        },
+        {
+          "label": "Talk to a person",
+          "text": "Talk to a person"
+        }
+      ]
+    },
+    {
+      "name": "a label and the words a tap sends",
+      "frame": {
+        "type": "quick_replies",
+        "replies": [
+          {
+            "label": "Talk to a person",
+            "text": "I'd like to talk to a person, please"
+          },
+          {
+            "label": "No thanks"
+          }
+        ]
+      },
+      "replies": [
+        {
+          "label": "Talk to a person",
+          "text": "I'd like to talk to a person, please"
+        },
+        {
+          "label": "No thanks",
+          "text": "No thanks"
+        }
+      ]
+    },
+    {
+      "name": "blank, repeated (ignoring case), not words, or past six: left out; long ones cut",
+      "frame": {
+        "type": "quick_replies",
+        "replies": [
+          "  Yes  ",
+          "",
+          "   ",
+          "YES",
+          42,
+          null,
+          {
+            "text": "a text with no label"
+          },
+          {
+            "label": ""
+          },
+          "A reply far longer than any chip should ever be allowed to grow",
+          "Two",
+          "Three",
+          "Four",
+          "Five",
+          "Six",
+          "Seven",
+          {
+            "label": "Eight",
+            "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          }
+        ]
+      },
+      "replies": [
+        {
+          "label": "Yes",
+          "text": "Yes"
+        },
+        {
+          "label": "A reply far longer than any chip should",
+          "text": "A reply far longer than any chip should"
+        },
+        {
+          "label": "Two",
+          "text": "Two"
+        },
+        {
+          "label": "Three",
+          "text": "Three"
+        },
+        {
+          "label": "Four",
+          "text": "Four"
+        },
+        {
+          "label": "Five",
+          "text": "Five"
+        }
+      ]
+    },
+    {
+      "name": "control and direction marks are spaces; spaces collapse",
+      "frame": {
+        "type": "quick_replies",
+        "replies": [
+          "Line\none‮\ttwo",
+          {
+            "label": "ok",
+            "text": "  send\n  this  "
+          }
+        ]
+      },
+      "replies": [
+        {
+          "label": "Line one two",
+          "text": "Line one two"
+        },
+        {
+          "label": "ok",
+          "text": "send this"
+        }
+      ]
+    },
+    {
+      "name": "Hindi and emoji stay whole",
+      "frame": {
+        "type": "quick_replies",
+        "replies": [
+          "मेरा ऑर्डर कहाँ है?",
+          "👍 Sounds good"
+        ]
+      },
+      "replies": [
+        {
+          "label": "मेरा ऑर्डर कहाँ है?",
+          "text": "मेरा ऑर्डर कहाँ है?"
+        },
+        {
+          "label": "👍 Sounds good",
+          "text": "👍 Sounds good"
+        }
+      ]
+    },
+    {
+      "name": "an empty list: the replies go",
+      "frame": {
+        "type": "quick_replies",
+        "replies": []
+      },
+      "replies": []
+    },
+    {
+      "name": "not a list: ignored",
+      "frame": {
+        "type": "quick_replies",
+        "replies": "Yes, No"
+      },
+      "replies": null
+    },
+    {
+      "name": "no replies at all: ignored",
+      "frame": {
+        "type": "quick_replies"
+      },
+      "replies": null
+    },
+    {
+      "name": "not an object: ignored",
+      "frame": "quick_replies",
+      "replies": null
+    }
+  ],
+  "fold": [
+    {
+      "name": "replies offered after a turn are drawn",
+      "steps": [
+        {
+          "frame": {
+            "type": "text",
+            "data": "<beginning_of_stream>How can I help?<end_of_stream>"
+          }
+        },
+        {
+          "frame": {
+            "type": "quick_replies",
+            "replies": [
+              "Track my order",
+              "Talk to a person"
+            ]
+          }
+        }
+      ],
+      "turns": [
+        {
+          "role": "agent",
+          "text": "How can I help?",
+          "live": false,
+          "proactive": true
+        }
+      ],
+      "typing": false,
+      "quickReplies": [
+        {
+          "label": "Track my order",
+          "text": "Track my order"
+        },
+        {
+          "label": "Talk to a person",
+          "text": "Talk to a person"
+        }
+      ],
+      "ended": false,
+      "rating": null,
+      "sent": [],
+      "events": []
+    },
+    {
+      "name": "the customer sending — typed or tapped — takes them away",
+      "steps": [
+        {
+          "frame": {
+            "type": "text",
+            "data": "<beginning_of_stream>How can I help?<end_of_stream>"
+          }
+        },
+        {
+          "frame": {
+            "type": "quick_replies",
+            "replies": [
+              "Track my order",
+              {
+                "label": "Talk to a person",
+                "text": "I'd like to talk to a person"
+              }
+            ]
+          }
+        },
+        {
+          "send": "I'd like to talk to a person"
+        }
+      ],
+      "turns": [
+        {
+          "role": "agent",
+          "text": "How can I help?",
+          "live": false,
+          "proactive": true
+        },
+        {
+          "role": "customer",
+          "text": "I'd like to talk to a person"
+        }
+      ],
+      "typing": true,
+      "quickReplies": [],
+      "ended": false,
+      "rating": null,
+      "sent": [
+        "I'd like to talk to a person"
+      ],
+      "events": []
+    },
+    {
+      "name": "the agent's next turn takes them away",
+      "steps": [
+        {
+          "frame": {
+            "type": "text",
+            "data": "<beginning_of_stream>Here is your order.<end_of_stream>"
+          }
+        },
+        {
+          "frame": {
+            "type": "quick_replies",
+            "replies": [
+              "Cancel it"
+            ]
+          }
+        },
+        {
+          "frame": {
+            "type": "text",
+            "data": "<beginning_of_stream>Anything else?<end_of_stream>"
+          }
+        }
+      ],
+      "turns": [
+        {
+          "role": "agent",
+          "text": "Here is your order.",
+          "live": false,
+          "proactive": true
+        },
+        {
+          "role": "agent",
+          "text": "Anything else?",
+          "live": false,
+          "proactive": true
+        }
+      ],
+      "typing": false,
+      "quickReplies": [],
+      "ended": false,
+      "rating": null,
+      "sent": [],
+      "events": []
+    },
+    {
+      "name": "words still arriving in the same turn keep them",
+      "steps": [
+        {
+          "frame": {
+            "type": "text",
+            "data": "Let me check"
+          }
+        },
+        {
+          "frame": {
+            "type": "quick_replies",
+            "replies": [
+              "Thanks"
+            ]
+          }
+        },
+        {
+          "frame": {
+            "type": "text",
+            "data": " that for you."
+          }
+        }
+      ],
+      "turns": [
+        {
+          "role": "agent",
+          "text": "Let me check that for you.",
+          "live": true,
+          "proactive": true
+        }
+      ],
+      "typing": false,
+      "quickReplies": [
+        {
+          "label": "Thanks",
+          "text": "Thanks"
+        }
+      ],
+      "ended": false,
+      "rating": null,
+      "sent": [],
+      "events": []
+    },
+    {
+      "name": "an empty list takes them away",
+      "steps": [
+        {
+          "frame": {
+            "type": "quick_replies",
+            "replies": [
+              "Yes",
+              "No"
+            ]
+          }
+        },
+        {
+          "frame": {
+            "type": "quick_replies",
+            "replies": []
+          }
+        }
+      ],
+      "turns": [],
+      "typing": false,
+      "quickReplies": [],
+      "ended": false,
+      "rating": null,
+      "sent": [],
+      "events": []
+    },
+    {
+      "name": "a drop keeps them: they are still the agent's suggestion",
+      "steps": [
+        {
+          "frame": {
+            "type": "text",
+            "data": "<beginning_of_stream>Shall I go ahead?<end_of_stream>"
+          }
+        },
+        {
+          "frame": {
+            "type": "quick_replies",
+            "replies": [
+              "Yes",
+              "No"
+            ]
+          }
+        },
+        {
+          "drop": true
+        }
+      ],
+      "turns": [
+        {
+          "role": "agent",
+          "text": "Shall I go ahead?",
+          "live": false,
+          "proactive": true
+        }
+      ],
+      "typing": false,
+      "quickReplies": [
+        {
+          "label": "Yes",
+          "text": "Yes"
+        },
+        {
+          "label": "No",
+          "text": "No"
+        }
+      ],
+      "ended": false,
+      "rating": null,
+      "sent": [],
+      "events": []
+    },
+    {
+      "name": "an earlier conversation restored takes them away",
+      "steps": [
+        {
+          "frame": {
+            "type": "quick_replies",
+            "replies": [
+              "Yes"
+            ]
+          }
+        },
+        {
+          "frame": {
+            "type": "history",
+            "continued": true,
+            "turns": [
+              {
+                "id": "h1",
+                "role": "assistant",
+                "text": "Welcome back.",
+                "at": "2026-10-13T09:30:00Z",
+                "channel": "chat"
+              }
+            ]
+          }
+        }
+      ],
+      "turns": [
+        {
+          "role": "agent",
+          "text": "Welcome back.",
+          "live": false,
+          "proactive": false,
+          "restored": true
+        }
+      ],
+      "typing": false,
+      "quickReplies": [],
+      "ended": false,
+      "rating": null,
+      "sent": [],
+      "events": []
+    },
+    {
+      "name": "the conversation ends: the open turn closes, typing stops, the replies go",
+      "steps": [
+        {
+          "send": "That's all, thanks"
+        },
+        {
+          "frame": {
+            "type": "text",
+            "data": "Glad I could help"
+          }
+        },
+        {
+          "frame": {
+            "type": "quick_replies",
+            "replies": [
+              "One more thing"
+            ]
+          }
+        },
+        {
+          "frame": {
+            "type": "conversation_end"
+          }
+        }
+      ],
+      "turns": [
+        {
+          "role": "customer",
+          "text": "That's all, thanks"
+        },
+        {
+          "role": "agent",
+          "text": "Glad I could help",
+          "live": false,
+          "proactive": false
+        }
+      ],
+      "typing": false,
+      "quickReplies": [],
+      "ended": true,
+      "rating": null,
+      "sent": [
+        "That's all, thanks"
+      ],
+      "events": []
+    },
+    {
+      "name": "a rating after the end is kept and sent as a quiet app event",
+      "steps": [
+        {
+          "frame": {
+            "type": "text",
+            "data": "<beginning_of_stream>Bye!<end_of_stream>"
+          }
+        },
+        {
+          "frame": {
+            "type": "conversation_end"
+          }
+        },
+        {
+          "rate": {
+            "style": "stars",
+            "value": 4
+          }
+        }
+      ],
+      "turns": [
+        {
+          "role": "agent",
+          "text": "Bye!",
+          "live": false,
+          "proactive": true
+        }
+      ],
+      "typing": false,
+      "quickReplies": [],
+      "ended": true,
+      "rating": {
+        "value": 4,
+        "scale": 5,
+        "style": "stars"
+      },
+      "sent": [],
+      "events": [
+        {
+          "type": "app_event",
+          "event": {
+            "name": "chat_rating",
+            "quiet": true,
+            "detail": "The customer rated this chat 4 out of 5.",
+            "data": {
+              "value": 4,
+              "scale": 5,
+              "style": "stars"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "thumbs: up is 1 of 1",
+      "steps": [
+        {
+          "frame": {
+            "type": "conversation_end"
+          }
+        },
+        {
+          "rate": {
+            "style": "thumbs",
+            "value": 1
+          }
+        }
+      ],
+      "turns": [],
+      "typing": false,
+      "quickReplies": [],
+      "ended": true,
+      "rating": {
+        "value": 1,
+        "scale": 1,
+        "style": "thumbs"
+      },
+      "sent": [],
+      "events": [
+        {
+          "type": "app_event",
+          "event": {
+            "name": "chat_rating",
+            "quiet": true,
+            "detail": "The customer gave this chat a thumbs up.",
+            "data": {
+              "value": 1,
+              "scale": 1,
+              "style": "thumbs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a rating before the conversation ends is not taken",
+      "steps": [
+        {
+          "frame": {
+            "type": "text",
+            "data": "<beginning_of_stream>Hello<end_of_stream>"
+          }
+        },
+        {
+          "rate": {
+            "style": "emoji",
+            "value": 5
+          }
+        }
+      ],
+      "turns": [
+        {
+          "role": "agent",
+          "text": "Hello",
+          "live": false,
+          "proactive": true
+        }
+      ],
+      "typing": false,
+      "quickReplies": [],
+      "ended": false,
+      "rating": null,
+      "sent": [],
+      "events": []
+    },
+    {
+      "name": "replies offered after the end are nobody's to tap",
+      "steps": [
+        {
+          "frame": {
+            "type": "conversation_end"
+          }
+        },
+        {
+          "frame": {
+            "type": "quick_replies",
+            "replies": [
+              "Start again"
+            ]
+          }
+        }
+      ],
+      "turns": [],
+      "typing": false,
+      "quickReplies": [],
+      "ended": true,
+      "rating": null,
+      "sent": [],
+      "events": []
+    },
+    {
+      "name": "a message after the end starts over: no end, no rating",
+      "steps": [
+        {
+          "frame": {
+            "type": "conversation_end"
+          }
+        },
+        {
+          "rate": {
+            "style": "emoji",
+            "value": 2
+          }
+        },
+        {
+          "send": "One more question"
+        }
+      ],
+      "turns": [
+        {
+          "role": "customer",
+          "text": "One more question"
+        }
+      ],
+      "typing": true,
+      "quickReplies": [],
+      "ended": false,
+      "rating": null,
+      "sent": [
+        "One more question"
+      ],
+      "events": [
+        {
+          "type": "app_event",
+          "event": {
+            "name": "chat_rating",
+            "quiet": true,
+            "detail": "The customer rated this chat 2 out of 5.",
+            "data": {
+              "value": 2,
+              "scale": 5,
+              "style": "emoji"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "clearing the chat clears the replies and the end",
+      "steps": [
+        {
+          "frame": {
+            "type": "quick_replies",
+            "replies": [
+              "Yes"
+            ]
+          }
+        },
+        {
+          "frame": {
+            "type": "conversation_end"
+          }
+        },
+        {
+          "clear": true
+        }
+      ],
+      "turns": [],
+      "typing": false,
+      "quickReplies": [],
+      "ended": false,
+      "rating": null,
+      "sent": [],
+      "events": []
+    }
+  ],
+  "rating": [
+    {
+      "input": {
+        "style": "thumbs",
+        "value": 1
+      },
+      "rating": {
+        "value": 1,
+        "scale": 1,
+        "style": "thumbs"
+      },
+      "frame": {
+        "type": "app_event",
+        "event": {
+          "name": "chat_rating",
+          "quiet": true,
+          "detail": "The customer gave this chat a thumbs up.",
+          "data": {
+            "value": 1,
+            "scale": 1,
+            "style": "thumbs"
+          }
+        }
+      }
+    },
+    {
+      "input": {
+        "style": "thumbs",
+        "value": 0
+      },
+      "rating": {
+        "value": 0,
+        "scale": 1,
+        "style": "thumbs"
+      },
+      "frame": {
+        "type": "app_event",
+        "event": {
+          "name": "chat_rating",
+          "quiet": true,
+          "detail": "The customer gave this chat a thumbs down.",
+          "data": {
+            "value": 0,
+            "scale": 1,
+            "style": "thumbs"
+          }
+        }
+      }
+    },
+    {
+      "input": {
+        "style": "thumbs",
+        "value": 7
+      },
+      "rating": {
+        "value": 1,
+        "scale": 1,
+        "style": "thumbs"
+      },
+      "frame": {
+        "type": "app_event",
+        "event": {
+          "name": "chat_rating",
+          "quiet": true,
+          "detail": "The customer gave this chat a thumbs up.",
+          "data": {
+            "value": 1,
+            "scale": 1,
+            "style": "thumbs"
+          }
+        }
+      }
+    },
+    {
+      "input": {
+        "style": "stars",
+        "value": 5
+      },
+      "rating": {
+        "value": 5,
+        "scale": 5,
+        "style": "stars"
+      },
+      "frame": {
+        "type": "app_event",
+        "event": {
+          "name": "chat_rating",
+          "quiet": true,
+          "detail": "The customer rated this chat 5 out of 5.",
+          "data": {
+            "value": 5,
+            "scale": 5,
+            "style": "stars"
+          }
+        }
+      }
+    },
+    {
+      "input": {
+        "style": "stars",
+        "value": 3.6
+      },
+      "rating": {
+        "value": 4,
+        "scale": 5,
+        "style": "stars"
+      },
+      "frame": {
+        "type": "app_event",
+        "event": {
+          "name": "chat_rating",
+          "quiet": true,
+          "detail": "The customer rated this chat 4 out of 5.",
+          "data": {
+            "value": 4,
+            "scale": 5,
+            "style": "stars"
+          }
+        }
+      }
+    },
+    {
+      "input": {
+        "style": "stars",
+        "value": 0
+      },
+      "rating": {
+        "value": 1,
+        "scale": 5,
+        "style": "stars"
+      },
+      "frame": {
+        "type": "app_event",
+        "event": {
+          "name": "chat_rating",
+          "quiet": true,
+          "detail": "The customer rated this chat 1 out of 5.",
+          "data": {
+            "value": 1,
+            "scale": 5,
+            "style": "stars"
+          }
+        }
+      }
+    },
+    {
+      "input": {
+        "style": "stars",
+        "value": 99
+      },
+      "rating": {
+        "value": 5,
+        "scale": 5,
+        "style": "stars"
+      },
+      "frame": {
+        "type": "app_event",
+        "event": {
+          "name": "chat_rating",
+          "quiet": true,
+          "detail": "The customer rated this chat 5 out of 5.",
+          "data": {
+            "value": 5,
+            "scale": 5,
+            "style": "stars"
+          }
+        }
+      }
+    },
+    {
+      "input": {
+        "style": "emoji",
+        "value": 1
+      },
+      "rating": {
+        "value": 1,
+        "scale": 5,
+        "style": "emoji"
+      },
+      "frame": {
+        "type": "app_event",
+        "event": {
+          "name": "chat_rating",
+          "quiet": true,
+          "detail": "The customer rated this chat 1 out of 5.",
+          "data": {
+            "value": 1,
+            "scale": 5,
+            "style": "emoji"
+          }
+        }
+      }
+    },
+    {
+      "input": {
+        "style": "emoji",
+        "value": "4"
+      },
+      "rating": {
+        "value": 1,
+        "scale": 5,
+        "style": "emoji"
+      },
+      "frame": {
+        "type": "app_event",
+        "event": {
+          "name": "chat_rating",
+          "quiet": true,
+          "detail": "The customer rated this chat 1 out of 5.",
+          "data": {
+            "value": 1,
+            "scale": 5,
+            "style": "emoji"
+          }
+        }
+      }
+    },
+    {
+      "input": {
+        "style": "hearts",
+        "value": 1
+      },
+      "rating": {
+        "value": 1,
+        "scale": 1,
+        "style": "thumbs"
+      },
+      "frame": {
+        "type": "app_event",
+        "event": {
+          "name": "chat_rating",
+          "quiet": true,
+          "detail": "The customer gave this chat a thumbs up.",
+          "data": {
+            "value": 1,
+            "scale": 1,
+            "style": "thumbs"
+          }
+        }
+      }
+    }
+  ],
+  "groups": [
+    {
+      "name": "one side, within two minutes each: one group",
+      "items": [
+        {
+          "role": "agent",
+          "at": 1792400400000
+        },
+        {
+          "role": "agent",
+          "at": 1792400460000
+        },
+        {
+          "role": "agent",
+          "at": 1792400500000
+        }
+      ],
+      "positions": [
+        "first",
+        "middle",
+        "last"
+      ],
+      "times": {
+        "never": [
+          false,
+          false,
+          false
+        ],
+        "group": [
+          false,
+          false,
+          true
+        ],
+        "always": [
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    {
+      "name": "the other side ends a group",
+      "items": [
+        {
+          "role": "agent",
+          "at": 1792400400000
+        },
+        {
+          "role": "customer",
+          "at": 1792400410000
+        },
+        {
+          "role": "customer",
+          "at": 1792400420000
+        },
+        {
+          "role": "agent",
+          "at": 1792400430000
+        }
+      ],
+      "positions": [
+        "single",
+        "first",
+        "last",
+        "single"
+      ],
+      "times": {
+        "never": [
+          false,
+          false,
+          false,
+          false
+        ],
+        "group": [
+          true,
+          false,
+          true,
+          true
+        ],
+        "always": [
+          true,
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    {
+      "name": "more than two minutes apart: two groups",
+      "items": [
+        {
+          "role": "customer",
+          "at": 1792400400000
+        },
+        {
+          "role": "customer",
+          "at": 1792400600000
+        }
+      ],
+      "positions": [
+        "single",
+        "single"
+      ],
+      "times": {
+        "never": [
+          false,
+          false
+        ],
+        "group": [
+          true,
+          true
+        ],
+        "always": [
+          true,
+          true
+        ]
+      }
+    },
+    {
+      "name": "exactly two minutes: still one group",
+      "items": [
+        {
+          "role": "customer",
+          "at": 1792400400000
+        },
+        {
+          "role": "customer",
+          "at": 1792400520000
+        }
+      ],
+      "positions": [
+        "first",
+        "last"
+      ],
+      "times": {
+        "never": [
+          false,
+          false
+        ],
+        "group": [
+          false,
+          true
+        ],
+        "always": [
+          true,
+          true
+        ]
+      }
+    },
+    {
+      "name": "a separator, a call row or a component ends a group",
+      "items": [
+        {
+          "role": "agent",
+          "at": 1792400400000
+        },
+        {
+          "breaks": true
+        },
+        {
+          "role": "agent",
+          "at": 1792400410000
+        },
+        {
+          "role": "agent",
+          "at": 1792400420000
+        },
+        {},
+        {
+          "role": "agent",
+          "at": 1792400430000
+        }
+      ],
+      "positions": [
+        "single",
+        "single",
+        "first",
+        "last",
+        "single",
+        "single"
+      ],
+      "times": {
+        "never": [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        "group": [
+          true,
+          true,
+          false,
+          true,
+          true,
+          true
+        ],
+        "always": [
+          true,
+          true,
+          true,
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    {
+      "name": "turns with no time join the group before them",
+      "items": [
+        {
+          "role": "agent"
+        },
+        {
+          "role": "agent"
+        },
+        {
+          "role": "agent",
+          "at": 1792400400000
+        }
+      ],
+      "positions": [
+        "first",
+        "middle",
+        "last"
+      ],
+      "times": {
+        "never": [
+          false,
+          false,
+          false
+        ],
+        "group": [
+          false,
+          false,
+          true
+        ],
+        "always": [
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    {
+      "name": "a turn with no time joins, and the next is measured from the last time known",
+      "items": [
+        {
+          "role": "agent",
+          "at": 1792400400000
+        },
+        {
+          "role": "agent",
+          "at": null
+        },
+        {
+          "role": "agent",
+          "at": 1792400900000
+        }
+      ],
+      "positions": [
+        "first",
+        "last",
+        "single"
+      ],
+      "times": {
+        "never": [
+          false,
+          false,
+          false
+        ],
+        "group": [
+          false,
+          true,
+          true
+        ],
+        "always": [
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    {
+      "name": "nothing",
+      "items": [],
+      "positions": [],
+      "times": {
+        "never": [],
+        "group": [],
+        "always": []
+      }
+    }
+  ],
+  "markdown": [
+    {
+      "text": "Plain words, nothing more.",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "spans": [
+            {
+              "text": "Plain words, nothing more."
+            }
+          ]
+        }
+      ],
+      "plain": "Plain words, nothing more."
+    },
+    {
+      "text": "**Bold** and *italic*, _italic too_ and __bold too__.",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "spans": [
+            {
+              "text": "Bold",
+              "bold": true
+            },
+            {
+              "text": " and "
+            },
+            {
+              "text": "italic",
+              "italic": true
+            },
+            {
+              "text": ", "
+            },
+            {
+              "text": "italic too",
+              "italic": true
+            },
+            {
+              "text": " and "
+            },
+            {
+              "text": "bold too",
+              "bold": true
+            },
+            {
+              "text": "."
+            }
+          ]
+        }
+      ],
+      "plain": "Bold and italic, italic too and bold too."
+    },
+    {
+      "text": "A `code` span and **bold with _italic_ inside**.",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "spans": [
+            {
+              "text": "A "
+            },
+            {
+              "text": "code",
+              "code": true
+            },
+            {
+              "text": " span and "
+            },
+            {
+              "text": "bold with ",
+              "bold": true
+            },
+            {
+              "text": "italic",
+              "bold": true,
+              "italic": true
+            },
+            {
+              "text": " inside",
+              "bold": true
+            },
+            {
+              "text": "."
+            }
+          ]
+        }
+      ],
+      "plain": "A code span and bold with italic inside."
+    },
+    {
+      "text": "See [the help page](https://example.com/help) or https://example.com/faq.",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "spans": [
+            {
+              "text": "See "
+            },
+            {
+              "text": "the help page",
+              "link": "https://example.com/help"
+            },
+            {
+              "text": " or "
+            },
+            {
+              "text": "https://example.com/faq",
+              "link": "https://example.com/faq"
+            },
+            {
+              "text": "."
+            }
+          ]
+        }
+      ],
+      "plain": "See the help page or https://example.com/faq."
+    },
+    {
+      "text": "[Click here](javascript:alert(1)) is only its label.",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "spans": [
+            {
+              "text": "Click here is only its label."
+            }
+          ]
+        }
+      ],
+      "plain": "Click here is only its label."
+    },
+    {
+      "text": "[write to us](mailto:help@example.com) or [call](tel:+911234567890).",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "spans": [
+            {
+              "text": "write to us",
+              "link": "mailto:help@example.com"
+            },
+            {
+              "text": " or "
+            },
+            {
+              "text": "call",
+              "link": "tel:+911234567890"
+            },
+            {
+              "text": "."
+            }
+          ]
+        }
+      ],
+      "plain": "write to us or call."
+    },
+    {
+      "text": "A link in brackets (https://example.com/a) and https://example.com/path_(x) keep their own.",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "spans": [
+            {
+              "text": "A link in brackets ("
+            },
+            {
+              "text": "https://example.com/a",
+              "link": "https://example.com/a"
+            },
+            {
+              "text": ") and "
+            },
+            {
+              "text": "https://example.com/path_(x)",
+              "link": "https://example.com/path_(x)"
+            },
+            {
+              "text": " keep their own."
+            }
+          ]
+        }
+      ],
+      "plain": "A link in brackets (https://example.com/a) and https://example.com/path_(x) keep their own."
+    },
+    {
+      "text": "HTTPS://EXAMPLE.COM/UPPER works; https:// alone does not.",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "spans": [
+            {
+              "text": "HTTPS://EXAMPLE.COM/UPPER",
+              "link": "HTTPS://EXAMPLE.COM/UPPER"
+            },
+            {
+              "text": " works; https:// alone does not."
+            }
+          ]
+        }
+      ],
+      "plain": "HTTPS://EXAMPLE.COM/UPPER works; https:// alone does not."
+    },
+    {
+      "text": "snake_case_name, 2*3*4, 5 * 6 and a**b**c stay as written.",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "spans": [
+            {
+              "text": "snake_case_name, 2*3*4, 5 * 6 and a**b**c stay as written."
+            }
+          ]
+        }
+      ],
+      "plain": "snake_case_name, 2*3*4, 5 * 6 and a**b**c stay as written."
+    },
+    {
+      "text": "Not *  italic* and not ** bold** either.",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "spans": [
+            {
+              "text": "Not *  italic* and not ** bold** either."
+            }
+          ]
+        }
+      ],
+      "plain": "Not *  italic* and not ** bold** either."
+    },
+    {
+      "text": "*   a line starting with a star and spaces is a bullet",
+      "blocks": [
+        {
+          "kind": "bullet",
+          "spans": [
+            {
+              "text": "a line starting with a star and spaces is a bullet"
+            }
+          ]
+        }
+      ],
+      "plain": "• a line starting with a star and spaces is a bullet"
+    },
+    {
+      "text": "Unclosed **bold stays as written.",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "spans": [
+            {
+              "text": "Unclosed **bold stays as written."
+            }
+          ]
+        }
+      ],
+      "plain": "Unclosed **bold stays as written."
+    },
+    {
+      "text": "Escaped \\*stars\\* and \\_underscores\\_ and a \\`tick\\`.",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "spans": [
+            {
+              "text": "Escaped *stars* and _underscores_ and a `tick`."
+            }
+          ]
+        }
+      ],
+      "plain": "Escaped *stars* and _underscores_ and a `tick`."
+    },
+    {
+      "text": "<b>Not HTML</b> & never markup.",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "spans": [
+            {
+              "text": "<b>Not HTML</b> & never markup."
+            }
+          ]
+        }
+      ],
+      "plain": "<b>Not HTML</b> & never markup."
+    },
+    {
+      "text": "Line one\nline two\n\nA second paragraph.",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "spans": [
+            {
+              "text": "Line one\nline two"
+            }
+          ]
+        },
+        {
+          "kind": "paragraph",
+          "spans": [
+            {
+              "text": "A second paragraph."
+            }
+          ]
+        }
+      ],
+      "plain": "Line one\nline two\nA second paragraph."
+    },
+    {
+      "text": "Your options:\n- Track your order\n- Change the address\n* Cancel it\n• Talk to us",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "spans": [
+            {
+              "text": "Your options:"
+            }
+          ]
+        },
+        {
+          "kind": "bullet",
+          "spans": [
+            {
+              "text": "Track your order"
+            }
+          ]
+        },
+        {
+          "kind": "bullet",
+          "spans": [
+            {
+              "text": "Change the address"
+            }
+          ]
+        },
+        {
+          "kind": "bullet",
+          "spans": [
+            {
+              "text": "Cancel it"
+            }
+          ]
+        },
+        {
+          "kind": "bullet",
+          "spans": [
+            {
+              "text": "Talk to us"
+            }
+          ]
+        }
+      ],
+      "plain": "Your options:\n• Track your order\n• Change the address\n• Cancel it\n• Talk to us"
+    },
+    {
+      "text": "Steps:\n1. Open the app\n2) Tap **Settings**\n3. Done",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "spans": [
+            {
+              "text": "Steps:"
+            }
+          ]
+        },
+        {
+          "kind": "number",
+          "n": 1,
+          "spans": [
+            {
+              "text": "Open the app"
+            }
+          ]
+        },
+        {
+          "kind": "number",
+          "n": 2,
+          "spans": [
+            {
+              "text": "Tap "
+            },
+            {
+              "text": "Settings",
+              "bold": true
+            }
+          ]
+        },
+        {
+          "kind": "number",
+          "n": 3,
+          "spans": [
+            {
+              "text": "Done"
+            }
+          ]
+        }
+      ],
+      "plain": "Steps:\n1. Open the app\n2. Tap Settings\n3. Done"
+    },
+    {
+      "text": "  - two spaces in is a bullet\n    - four is not",
+      "blocks": [
+        {
+          "kind": "bullet",
+          "spans": [
+            {
+              "text": "two spaces in is a bullet"
+            }
+          ]
+        },
+        {
+          "kind": "paragraph",
+          "spans": [
+            {
+              "text": "- four is not"
+            }
+          ]
+        }
+      ],
+      "plain": "• two spaces in is a bullet\n- four is not"
+    },
+    {
+      "text": "# Order summary #\nTotal: **₹420**",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "spans": [
+            {
+              "text": "Order summary",
+              "bold": true
+            }
+          ]
+        },
+        {
+          "kind": "paragraph",
+          "spans": [
+            {
+              "text": "Total: "
+            },
+            {
+              "text": "₹420",
+              "bold": true
+            }
+          ]
+        }
+      ],
+      "plain": "Order summary\nTotal: ₹420"
+    },
+    {
+      "text": "हिंदी में **बोल्ड** और _इटैलिक_",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "spans": [
+            {
+              "text": "हिंदी में "
+            },
+            {
+              "text": "बोल्ड",
+              "bold": true
+            },
+            {
+              "text": " और "
+            },
+            {
+              "text": "इटैलिक",
+              "italic": true
+            }
+          ]
+        }
+      ],
+      "plain": "हिंदी में बोल्ड और इटैलिक"
+    },
+    {
+      "text": "**",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "spans": [
+            {
+              "text": "**"
+            }
+          ]
+        }
+      ],
+      "plain": "**"
+    },
+    {
+      "text": "",
+      "blocks": [],
+      "plain": ""
+    },
+    {
+      "text": "   \n\n  ",
+      "blocks": [],
+      "plain": ""
+    },
+    {
+      "text": "Here is **important",
+      "live": true,
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "spans": [
+            {
+              "text": "Here is "
+            },
+            {
+              "text": "important",
+              "bold": true
+            }
+          ]
+        }
+      ],
+      "plain": "Here is important"
+    },
+    {
+      "text": "Here is **important",
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "spans": [
+            {
+              "text": "Here is **important"
+            }
+          ]
+        }
+      ],
+      "plain": "Here is **important"
+    },
+    {
+      "text": "Working on it *",
+      "live": true,
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "spans": [
+            {
+              "text": "Working on it"
+            }
+          ]
+        }
+      ],
+      "plain": "Working on it"
+    },
+    {
+      "text": "Run `npm i",
+      "live": true,
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "spans": [
+            {
+              "text": "Run "
+            },
+            {
+              "text": "npm i",
+              "code": true
+            }
+          ]
+        }
+      ],
+      "plain": "Run npm i"
+    },
+    {
+      "text": "Almost [a link",
+      "live": true,
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "spans": [
+            {
+              "text": "Almost [a link"
+            }
+          ]
+        }
+      ],
+      "plain": "Almost [a link"
+    },
+    {
+      "text": "Done **now**.",
+      "live": true,
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "spans": [
+            {
+              "text": "Done "
+            },
+            {
+              "text": "now",
+              "bold": true
+            },
+            {
+              "text": "."
+            }
+          ]
+        }
+      ],
+      "plain": "Done now."
+    }
+  ],
+  "reveal": [
+    {
+      "shown": 0,
+      "target": 100,
+      "elapsedMs": 16,
+      "length": 2
+    },
+    {
+      "shown": 0,
+      "target": 10,
+      "elapsedMs": 16,
+      "length": 1
+    },
+    {
+      "shown": 0,
+      "target": 1000,
+      "elapsedMs": 100,
+      "length": 166
+    },
+    {
+      "shown": 50,
+      "target": 50,
+      "elapsedMs": 16,
+      "length": 50
+    },
+    {
+      "shown": 10,
+      "target": 5,
+      "elapsedMs": 16,
+      "length": 5
+    },
+    {
+      "shown": 0,
+      "target": 100,
+      "elapsedMs": 0,
+      "length": 0
+    },
+    {
+      "shown": 95,
+      "target": 100,
+      "elapsedMs": 1000,
+      "length": 100
+    },
+    {
+      "shown": 0,
+      "target": 3,
+      "elapsedMs": 1,
+      "length": 1
+    }
+  ],
+  "ratingLayout": [
+    {
+      "style": "emoji",
+      "thread": 400,
+      "padding": 14,
+      "width": 300,
+      "count": 5,
+      "size": 44,
+      "glyph": 24,
+      "gap": 8
+    },
+    {
+      "style": "emoji",
+      "thread": 345,
+      "padding": 14,
+      "width": 289.8,
+      "count": 5,
+      "size": 44,
+      "glyph": 24,
+      "gap": 8
+    },
+    {
+      "style": "emoji",
+      "thread": 327,
+      "padding": 14,
+      "width": 280,
+      "count": 5,
+      "size": 44,
+      "glyph": 24,
+      "gap": 8
+    },
+    {
+      "style": "emoji",
+      "thread": 327,
+      "padding": 24,
+      "width": 300,
+      "count": 5,
+      "size": 44,
+      "glyph": 24,
+      "gap": 8
+    },
+    {
+      "style": "emoji",
+      "thread": 300,
+      "padding": 24,
+      "width": 300,
+      "count": 5,
+      "size": 44,
+      "glyph": 24,
+      "gap": 8
+    },
+    {
+      "style": "emoji",
+      "thread": 280,
+      "padding": 24,
+      "width": 280,
+      "count": 5,
+      "size": 40,
+      "glyph": 21.818181818181817,
+      "gap": 8
+    },
+    {
+      "style": "emoji",
+      "thread": 258,
+      "padding": 14,
+      "width": 258,
+      "count": 5,
+      "size": 39.6,
+      "glyph": 21.6,
+      "gap": 8
+    },
+    {
+      "style": "emoji",
+      "thread": 200,
+      "padding": 12,
+      "width": 200,
+      "count": 5,
+      "size": 28.8,
+      "glyph": 15.70909090909091,
+      "gap": 8
+    },
+    {
+      "style": "emoji",
+      "thread": 0,
+      "padding": 14,
+      "width": 0,
+      "count": 5,
+      "size": 0,
+      "glyph": 0,
+      "gap": 8
+    },
+    {
+      "style": "stars",
+      "thread": 327,
+      "padding": 14,
+      "width": 274.68,
+      "count": 5,
+      "size": 36,
+      "glyph": 28,
+      "gap": 8
+    },
+    {
+      "style": "stars",
+      "thread": 240,
+      "padding": 16,
+      "width": 240,
+      "count": 5,
+      "size": 35.2,
+      "glyph": 27.37777777777778,
+      "gap": 8
+    },
+    {
+      "style": "stars",
+      "thread": 600,
+      "padding": 16,
+      "width": 300,
+      "count": 5,
+      "size": 36,
+      "glyph": 28,
+      "gap": 8
+    },
+    {
+      "style": "thumbs",
+      "thread": 327,
+      "padding": 14,
+      "width": 274.68,
+      "count": 2,
+      "size": 44,
+      "glyph": 22,
+      "gap": 8
+    },
+    {
+      "style": "thumbs",
+      "thread": 100,
+      "padding": 14,
+      "width": 100,
+      "count": 2,
+      "size": 32,
+      "glyph": 16,
+      "gap": 8
+    },
+    {
+      "style": "hearts",
+      "thread": 327,
+      "padding": 14,
+      "width": 274.68,
+      "count": 2,
+      "size": 44,
+      "glyph": 22,
+      "gap": 8
+    }
+  ]
+}

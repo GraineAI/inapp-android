@@ -34,7 +34,14 @@ internal class FakePeer(var offer: String = Trace.OFFER) : GraineRtcPeer {
     fun completeOffer() { pendingOffer?.invoke(null); pendingOffer = null; flushPool() }
     private fun flushPool() { val found = pool.toList(); pool.clear(); for (c in found) listener!!.onCandidate(c) }
     override fun localDescription(): String? = if (hasLocal) offer else null
-    override fun setRemoteAnswer(sdp: String, done: (error: String?) -> Unit) { calls += "setRemoteAnswer"; remoteAnswer = sdp; done(null) }
+    /** setRemoteAnswer's callback held until the test applies it ([completeAnswer]): an answer still being applied. */
+    var holdAnswer = false
+    private var pendingAnswer: ((String?) -> Unit)? = null
+    override fun setRemoteAnswer(sdp: String, done: (error: String?) -> Unit) {
+        calls += "setRemoteAnswer"; remoteAnswer = sdp
+        if (holdAnswer) pendingAnswer = done else done(null)
+    }
+    fun completeAnswer(error: String? = null) { pendingAnswer?.invoke(error); pendingAnswer = null }
     override fun answerOffer(sdp: String, done: (answer: String?, error: String?) -> Unit) { calls += "answerOffer"; answeredOffer = sdp; done("v=0\r\ns=answer\r\n", null) }
     override fun setMicrophoneEnabled(enabled: Boolean) { micEnabled = enabled }
     /** Every setAudioActive, in order: (recording, playout). A peer starts recording and playing, as the library's does. */

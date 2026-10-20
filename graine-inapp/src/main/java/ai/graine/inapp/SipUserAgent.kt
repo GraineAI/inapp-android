@@ -120,8 +120,17 @@ internal sealed class SipResult {
 
 /** What a call's dialog reports, on the user agent's scheduler. */
 internal interface SipCallListener {
-    /** A provisional reply (100 Trying, 18x): the INVITE arrived. */
+    /**
+     * A provisional reply (100 Trying, 18x) to the INVITE in flight: it arrived. Once per status for
+     * each INVITE — the first one, and after a challenge the one with credentials, whose 100 Trying
+     * is the reply the answer is timed from.
+     */
     fun onProvisional(code: Int) {}
+    /**
+     * The INVITE was challenged ([code] 401 or 407) and has gone again with credentials: whatever was
+     * heard so far belonged to an INVITE that is now refused, and the one in flight has heard nothing yet.
+     */
+    fun onChallenged(code: Int) {}
     /** Answered: the 200 OK's SDP. The ACK has gone out. */
     fun onAnswered(sdp: String) {}
     /** Never answered. Not called for a call this side hung up. */
@@ -144,7 +153,8 @@ internal interface SipCallListener {
  *   REGISTER sip:{realm} (expires 300) → 401 → digest → 200, refreshed before it lapses
  *   INVITE sip:app-{sid}@{realm} → 100 → 401 → ACK → INVITE with credentials → 100 → 200 → ACK
  *   an UPDATE every 45 s while the call lasts (the session refresh the browser sends)
- *   BYE, or CANCEL before the answer; then un-REGISTER and the socket closed
+ *   BYE, or CANCEL before the answer; the un-REGISTER at once; the socket closed once they
+ *   are answered — a dial not yet answered keeps it until its INVITE has its final answer
  *
  * Every request of the dialog — the ACK, the BYE and the UPDATE whose
  * Request-URI is the server's own address — goes on this one socket, and the
@@ -341,6 +351,8 @@ internal class SipUserAgent(
                     timer?.invoke()
                     timer = scheduler.schedule(TIMER_B_MS) { remove() }
                     finish(SipResult.Response(m))
+                    // Answered after a stop (it crossed the CANCEL): the socket goes once the BYE just sent is answered.
+                    closeWhenIdle()
                 }
                 request.method == "INVITE" -> {
                     ackFailure(m)
@@ -361,7 +373,7 @@ internal class SipUserAgent(
         fun remove() {
             timer?.invoke(); timer = null
             if (pending[key] === this) pending.remove(key)
-            if (stopped && pending.isEmpty()) scheduler.post { if (pending.isEmpty()) closeSocket() }
+            closeWhenIdle()
         }
 
         /** The ACK for a final failure: this branch, the INVITE's Request-URI and CSeq, the response's To. */
@@ -380,7 +392,8 @@ internal class SipUserAgent(
     /**
      * Send [request], answering one digest challenge (and one more when the
      * server says the nonce went stale), as the browser's request sender does.
-     * [authenticated] hears the retried request, whose CSeq is one higher.
+     * [authenticated] hears the retried request, whose CSeq is one higher;
+     * [challenged] hears the challenge's status (401 or 407) just before it goes.
      */
     private fun request(
         request: SipRequest,
@@ -388,6 +401,7 @@ internal class SipUserAgent(
         onProvisional: (SipMessage) -> Unit = {},
         on2xxAgain: (SipMessage) -> Unit = {},
         authenticated: (SipRequest) -> Unit = {},
+        challenged: (Int) -> Unit = {},
         /** Whether a challenge may still be answered: not for an INVITE hung up meanwhile. */
         retry: () -> Boolean = { true },
         onFinal: (SipResult) -> Unit,
@@ -409,6 +423,7 @@ internal class SipUserAgent(
                             if (challenge.stale) staled = true
                             val next = r.authenticated(if (code == 401) "Authorization" else "Proxy-Authorization", value)
                             authenticated(next)
+                            challenged(code)
                             attempt(next, null)
                             return@ClientTx
                         }
@@ -512,8 +527,12 @@ internal class SipUserAgent(
 
     /**
      * Let go: the call hung up (BYE or CANCEL) if it is still up, the
-     * registration removed, and the socket closed once those are answered —
-     * at most two seconds later, as the browser's stack closes it. No event follows.
+     * registration removed at once, and the socket closed once those are
+     * answered — at most two seconds later, as the browser's stack closes it.
+     * A dial with no final answer yet keeps the socket longer, until it has
+     * one or [RtcDial.ABANDONED_DIAL_GRACE_MS] has passed: its CANCEL and the
+     * 487, or the ACK and BYE of an answer that crosses the CANCEL, travel on
+     * this socket, and without them the server's leg stays up. No event follows.
      */
     fun stop() = scheduler.post {
         if (stopped) return@post
@@ -521,12 +540,24 @@ internal class SipUserAgent(
         reconnectTimer?.invoke(); reconnectTimer = null
         refreshTimer?.invoke(); refreshTimer = null
         answerProbe(false)
+        val dialing = call?.inviteInFlight == true
         call?.terminate(null)
         if (registered) unregister()
         // An answered INVITE stays matched only for repeated 200s; it holds nothing open.
         for (tx in pending.values.toList()) if (tx.finished) tx.remove()
         if (pending.isEmpty()) closeSocket()
-        else closeTimer = scheduler.schedule(CLOSE_AFTER_MS) { closeSocket() }
+        else closeTimer = scheduler.schedule(if (dialing) RtcDial.ABANDONED_DIAL_GRACE_MS else CLOSE_AFTER_MS) { closeSocket() }
+    }
+
+    /**
+     * Stopping: close the socket once nothing on it waits for an answer — an
+     * answered INVITE kept only for repeated 200s waits for nothing. Looked at
+     * after the current work, which may still send something (the BYE for an
+     * answer that crossed the CANCEL).
+     */
+    private fun closeWhenIdle() {
+        if (!stopped) return
+        scheduler.post { if (stopped && pending.values.all { it.finished }) closeSocket() }
     }
 
     private fun unregister() {
@@ -672,6 +703,9 @@ internal class SipUserAgent(
         var serverCallId: String? = null
             private set
 
+        /** An INVITE of this call is on its way and has no final answer yet: hanging up must CANCEL it, on this socket. */
+        internal val inviteInFlight: Boolean get() = invite?.current?.finished == false
+
         private var timerExpires = SESSION_EXPIRES
         private var timerRefresher = false
         private var timerRunning = false
@@ -686,16 +720,24 @@ internal class SipUserAgent(
             extra += "Content-Type: application/sdp"
             extra += "Session-Expires: $SESSION_EXPIRES"
             val req = SipRequest("INVITE", target, "<$target>", from, callId, random.cseq(), extra, localSdp)
-            invite = request(req, onProvisional = { m -> onProvisional(m) }, on2xxAgain = { m -> on2xx(m) }, retry = { !silenced }) { result -> onFinal(result) }
+            invite = request(req, onProvisional = { m -> onProvisional(m) }, on2xxAgain = { m -> on2xx(m) },
+                challenged = { code -> onChallenged(code) }, retry = { !silenced }) { result -> onFinal(result) }
         }
 
         private fun onProvisional(m: SipMessage) {
             if (state == State.CALLING) state = State.PROCEEDING
             if (canceling) { sendCancel(); return }
-            // Once per status: the server says 100 Trying to the INVITE and again to its retry with credentials.
+            // Once per status for each INVITE: the server says 100 Trying to the first and again to its retry with
+            // credentials — and the retry's is the one that counts: that INVITE is the one it answers.
             if (!silenced && provisionals.add(m.status)) listener.onProvisional(m.status)
         }
         private val provisionals = HashSet<Int>()
+
+        /** Challenged, and sent again with credentials: the INVITE in flight is a new one, and has heard nothing yet. */
+        private fun onChallenged(code: Int) {
+            provisionals.clear()
+            if (!silenced) listener.onChallenged(code)
+        }
 
         private fun onFinal(result: SipResult) {
             val m = (result as? SipResult.Response)?.message

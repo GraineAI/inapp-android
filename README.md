@@ -17,7 +17,7 @@ Integration guide: https://www.graine.ai/docs/in-app/android
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    implementation("ai.graine:inapp-android:0.12.0")
+    implementation("ai.graine:inapp-android:0.13.0")
 }
 ```
 
@@ -279,8 +279,8 @@ ring, the call screen or the outcomes.
 
 ```kotlin
 dependencies {
-    implementation("ai.graine:inapp-android:0.12.0")
-    implementation("ai.graine:inapp-android-rtc:0.12.0")   // same version as the SDK
+    implementation("ai.graine:inapp-android:0.13.0")
+    implementation("ai.graine:inapp-android-rtc:0.13.0")   // same version as the SDK
 }
 ```
 
@@ -358,6 +358,36 @@ header offers it while an earlier conversation is on screen); what the agent
 remembers about the user stays. `forgetMemory` clears the chat on screen too.
 Anonymous users, and those with memory off, start fresh every time; each agent
 in your app keeps its own conversation.
+
+### Chat window v2: styles, quick replies, ratings
+
+The chat window is drawn piece by piece from the dashboard (**Chat window →
+Style**): a style — Classic, Soft, Bold, Glass, Minimal, Crisp, Cozy, Calm,
+Compact or Lively — sets the header, bubbles, times, wallpaper, chips, cards,
+composer, typing indicator, welcome and rating at once, and each piece can then
+be tuned on its own, with no code. Classic is the chat as it has always looked.
+Replies arrive smoothly and formatted (bold, italic, lists, links, code); a
+long press copies a message; a message that could not be sent says so, and a
+tap sends it again. The agent can suggest replies (chips the user taps) and end
+the conversation, after which the window asks how it went where the design does.
+
+```kotlin
+val chat = GraineInApp.get().chat
+// What the conversation is about, pinned under the header or atop the thread (never sent to the agent).
+chat.pin(GraineChatPin("Account settings", subtitle = "Profile, email and phone", badge = "Active"))
+chat.pin(null)
+chat.onAttach = { pickAFile() }          // the paperclip shows where the design has one, and only with this set
+chat.onRated = { rating -> log(rating.style, rating.value, rating.scale) }
+chat.rating                              // the user's answer, once given
+// Drawing your own chat:
+chat.quickReplies                        // the agent's suggested replies for its latest turn
+chat.sendQuickReply(chat.quickReplies.first())
+chat.ended                               // the agent ended the conversation
+chat.rate("stars", 4)                    // thumbs 1 (up) or 0, stars and emoji 1–5 — once, after the end
+```
+
+The microphone and call buttons a style may draw call the agent the way the
+voice bar does, and are drawn only where the agent takes calls.
 
 ## A bigger chat window
 

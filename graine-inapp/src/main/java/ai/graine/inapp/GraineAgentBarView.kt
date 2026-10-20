@@ -176,6 +176,8 @@ class GraineAgentBarView @JvmOverloads constructor(
             if (attached) {
                 old.chatScreenWatchers.remove(screenClosed)
                 v.chatScreenWatchers.add(screenClosed)
+                old.chatScreenCallWatchers.remove(screenCall)
+                v.chatScreenCallWatchers.add(screenCall)
             }
             // The chat follows the agent, unless the app draws a conversation of its own.
             if (chat === old.chat) chat = v.chat
@@ -243,6 +245,8 @@ class GraineAgentBarView @JvmOverloads constructor(
     private var seenOpens = 0
     /** That full-screen chat was closed: do what the chevron does. */
     private val screenClosed: () -> Unit = { post { if (screenOpen) { screenOpen = false; closeChat() } } }
+    /** That full-screen chat asked for a call: back here, and the call starts — its close then has nothing left to do. */
+    private val screenCall: () -> Unit = { post { if (screenOpen) { screenOpen = false; callFromChat() } } }
     /** Icons drawn for this look, by name and colour: a caption arriving redraws the buttons, not the drawings. */
     private val icons = HashMap<String, Drawable>()
     /** The bar's corners and whether its face is opaque, for the outline this view casts its shadow in. */
@@ -346,6 +350,7 @@ class GraineAgentBarView @JvmOverloads constructor(
         super.onAttachedToWindow()
         graine.addListener(this)
         graine.chatScreenWatchers.add(screenClosed)
+        graine.chatScreenCallWatchers.add(screenCall)
         seenOpens = (chat as? GraineChat)?.opens ?: 0
         chat?.addChangeListener(chatWatcher)
         voice.barShown(this, isShown)
@@ -361,6 +366,7 @@ class GraineAgentBarView @JvmOverloads constructor(
         voice.barShown(this, false)
         graine.removeListener(this)
         graine.chatScreenWatchers.remove(screenClosed)
+        graine.chatScreenCallWatchers.remove(screenCall)
         chat?.removeChangeListener(chatWatcher)
         dismissBigChat()
         showChat(false)
@@ -695,12 +701,14 @@ class GraineAgentBarView @JvmOverloads constructor(
                 cw.onBook = { openBooking() }
                 cw.onNewConversation = { (chat as? GraineChat)?.newConversation() }
                 cw.onCollapse = { closeChat() }
+                wireChatV2(cw)
                 chatSlot.addView(cw, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
             }
             w.render(t, l.accent, l.onAccent, l.name, l.hostImage, l.logoUrl, l.logoPlate, source.messages, source.online,
                 replying = source.typing, failed = source.failed, keyboardUp = imeLiftPx > 0, loader = l.loader, loaderColor = l.loaderColor,
                 upcoming = (source as? GraineChat)?.upcomingRows() ?: emptyList(), callName = graine.schedulingRules.callName ?: l.name,
-                bookable = source is GraineChat && graine.bookingAvailable)
+                bookable = source is GraineChat && graine.bookingAvailable,
+                extras = ChatExtras.of(source, canCall = canSwitch))
             chatSlot.visibility = VISIBLE
             if (!chatShown) Themed.enter(chatSlot, t, px(VoiceBar.RISE).toFloat())
         } else {
@@ -763,6 +771,25 @@ class GraineAgentBarView @JvmOverloads constructor(
     }
 
     /**
+     * The chat's microphone or call button: a call with the agent, exactly as
+     * this bar places one — the switch to the call (the chat ends), then the
+     * microphone's start. Offered only where the agent takes calls as well.
+     */
+    private fun callFromChat() {
+        if (surfaces()?.canSwitch != true) return
+        if (surfaces()?.start == "chat") switchSurface()
+        if (!voice.connected && !voice.connecting) pressMic()
+    }
+
+    /** A chat window's v2 pieces, answered here: quick replies, the rating, the paperclip and the call. */
+    private fun wireChatV2(w: ChatWindowView) {
+        w.onQuickReply = { reply -> (chat as? GraineChat)?.sendQuickReply(reply) ?: chat?.send(reply.text) }
+        w.onRate = { style, value -> chat?.rate(style, value) }
+        w.onAttach = { (chat as? GraineChat)?.onAttach?.invoke() }
+        w.onCall = { callFromChat() }
+    }
+
+    /**
      * A bigger chat window: a phone's sheet or a tablet's panel in a window of
      * its own ([ChatWindowDialog]), the agent's components above its composer;
      * the whole screen in the chat's own activity, opened once. Anything else
@@ -782,6 +809,7 @@ class GraineAgentBarView @JvmOverloads constructor(
                     // A sheet and a panel offer New conversation like the window above the bar.
                     dialog.chat.onNewConversation = { (chat as? GraineChat)?.newConversation() }
                     dialog.chat.onCollapse = { closeChat() }
+                    wireChatV2(dialog.chat)
                     dialog.chat.setAccessory(GraineWidgetView(context).also { it.graine = graine; it.scheme = scheme })
                     bigChat = dialog
                 }
@@ -791,7 +819,8 @@ class GraineAgentBarView @JvmOverloads constructor(
             d.chat.render(l.t, l.accent, l.onAccent, l.name, l.hostImage, l.logoUrl, l.logoPlate, source.messages, source.online,
                 replying = source.typing, failed = source.failed, loader = l.loader, loaderColor = l.loaderColor,
                 upcoming = (source as? GraineChat)?.upcomingRows() ?: emptyList(), callName = graine.schedulingRules.callName ?: l.name,
-                bookable = source is GraineChat && graine.bookingAvailable)
+                bookable = source is GraineChat && graine.bookingAvailable,
+                extras = ChatExtras.of(source, canCall = surfaces()?.canSwitch == true))
             val host = Ui.activity(context)
             if (!d.isShowing && isAttachedToWindow && host != null && !host.isFinishing) d.show()
         } else {

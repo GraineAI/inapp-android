@@ -37,6 +37,8 @@ import org.json.JSONObject
 
 class MainActivity : Activity() {
     private val graine get() = GraineInApp.get()
+    /** Built without a publishable key: only the Chat styles screen (debug builds) can run. */
+    private val ready get() = GraineInApp.find(GraineInApp.DEFAULT) != null
     private lateinit var bar: GraineAgentBarView
     private lateinit var reportScreen: () -> Unit
 
@@ -67,6 +69,7 @@ class MainActivity : Activity() {
         val ink = if (dark) Color.WHITE else Color.parseColor("#101318")
         val muted = if (dark) Color.parseColor("#A0A5AE") else Color.parseColor("#5F6672")
         val root = FrameLayout(this).apply { setBackgroundColor(Color.parseColor(if (dark) "#0E0F12" else "#F4F5F7")) }
+        if (!ready) { showNoKey(root, ink, muted); return }
 
         // The screen the agent is helping with: one field, reported as it changes.
         val error = TextView(this).apply { setTextColor(Color.parseColor("#D32F2F")); textSize = 13f; visibility = TextView.GONE }
@@ -163,11 +166,38 @@ class MainActivity : Activity() {
         graine.voice.attach(this)
         if (intent?.getBooleanExtra("autostart", false) == true) graine.voice.start()
         if (BuildConfig.DEBUG) {
+            content.addView(chatStylesLink(), LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(16) })
             if (intent?.getBooleanExtra("maskCheck", false) == true) runMaskCheck()
             if (intent?.hasExtra("demoDesign") == true) showDemoDesign(root, intent.getIntExtra("demoDesign", 0))
             showDemoWidget()
             if (intent?.hasExtra("demoLoaders") == true) content.addView(demoLoaders(muted), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(24) })
         }
+    }
+
+    /** No key in local.properties: what to add — and, in a debug build, the Chat styles screen, which needs no agent. */
+    private fun showNoKey(root: FrameLayout, ink: Int, muted: Int) {
+        root.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(48), dp(24), 0)
+            addView(TextView(context).apply { text = "Add your publishable key"; setTextColor(ink); setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f); paint.isFakeBoldText = true })
+            addView(TextView(context).apply {
+                text = "Set graine.publishableKey=pk_live_… in local.properties (Agent → Embed & Widgets), then rebuild."
+                setTextColor(muted); textSize = 15f
+            }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+            if (BuildConfig.DEBUG) addView(chatStylesLink(), LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(20) })
+        }, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
+        root.setOnApplyWindowInsetsListener { v, insets -> val (top, bottom) = systemBars(insets); v.setPadding(0, top, 0, bottom); insets }
+        setContentView(root)
+    }
+
+    /** Debug builds only: every chat style, drawn by the SDK's chat window with a sample conversation (ChatStylesActivity). */
+    private fun chatStylesLink(): TextView = TextView(this).apply {
+        text = "Chat styles"
+        contentDescription = "Chat styles"
+        setTextColor(Color.parseColor("#318CE7"))
+        textSize = 15f
+        setPadding(0, dp(10), 0, dp(10))
+        setOnClickListener { runCatching { startActivity(android.content.Intent().setClassName(this@MainActivity, "ai.graine.sample.ChatStylesActivity")) } }
     }
 
     @Suppress("DEPRECATION")
@@ -251,7 +281,7 @@ class MainActivity : Activity() {
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        if (!graine.voice.onRequestPermissionsResult(requestCode, grantResults)) {
+        if (!ready || !graine.voice.onRequestPermissionsResult(requestCode, grantResults)) {
             super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         }
     }
@@ -265,7 +295,7 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         // No detach here: the engine follows the customer to whichever activity
         // is in front, and a call started on this step carries on in the next.
-        graine.removeListener(logger)
+        if (ready) graine.removeListener(logger)
         super.onDestroy()
     }
 }

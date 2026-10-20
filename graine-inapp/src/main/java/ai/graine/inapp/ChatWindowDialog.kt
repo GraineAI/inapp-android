@@ -115,21 +115,22 @@ internal class ChatWindowDialog(
     fun paint(t: ThemeTokens) {
         val first = tokens == null
         tokens = t
-        val chatTokens = Surfaces.chatOf(t)
+        val style = Surfaces.styleOf(t)
         if (sheet) {
             val r = Themed.px(context, t.shape.radius.xl).toFloat()
             body.background = GradientDrawable().apply {
-                setColor(Themed.color(chatTokens.background))
+                setColor(Themed.color(style.wallpaper.color))
                 cornerRadii = floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
             }
             body.outlineProvider = ViewOutlineProvider.BACKGROUND
             body.clipToOutline = true
             // The floating shadow, unless the design draws a hard offset — which has nowhere to show at the screen's edges.
             if (t.elevation.hardOffset == null) Themed.shadow(body, t.elevation.floating) else body.elevation = 0f
+            // The handle's strip in the header's fill (a plain header's is the wallpaper's top; the title bar's with window chrome).
             val windowed = WindowChrome.titleBar(t, WindowChrome.Surface.CHAT, "", false) != null
-            handle.setBackgroundColor(Themed.color(if (windowed) t.colors.surfaceRaised else chatTokens.headerBackground))
+            handle.setBackgroundColor(Themed.color(if (windowed) t.colors.surfaceRaised else style.header.fill.color))
             handleBar.background = Ui.rounded(
-                Themed.alpha(Themed.color(if (windowed) t.colors.textMuted else chatTokens.headerSubtext), 0.5),
+                Themed.alpha(Themed.color(if (windowed) t.colors.textMuted else style.header.fill.textMuted), 0.5),
                 dp(ChatWindowLayout.HANDLE_HEIGHT / 2).toFloat(),
             )
         }

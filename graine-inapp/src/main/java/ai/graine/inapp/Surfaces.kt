@@ -45,6 +45,14 @@ data class ChatTokens(
     val showHistory: Boolean = true,
     /** The header's compose control (New conversation button). Off, [GraineChat.newConversation] still works. */
     val newConversation: Boolean = true,
+    /**
+     * Chat window v2 — every piece of the chat (header, bubbles, times,
+     * wallpaper, chips, cards, composer, typing, density, welcome, rating,
+     * call button, glass), as the server sent it; null from a server that
+     * predates them. `Surfaces.styleOf(tokens)` is what to draw: this, or
+     * the classic chat derived from the fields above.
+     */
+    val style: ChatStyle? = null,
 )
 
 /**
@@ -296,6 +304,9 @@ internal object Surfaces {
     /** The chat window's tokens to draw: the server's, else derived. */
     fun chatOf(t: ThemeTokens): ChatTokens = t.chat ?: defaultChat(t.colors)
 
+    /** The chat window's v2 pieces to draw: the server's, else the classic chat derived from the v1 tokens (contract/DESIGN.md "Chat window v2"). */
+    fun styleOf(t: ThemeTokens): ChatStyle = t.chat?.style ?: ChatStyles.classic(t)
+
     /** The call screen's tokens to draw: the server's, else derived. */
     fun callOf(t: ThemeTokens): CallTokens = t.call ?: defaultCall(t.colors)
 
@@ -314,6 +325,8 @@ internal object Surfaces {
         .put("size", c.size.wire)
         .put("showUpcomingCalls", c.showUpcomingCalls).put("upcomingTitle", c.upcomingTitle)
         .put("showHistory", c.showHistory).put("newConversation", c.newConversation)
+        // Only what the server sent: a chat from before v2 writes back without its groups.
+        .apply { c.style?.let { ChatStyles.json(it, this) } }
 
     fun json(c: CallTokens): JSONObject = JSONObject()
         .put("background", c.background).put("backgroundTo", c.backgroundTo ?: JSONObject.NULL)

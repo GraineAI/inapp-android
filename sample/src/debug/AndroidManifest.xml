@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds only: the Chat styles screen (ChatStylesActivity), which draws the SDK's chat window with no agent.
+     supportsRtl: without it Android lays every screen out left to right, so the screen's right-to-left check (rtl) shows nothing. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:supportsRtl="true">
+        <activity android:name=".ChatStylesActivity" android:exported="true" android:label="Chat styles" />
+    </application>
+</manifest>

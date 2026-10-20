@@ -1994,7 +1994,7 @@ object Design {
             scrim = hex(c, "scrim", dc.scrim),
         )
         val fontWeights = FontWeights(weight("body", d.font.weights.body), weight("strong", d.font.weights.strong), weight("title", d.font.weights.title))
-        return ThemeTokens(
+        val base = ThemeTokens(
             v = Js.finite(o?.opt("v"))?.toInt() ?: 1,
             preset = text(o, "preset", d.preset),
             scheme = word(o, "scheme", listOf("light", "dark"), scheme),
@@ -2063,6 +2063,10 @@ object Design {
             chat = Surfaces.chat(o?.opt("chat"), colors),
             call = Surfaces.call(o?.opt("call"), colors, fontWeights),
         )
+        // Chat window v2: the server's pieces, field by field over the classic chat these very tokens imply.
+        val chat = base.chat ?: return base
+        val style = ChatStyles.parse(o?.opt("chat") as? JSONObject, ChatStyles.classic(base)) ?: return base
+        return base.copy(chat = chat.copy(style = style))
     }
 
     // ── Graine Classic: the default for every value the wire leaves out ─────
@@ -2094,7 +2098,7 @@ object Design {
         elevation = ThemeElevation(ThemeShadow(2.0, 8.0, 0.0, 0.08, "#000000"), CLASSIC_FLOATING, null),
         motion = CLASSIC_MOTION, icons = CLASSIC_ICONS, glass = null, bubbles = "filled", chrome = "none",
         chat = Surfaces.CLASSIC_CHAT_LIGHT, call = Surfaces.CLASSIC_CALL,
-    )
+    ).let { t -> t.copy(chat = t.chat?.copy(style = ChatStyles.classic(t))) }
 
     /** Graine Classic in dark, as the server resolves it. */
     @JvmField
@@ -2110,5 +2114,5 @@ object Design {
         elevation = ThemeElevation(ThemeShadow(2.0, 8.0, 0.0, 0.16, "#000000"), CLASSIC_FLOATING, null),
         motion = CLASSIC_MOTION, icons = CLASSIC_ICONS, glass = null, bubbles = "filled", chrome = "none",
         chat = Surfaces.CLASSIC_CHAT_DARK, call = Surfaces.CLASSIC_CALL,
-    )
+    ).let { t -> t.copy(chat = t.chat?.copy(style = ChatStyles.classic(t))) }
 }

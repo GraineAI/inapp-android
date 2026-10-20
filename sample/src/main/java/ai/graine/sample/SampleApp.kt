@@ -16,6 +16,11 @@ import android.app.Application
 class SampleApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        // No key yet: the main screen says what to add, and the Chat styles screen (debug builds) runs without an agent.
+        if (BuildConfig.GRAINE_PUBLISHABLE_KEY.isEmpty()) {
+            android.util.Log.w("GraineSample", "No publishable key: set graine.publishableKey=pk_live_… in local.properties, then rebuild.")
+            return
+        }
         val graine = GraineInApp.init(this, GraineConfig(
             baseUrl = "https://www.graine.ai",
             publishableKey = BuildKeys.PUBLISHABLE_KEY,

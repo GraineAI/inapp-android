@@ -63,7 +63,7 @@ iOS points, Android dp, Flutter logical pixels).
 | `glass` | `{ blur, surfaceOpacity }` or `null`. When set, surfaces are translucent: `surface` at `surfaceOpacity`, background blurred by `blur` where the platform can (iOS has no public blur radius: its thinnest system material) |
 | `bubbles` | `filled`, `outline`, `minimal` — see Chat window |
 | `chrome` | `none` or `window` — see Window chrome. Absent (an older server): `none` |
-| `chat` | The chat window's words and colours — see **Chat window**. Absent (an older server): draw the chat window as before |
+| `chat` | The chat window's words and colours — see **Chat window** — and, from a v2 server, every piece of it (`preset`, `header`, `bubbles`, `timestamps`, `wallpaper`, `chips`, `cards`, `composer`, `typing`, `density`, `welcome`, `rating`, `escalation`, `glass`) — see **Chat window v2**. Absent (an older server): draw the chat window as before |
 | `call` | The call screen's colours, buttons, words and ring, and its look (version 2: backdrop, layout, rings, visualiser, caption style, type, a look per moment) — see **Call screen**. Absent: Graine Classic's (below) |
 
 ### `chat` and `call`
@@ -442,6 +442,450 @@ new, so it reaches every shipped SDK as it is.
   listening; the customer finished with no reply yet is thinking.
 - Native SDKs keep the **Voice bar** above for this design. Drawing the grain
   on a phone is a future SDK release, not a token change.
+
+## Chat window v2
+
+The chat window, piece by piece — header, bubbles, times, wallpaper, chips,
+cards, composer, typing indicator, density, welcome, rating and call button —
+each set in the Garage (Chat window → Style) and delivered, resolved, in the
+token set's `chat` group beside the v1 tokens above. A **style preset** sets
+them all at once; every knob can then be turned on its own.
+
+**Compatibility.** Nothing here changes the v1 tokens: a design saved before
+v2 resolves to exactly the tokens it always did, and its v2 groups describe
+that same chat (`chat.preset: "classic"`). The v1 tokens of a v2 design are
+the nearest an older SDK can draw — the header's fill is a gradient's first
+colour, a pattern it does not know is its dots, times by group are times
+under every message, a bubble colour the brand chose is also
+`colors.userBubble` / `agentBubble`. **A server that sends no v2 groups** (an
+older one): draw classic, derived from the v1 tokens exactly as the table
+below says (theme.ts `resolveChat` is the reference). A group present but a
+field missing or the wrong type: that field's classic value. A word this
+build does not know: the first value listed for it (`surface`, `rounded`,
+`never`, `solid`, `dots`, `outline`, `both`, `wrap`, `auto`, `filled`, `bar`,
+`circle`, `loader`, `comfortable`, `centered`, `chips`, `thumbs`, `none`,
+`bar` for `contextCard`).
+
+### The tokens
+
+Colours `#RRGGBB`, lengths in points, every text colour already checked
+against what it sits on: 4.5:1, or 3:1 (`ON_ACCENT_MIN`, the accent's own
+floor, as the v1 accent header and customer bubble have always had) for words
+on the accent or a gradient of its shades. A gradient's text reads on both
+ends; where the brand forced the ink (`ink: "light" | "dark"`) the colour,
+not the ink, moved until it reads.
+
+| Token | Value | Classic (derived from v1) |
+|---|---|---|
+| `chat.preset` | the style it came from (informational) | `"classic"` |
+| `chat.header.style` | `surface` · `accent` · `gradient` · `plain` | `accent` when `headerBackground` ≠ `colors.surface`, else `surface` |
+| `chat.header.align` | `start` · `center` | `start` |
+| `chat.header.status` | `online` · `text` · `none` | `online` |
+| `chat.header.typingStatus` | boolean | `false` |
+| `chat.header.contextCard` | `bar` · `card` · `none` | `bar` |
+| `chat.header.fill` | `{color, colorTo, text, textMuted}` | `{headerBackground, null, headerText, headerSubtext}` |
+| `chat.header.dot`, `chat.header.divider` | colour; boolean | `success` on a surface header, else `headerText`; `true` |
+| `chat.bubbles.shape` | `rounded` · `squircle` · `tail` · `flat` | `rounded` |
+| `chat.bubbles.radius`, `tightRadius` | numbers | `radius.lg`, `min(radius.sm, radius.lg)` |
+| `chat.bubbles.grouping` | boolean | `false` |
+| `chat.bubbles.maxWidth` | share of the thread's width, 0.6–0.92 | `0.84` |
+| `chat.bubbles.shadow` | `{y, blur, spread, opacity, color}` or `null` | `null` |
+| `chat.bubbles.user`, `chat.bubbles.agent` | `{color, colorTo, text, textMuted, border, bare, link}` — `color` null = transparent, `colorTo` null = solid, `border` null = none, `bare` = no bubble at all | from `bubbles` exactly as v1 draws it: `filled` — `userBubble`/`userBubbleText`, `agentBubble`/`agentBubbleText`; `outline` — transparent, `text`, borders `accent` (customer) and `border` (agent); `minimal` — customer `accentSoft`/`text`, agent bare in `text`. `link`: `accent` where it reads at 4.5:1 on the fill, else the words' colour |
+| `chat.timestamps` | `{show: never·group·always, style: below·inside, ticks}` | `{showTimestamps ? always : never, below, false}` |
+| `chat.wallpaper` | `{style: solid·gradient·pattern, color, colorTo, pattern: none·dots·grid·diagonal, patternColor, intensity, text, textMuted}` | `{pattern = "dots" ? pattern : solid, background, null, pattern, patternColor, 0.5, colors.text, colors.textMuted}` |
+| `chat.chips` | `{style: outline·filled·soft·elevated, placement: both·inline·above-composer, scroll: wrap·row, height, radius, fill, text, border, borderWidth, shadow}` | `{outline, both, wrap, 34, min(radius.xl, 17), the wallpaper's colour (its bottom one), colors.text (raised to 4.5:1 on the fill), accent, max(1, borderWidth), null}` |
+| `chat.cards` | `{radius, shadow, hard, border, image: auto·square·landscape·wide, button: filled·outline·tonal·text, buttonFill, buttonText, buttonBorder}` | `{radius.lg, elevation.card, hardOffset ≠ null, true, auto, filled, accent, onAccent, null}` |
+| `chat.composer` | `{style: bar·floating·pill, mic, attach, send: circle·rounded·icon, fill, text, placeholder, border, strip, shadow, height, radius, sendFill, sendIcon, icon}` | `{bar, false, false, circle, composerBackground, composerText, composerPlaceholder, composerBorder, background, null, 40, radius.xl, accent, onAccent, accent (raised to 3:1 on the field)}` (`icon` draws nothing in classic: no paperclip, microphone or call button) |
+| `chat.typing` | `{style: loader·dots·wave·text, text ("" = "Typing…"), color}` | `{loader, "", accent}` |
+| `chat.density` | `{name, gap, groupGap, padX, padY, edge}` | `{comfortable, spacing.gap, max(2, round(gap/4)), cardPadding, round(cardPadding × 0.75), 12}` |
+| `chat.welcome` | `{layout: centered·card·hero·minimal, starters: chips·list}` | `{centered, chips}` |
+| `chat.rating` | `{show, style: thumbs·stars·emoji, prompt ("" = "How was this chat?")}` | `{false, thumbs, ""}` |
+| `chat.escalation` | `{call: none·header·composer}` | `{none}` |
+| `chat.glass` | `{blur, opacity}` or `null` | `null` |
+
+A side's `textMuted` (its times, inside the bubble) is its words mixed 30%
+toward its fill — less, down to 5%, until it reads at 4.5:1 (3:1 on the
+accent family) — else the words' own colour. `wallpaper.pattern` `none` is
+no pattern; a pattern word this build does not know is `dots`.
+
+The knobs the Garage saves (`DesignConfig.chat`) are the same groups in
+words, numbers and colour roles (`accent`, `accentSoft`, `accentDeep`,
+`accentBright`, `surface`, `surfaceRaised`, `background`, `text`, or a hex) —
+see `DesignChatStyleKnobs` in theme.ts. Only the server reads them.
+
+### Presets
+
+`design.json` → `chatStyles`, `CHAT_STYLES` in theme.ts: data, never code —
+a style is a set of knobs, so a new one reaches every phone without a
+release. Each is drawn in the brand's own design, accent, light and dark.
+
+| Style | What it is |
+|---|---|
+| Classic | The chat as it has always looked, in your design. The default. |
+| Soft *(recommended for a new chat)* | Pastel bubbles, a floating composer, gentle grouping, emoji rating |
+| Bold | A gradient header in your colour, tailed bubbles, filled chips, a hero welcome, a call button |
+| Glass | Frosted pieces over a soft wash of your colour |
+| Minimal | The agent's words on the page, a centred title, starters as a list |
+| Crisp | High contrast: ink bubbles, a pinned context bar, list starters, thumbs rating |
+| Cozy | A messaging app's warmth: an accent header, a patterned wallpaper, times inside the bubbles |
+| Calm | Spacious: a centred header, a hero welcome, a soft gradient, stars rating |
+| Compact | Dense: square-cornered bubbles, times inside, more on screen |
+| Lively | Gradient bubbles, a dotted wallpaper, a wave while it types |
+
+### Element by element (v2)
+
+Everything the v1 **Chat window** says still holds — frame, sizes, header
+pieces, earlier messages, day separators, the voice-call row, starters'
+behaviour, upcoming calls, window chrome — except where a v2 token says
+otherwise below.
+
+**Wallpaper** — behind the thread, and also behind a `plain` header and a
+`floating` composer: one surface from the window's top edge to its bottom.
+- `solid` — `wallpaper.color`.
+- `gradient` — linear, top → bottom of that surface, `color` → `colorTo`.
+- `pattern` — `color`, and over it, standing still while the messages
+  scroll, in `patternColor`: `dots` — 2 across on an 18-point grid, the
+  first centred 9 in from the top-left (v1); `grid` — 1-wide lines at
+  x = 9 + 18k and y = 9 + 18k; `diagonal` — 1-wide lines where x + y is a
+  multiple of 14 (rising left to right). Patterns never mirror for RTL.
+- Words drawn straight on it (a bare bubble, day separators, times under
+  bubbles, the welcome's title) use `wallpaper.text` / `textMuted`.
+- `chat.glass` set: the header (surface or plain), the composer, the chips
+  and every agent bubble with a fill are translucent — their colour at
+  `glass.opacity` — over the wallpaper blurred by `glass.blur` where the
+  platform can (iOS: its thinnest material). A surface header still frosts
+  with the design's own `glass` as in v1.
+
+**Header** — 50 high (it grows with the text size).
+- Fill by `header.style`: `surface` — `colors.surface`; `accent` —
+  `header.fill.color`; `gradient` — linear from the leading edge
+  (`fill.color`) to the trailing edge (`fill.colorTo`), mirrored in RTL;
+  `plain` — none: the wallpaper runs under it. A `borderWidth` hairline in
+  `colors.border` under it when `header.divider`.
+- `align: "start"` (v1): [chevron, full screen only] [avatar 30] [title and
+  status, taking the rest] [call button] [compose] [chevron]. `align:
+  "center"`: the same controls at the same edges, and the avatar (24) with the
+  title and status as one group centred on the header's whole width, kept 8
+  clear of the controls (truncated before it would touch them).
+- Title as v1, in `header.fill.text`. The status line, at caption size in
+  `fill.textMuted`, first match wins: connecting → "Connecting…" (the
+  loader's connecting words); reconnecting → "Reconnecting…"; the agent
+  typing and `typingStatus` → `typing.text` or "Typing…"; `status: "none"`
+  → no line at all (the title centres vertically); `online` → a 6-point dot
+  in `header.dot`, 6 apart, then `chat.subtitle` or "Online"; `text` → the
+  words without the dot. Not connected and not trying to (offline with
+  nothing waiting, or closed after the agent ended the conversation): the
+  line as each SDK drew it there before v2 — the reconnect banner says the
+  rest.
+- **Call button** (`escalation.call: "header"`, and only where the agent
+  takes calls and this SDK can start one from the chat): the `call` icon at
+  18 in `fill.text`, in a 44 target, before compose. It starts a call with the
+  agent exactly as the voice bar's call (or the chat → call switch) would.
+  Screen reader: "Call {name}".
+
+**Context card** — what the conversation is about (the item, request or
+account the customer is looking at), pinned by the APP: `GraineChatPin {
+title, subtitle?, imageUrl?, badge? }`, set and cleared through the chat API
+(see SDK API below). Each word cleaned like the brand's own — one line,
+control and direction characters out, spaces collapsed, cut in whole
+characters: title ≤ 60, subtitle ≤ 80, badge ≤ 24; a pin with no title is no
+pin; `imageUrl` only `http(s)`, ≤ 2048 characters (anything else draws the
+letter disc). Nothing is drawn until the app pins one, nor for
+`contextCard: "none"`. Never sent to the agent (describe the screen to it
+with the screen context, as always).
+- `bar` — under the header, full width, 52 high, `colors.surface` (frosted
+  as the header is), a hairline in `colors.border` under it; 12 in, items 10
+  apart: a 32 thumbnail (`imageUrl`, filled and cropped, corners
+  `radius.sm`; none: a 32 disc of `accentSoft` with the title's first
+  letter, 14, `weights.strong`, `text`), then the title (body family,
+  `weights.strong`, `scale.body − 1`, `text`) over the subtitle (caption,
+  `textMuted`), and at the trailing end the badge: a pill 22 high, 8 padding,
+  `accentSoft`, the words at caption size `weights.strong` in `text`.
+- `card` — the first item of the thread (after a hero welcome, before the
+  upcoming-calls card), scrolling with it, drawn as a card (**Cards** below) with `cardPadding`: a
+  44 thumbnail (corners `radius.md`), the title in the heading family at
+  `weights.title`, `min(scale.title, 16)`, the subtitle and badge as in `bar`.
+- Screen reader: "Pinned: {title}, {subtitle}, {badge}".
+
+**Reconnect banner** — while the chat reconnects after it was connected, or
+is offline with a message waiting: a strip pinned under the header (and the
+context bar), 28 high, `colors.surfaceRaised` (frosted with `chat.glass`), a
+hairline under it; centred, at caption size in `textMuted`: the loader at 12
+and "Reconnecting…", or a 6-point `warning` dot and "Offline · messages send
+when you're back". It slides in and out over `motion.durationMs` (not under
+reduced motion) and is announced politely once. Calm: never red, never a
+modal.
+
+**Thread** — `density.edge` in from each side; `density.gap` between rows;
+between two messages of one group `density.groupGap`.
+
+**Bubbles** — at most `bubbles.maxWidth` of the thread's inner width;
+padding `density.padY` × `density.padX` (a bare one 2 × 2); words at
+`scale.body`, the body family at `weights.body`, `lineHeight.body`, in
+`side.text`.
+- Fill `side.color` (null: transparent), or a linear gradient top → bottom
+  from `color` to `colorTo`; outline `max(1, borderWidth)` in `side.border`
+  when set; `bubbles.shadow` under it when set. `bare`: no box at all.
+- **Groups** (`bubbles.grouping`; positions from `chatGroups` in
+  protocol.ts, pinned by `chat-window.json` → `groups`). Without grouping
+  every bubble is `single`. The speaker's side is the trailing side for the
+  customer, the leading side for the agent (so both flip in RTL). Corners:
+  - `rounded` — every corner `radius`, except the bottom speaker-side corner,
+    always `tightRadius` (v1), and the top speaker-side corner, `tightRadius`
+    for `middle` and `last`.
+  - `squircle` — every corner `radius` (continuous corners on iOS,
+    `ContinuousRectangleBorder`-like where the platform has one, else
+    circular); in a group the top speaker-side corner is `tightRadius` for
+    `middle` and `last`, the bottom one for `first` and `middle`.
+  - `tail` — corners as `squircle`; on a `single` or `last` bubble the bottom
+    speaker-side corner is square and carries a tail, filled like the bubble
+    (a gradient's bottom colour) and outlined with it: for the customer, with
+    the bubble's bottom-trailing corner at (W, H), the closed path
+    M W,H−12 · Q W+1,H−2 W+8,H · L W−12,H · Z; for the agent the same
+    mirrored at its bottom-leading corner (M 0,H−12 · Q −1,H−2 −8,H ·
+    L 12,H · Z). The tail lies outside the bubble's width, in the margin.
+  - `flat` — every corner `radius` (`tightRadius` equals it).
+- **Formatting** — the agent's words are drawn from `chatMarkdown` (pinned
+  by `chat-window.json` → `markdown`): paragraphs 6 apart, a line break a
+  new line; bold at `weights.strong`; italic the platform's italic; code in
+  the platform's monospace at `scale.body − 1` on `mixHex(fill, text, 0.1)`
+  with 4 corners; links in `side.link`, always underlined — a tap opens
+  http(s) in the platform's browser and mailto/tel with the system; bullets
+  "•" and items "1." then 8, wrapped lines hanging under the words. The
+  customer's own words are drawn as typed (no formatting).
+- **Long-press** a bubble: copy its plain words (`chatMarkdownText`) with the
+  platform's confirmation (a "Copied" toast or the system's menu); also a
+  screen-reader action "Copy".
+- **A reply still arriving** is revealed smoothly: draw
+  `revealSlice(text, shown)`, advancing `shown` by `revealLength` every
+  frame, parsed with `chatMarkdown(…, { live: true })`; when the turn ends
+  the rest is revealed at the same pace, then drawn whole. No reveal (draw
+  it as it arrives) when `motion.durationMs` is 0 or the OS asks for reduced
+  motion. Only the live turn animates.
+
+**Times** — whose time is drawn: `chatShowsTime(timestamps.show, position)`
+(every message, the last of each group, or none). The device's short time
+format, `max(10, scale.caption − 1)`, the body family at `weights.body`.
+- `below` (v1) — 4 under the bubble, aligned with it, in
+  `wallpaper.textMuted`.
+- `inside` — inside the bubble, its own line under the words, 2 below them,
+  at the trailing edge, in `side.textMuted` (a bare bubble: below, as
+  `below`).
+- `ticks` — beside each customer time, 4 after it, at 12: `clock` while the
+  message waits for a connection, `check` once sent, `alert` in
+  `colors.danger` if it could not be sent; in the time's colour otherwise.
+- A component card carries no time.
+
+**Message status** — a message waiting for a connection: at 60% opacity, and
+"Waiting for connection…" under it (v1). A message that could not be sent
+(an SDK whose reconnect gives up): full opacity, and under it, aligned with
+it, the `alert` icon at 14 and "Not sent · Tap to retry" at caption size,
+`weights.strong`, `colors.danger`. Tapping the bubble or the line sends it
+again (it waits, and the chat reconnects). React Native never gives up, so
+it has no "not sent"; there a tap on a waiting message tries to connect at
+once. Screen reader: "…, waiting to send" / "…, not sent. Double-tap to
+retry."
+
+**Typing indicator** — while `typing` (v1 rule), as the agent's next row:
+- `loader` (v1) — the Appearance loader (thinking) at 14 in an agent bubble,
+  padding `round(cardPadding × 0.5)` vertical.
+- `dots` — an agent bubble (its fill, border or bare) holding three 7-point
+  dots 5 apart in `typing.color`, each fading 0.35 → 1 → 0.35 over 1200 ms,
+  dot i starting i × 160 ms late, forever; all still at 0.6 under reduced
+  motion.
+- `wave` — the same dots, each rising 4 and back over 900 ms, i × 120 ms
+  late; still under reduced motion.
+- `text` — no bubble: `typing.text` or "Typing…" at caption size in
+  `typing.color`, its opacity breathing 0.55 ↔ 1 over 1400 ms; still under
+  reduced motion.
+- Screen reader: "{name} is typing", announced politely.
+
+**Chips** — the brand's starters and the agent's quick replies (the
+`quick_replies` frame; see Wire below), one look: `chips.height` high (it
+grows with the text), 14 padding left and right, corners `chips.radius`,
+fill `chips.fill` (frosted with `chat.glass` for `elevated`), outline
+`chips.borderWidth` in `chips.border` when set, `chips.shadow` when set; the
+words in `chips.text` at `scale.body − 1`, `weights.strong`, one line with an
+ellipsis.
+- Where (`chips.placement`): `both` — starters docked above the composer
+  (v1: on the customer's side, 12 from the edge, 8 above the composer),
+  quick replies in the thread under the agent turn they follow, on its
+  side, 8 below it; `inline` — starters at the end of the welcome, quick
+  replies under their turn; `above-composer` — both docked above the
+  composer (quick replies take the starters' place).
+- `chips.scroll`: `wrap` — rows that wrap, 8 apart both ways (docked:
+  trailing-aligned, v1); `row` — one row that scrolls sideways, 8 apart,
+  starting `density.edge` in.
+- Starters as a `list` (`welcome.starters`): always in the thread, at the
+  end of the welcome, full width, 8 apart: rows 44 high (they grow),
+  `colors.surfaceRaised` (frosted with `chat.glass`), outline `borderWidth`
+  in `colors.border`, corners `radius.md`, 14 padding, the words in `text` at
+  `scale.body − 1`, `weights.strong`, and the `chevron` icon turned to point
+  to the trailing side at 16 in `textMuted`.
+- A tap sends the chip's words — a quick reply's `text`, a starter as
+  written — as the customer's own message: a real turn, as if typed. Then
+  the starters go for the rest of the conversation and the quick replies
+  until the agent offers new ones. Screen reader: a button, its label.
+
+**Cards** — the agent's components, the upcoming-calls card, a context card
+and the rating card: corners `cards.radius`, `surfaceRaised` (window chrome
+as v1), outline `borderWidth` in `border` when `cards.border`, shadow
+`cards.shadow`, or the design's hard offset when `cards.hard`.
+- A component's large image (gallery, spotlight): `auto` — its own height as
+  today (100 / 140 / 180); `square` — as tall as wide; `landscape` — 3:4 of
+  its width; `wide` — 9:16; always 100–260.
+- A component's main button where its own look says `filled`: `filled` —
+  `buttonFill` / `buttonText` (v1); `outline` — no fill, `max(1,
+  borderWidth)` outline in `buttonBorder`, words in `buttonText`; `tonal` —
+  `buttonFill`, `buttonText`; `text` — no fill, the words in `buttonText` at
+  `weights.strong`. Corners `radius.md` (v1). A component's own style still
+  wins (v1).
+
+**Composer** — the field, its buttons, and what is behind them:
+- `bar` (v1) — a strip 58 high in `composer.strip`; the field
+  `composer.height` (40), corners `composer.radius`, fill `composer.fill`,
+  outline `borderWidth` in `composer.border`, words `composer.text`,
+  placeholder `chat.placeholder` in `composer.placeholder`; the send button
+  40, 10 from the sides, 8 apart.
+- `pill` — a strip 60 high; the field is a pill (`composer.height` 44,
+  corners 22) with the send button inside it at the trailing end, 36,
+  4 in from the field's edge.
+- `floating` — no strip (`composer.strip` null): one raised capsule
+  `composer.height` (48) high, 10 above the window's bottom (the keyboard,
+  the home indicator) and 10 in from the sides, corners `composer.radius`,
+  `composer.fill` (frosted with `chat.glass`), outline in `composer.border`,
+  shadow `composer.shadow`, the send button inside at the trailing end (36,
+  6 in). The thread scrolls under it; its last row clears it.
+- The send button: `circle` — round, `sendFill`, the `send` icon in
+  `sendIcon` (v1); `rounded` — corners `min(radius.md, 12)`; `icon` — no
+  fill, the `send` icon at 22 in `sendIcon`, in a 44 target.
+- `composer.mic` (and the agent takes calls, and this SDK can start one from
+  the chat): while the field is empty the send button shows `mic` instead,
+  and a tap starts a call with the agent; with words in the field it is the
+  send button. Screen reader: "Call {name}" / "Send".
+- `composer.attach` and the app handles attachments (the SDK API's attach
+  handler): the `attach` icon at 20 in `composer.icon`, a 40 target before
+  the field (`bar`) or inside it at its leading end (`pill`, `floating`). A
+  tap calls the app's handler; the SDK sends nothing itself.
+- `escalation.call: "composer"` (agent takes calls, SDK can start one):
+  the `call` icon at 20 in `composer.icon`, beside the paperclip; not drawn
+  when `composer.mic` is on (the microphone already calls).
+
+**Welcome** — the opening of a conversation that began here (nothing
+restored on screen; a restored conversation has none). A card or a hero
+stays at the top of its thread as the conversation grows; the starters
+inside it follow the starters' rule (gone once the customer says
+something):
+- `centered` (v1) — the empty chat as v1, before any message.
+- `card` — a card (**Cards**) as the first item of the thread (after a
+  pinned card and the upcoming calls): the avatar (40) and beside it the
+  title (heading family, `weights.title`, `min(scale.title, 17)`) over the
+  subtitle (caption, `textMuted`, when not ""); the starters inside it,
+  under a gap, when they are `list` or placed `inline`.
+- `hero` — the thread's first block, the window's full width (a `plain`
+  header sits over its top), filled with the header's fill (a gradient top →
+  bottom), its bottom corners `radius.xl`: 24 padding (plus the header's
+  height under a plain header), the avatar 56 centred, the title at
+  `min(scale.display, 26)` in the heading family at `weights.title` in
+  `header.fill.text`, centred, up to two lines, and the subtitle at
+  `scale.body` in `fill.textMuted`; the starters on it, 16 under the words,
+  centred (chips; a sideways row runs to its edges, starting 24 in) or as
+  the list, 24 in; the next item 16 below.
+- `minimal` — no welcome: the greeting is the first thing; starters as
+  placed (a `list` in the thread).
+
+**Rating** — after the agent ends the conversation (`conversation_end`; see
+Wire) when `rating.show`: a card (**Cards**) at the end of the thread,
+centred, `cardPadding` inside: `rating.prompt` or "How was this chat?" in
+the heading family at `weights.title`, `min(scale.title, 16)`, `text`,
+centred; under it, centred, the choices. The card's width and the choices'
+size are `chatRatingLayout(style, thread, cardPadding)` (protocol.ts; pinned
+by chat-window.json's `ratingLayout`), `thread` being the width the
+thread's rows have: `min(300, 84% of the thread)`, wider — up to the
+thread's own width — where the choices would not fit inside the padding;
+the choices at full size, `CHAT_RATING_GAP` (8) apart, made smaller
+together, icon or face with them, only where even the whole thread is too
+narrow (a small phone, a large display setting). At full size:
+- `thumbs` — two 44 round buttons, `thumbUp` and `thumbDown` at 22 in
+  `text` on `accentSoft`; the chosen one `accent` with its icon in
+  `onAccent`.
+- `stars` — five 36 targets, the `star` icon at 28: filled `accent` up to
+  the chosen one, stroked in `textMuted` after it.
+- `emoji` — five 44 round targets with 😞 🙁 😐 🙂 😄 at 24; the chosen one
+  on an `accentSoft` disc, scaled 1.15. The faces never scale with the
+  system text size: they are pictures, sized by the layout.
+- Once chosen, the choice stays drawn, nothing else can be chosen, and
+  "Thanks for your feedback" appears under it (caption, `textMuted`). The
+  answer goes on the conversation as a quiet app event (Wire) and to the
+  app as an event. Given after the conversation has closed (the server's
+  short wait ran out), it stays on screen and goes to the app, and is not
+  sent. Screen reader: `CHAT_RATING_LABELS`, the chosen one selected.
+
+**Scroll-to-latest** — the thread follows new rows while it is within 120 of
+the bottom (v1). Scrolled further up, nothing moves it, and a pill appears
+centred 8 above the composer (or the docked chips): 36 high, `surfaceRaised`,
+outline in `border`, the card shadow, the `arrowDown` icon at 16 in `text` —
+and, once something new has arrived since, "N new" (caption, `weights.strong`,
+`text`; "9+" past nine) beside it. A tap scrolls to the newest row (animated,
+except under reduced motion) and the pill goes. Screen reader: "Scroll to the
+latest message".
+
+**Accessibility, every surface** — each bubble one element: "{name}:
+{plain words}" or "You: {plain words}", then the time when drawn and its
+status; links inside it reachable; chips, list rows, rating choices and every
+icon button are buttons with their labels; the typing indicator and the
+reconnect banner announced politely. Text scales with the system's text size
+(iOS Dynamic Type, Android sp, Flutter's text scaler, React Native font
+scaling, the browser's zoom) and fixed heights grow with it. Reduced motion:
+no reveal, no typing animation, no slides. RTL: the customer's side is the
+trailing side, and tails, tight corners, alignment, the send icon and the
+chevrons mirror; patterns and top → bottom gradients do not.
+
+**Long conversations** — lazy, recycled lists (SwiftUI `LazyVStack`,
+Android's platform `ListView` with stable ids — the SDK takes no
+dependencies — Flutter `ListView.builder`, React Native `FlatList`);
+at most `CHAT_HISTORY_CAP` (200) turns kept; formatting parsed once per
+change of a turn's words; only the live turn animates; card images loaded
+lazily and cached.
+
+### Wire (protocol.ts; vectors: `chat-window.json`)
+
+All optional and additive: a server that sends none of it leaves every chat
+as it was; a client that does not know a frame ignores it.
+
+- server → client `{"type":"quick_replies","replies":[…]}` — replies the
+  agent suggests for the turn it just sent: each a string, or `{label,
+  text}`; read with `readQuickReplies` (≤ 6, label ≤ 40 on one line, text ≤
+  200, blanks and repeats out). `[]` takes them away. Gone also when the
+  customer sends anything, the agent starts a new turn, an earlier
+  conversation is restored, or the conversation ends (`foldChat`).
+- server → client `{"type":"conversation_end"}` — the agent ended the
+  conversation: the open turn closes, typing stops, the replies go, and the
+  rating is asked for where the design does. The server keeps the socket
+  open a short while (≤ 60 s, or until a rating arrives) before its 1000
+  close.
+- client → server, the customer's rating: `chatRatingFrame(chatRating(style,
+  value))` — `{"type":"app_event","event":{"name":"chat_rating","quiet":true,
+  "detail":"The customer rated this chat 4 out of 5.","data":{"value":4,
+  "scale":5,"style":"stars"}}}`. Quiet: recorded on the conversation, never
+  a nudge. thumbs 1 / 0 of 1; stars and emoji 1–5 of 5. One per conversation,
+  only after `conversation_end`.
+- A quick reply or a starter tapped is an ordinary `text` frame: the
+  customer's turn.
+
+### SDK API (additive)
+
+| | Pin a context card | Attachments | Rating, to the app | Quick replies, to an app's own UI |
+|---|---|---|---|---|
+| iOS | `GraineChatPin`; `chat.pin(_:)`, `chat.pin(nil)` | `chat.onAttach` | `chat.onRated`, and `chat.rating` | `chat.quickReplies`, `chat.sendQuickReply(_:)` |
+| Android | `GraineChatPin`; `chat.pin(pin)`, `chat.pin(null)` | `chat.onAttach` | `chat.onRated`, and `chat.rating` | `chat.quickReplies`, `chat.sendQuickReply(reply)` |
+| Flutter | `GraineChatPin`; `chat.pin(pin)`, `chat.pin(null)` | `chat.onAttach` | `chat.onRated`, and `chat.rating` | `chat.quickReplies`, `chat.sendQuickReply(reply)` |
+| React Native | `client.setChatPin(pin \| null)`, `useGraineAgent().setChatPin` | `onChatAttach` on `GraineProvider` | `onEvent` → `{type: "chat_rated", rating}`, `client.on("rated")` | `useGraineAgent().quickReplies` |
+| Website | `GraineAgent.pin(pin \| null)` | — | `GraineAgent.on("chat_rated")` | — |
+| Kotlin Multiplatform | `GraineChatPin`; `Graine.chat.pin(pin)`, `Graine.chat.pin(null)` | `Graine.chat.onAttach` | `Graine.chat.onRated`, and `Graine.chat.rating` | `Graine.chat.quickReplies`, `Graine.chat.sendQuickReply(reply)` |
+
+The exact signatures follow each platform's existing chat API; every one is
+optional, and an app that uses none of them gets the whole window.
 
 ## Call screen
 
@@ -856,7 +1300,8 @@ with every vector.
 ## Icons
 
 The SDK's own icons — `mic`, `micOff`, `end`, `send`, `chat`, `call`, `chevron`,
-`close`, and the call screen's `speaker` — are 24 × 24 drawings in `design.json`
+`close`, `compose`, the call screen's `speaker`, and the chat window v2's `attach`, `thumbUp`,
+`thumbDown`, `star`, `arrowDown`, `check`, `clock`, `alert` and `retry` — are 24 × 24 drawings in `design.json`
 → `icons`, the same paths the dashboard draws. Each has a closed `body` (may be filled) and `lines` (only ever
 stroked). Draw them in `icons.style` at `icons.stroke`:
 

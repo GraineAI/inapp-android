@@ -126,9 +126,10 @@ class SurfacesTest {
         val older = Design.CLASSIC_LIGHT.copy(chat = null, call = null)
         assertFalse(older.toJson().has("call"))
         assertFalse(older.toJson().has("chat"))
-        // Graine Classic itself carries both, as the server resolves it.
+        // Graine Classic itself carries both, as the server resolves it — its chat with the classic v2 pieces too.
         assertEquals(Surfaces.CLASSIC_CALL, Design.CLASSIC_LIGHT.call)
-        assertEquals(Surfaces.CLASSIC_CHAT_DARK, Design.CLASSIC_DARK.chat)
+        assertEquals(Surfaces.CLASSIC_CHAT_DARK, Design.CLASSIC_DARK.chat!!.copy(style = null))
+        assertEquals(ChatStyles.classic(Design.CLASSIC_DARK), Design.CLASSIC_DARK.chat!!.style)
     }
 
     // ── the call screen's rules ────────────────────────────────────────────

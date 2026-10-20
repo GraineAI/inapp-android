@@ -25,6 +25,12 @@ import java.util.concurrent.CopyOnWriteArraySet
  * opening the chat ends a voice call (and another agent's chat), starting a
  * call ends the chat, and a native call holds the chat until it is over.
  *
+ * The agent may suggest replies for its turn ([quickReplies], sent with
+ * [sendQuickReply]) and end the conversation ([ended]), after which the
+ * chat window asks how it went where the design does ([rating], [onRated],
+ * [rate]). The app can pin what the conversation is about ([pin]) and take
+ * attachments ([onAttach]).
+ *
  * Main thread. Changes reach [GraineListener.onChatState] and
  * [GraineListener.onChatMessage], and every [ChatSource] change listener.
  */
@@ -51,11 +57,54 @@ class GraineChat internal constructor(
      * is connected, gives up ([failed]) or is closed. [connecting] is true
      * too. Say "Reconnecting…", not "Offline", while it is.
      */
-    val reconnecting: Boolean get() = remaking && connecting
+    override val reconnecting: Boolean get() = remaking && connecting
     /** A drop's retries are under way: set when one is scheduled, cleared when connected, given up or hung up. */
     private var remaking = false
+    /** This conversation has been connected at least once: a reconnect after that is announced (the reconnect banner). */
+    internal var everConnected = false
+        private set
 
     override val messages: List<GraineChatTurn> get() = transcript.lines
+
+    /**
+     * The replies the agent suggests for its latest turn — drawn as chips by
+     * the SDK's chat window; read them to draw your own, and send one with
+     * [sendQuickReply]. Gone once the customer sends anything, the agent starts
+     * another turn, an earlier conversation is restored, or the conversation
+     * ends.
+     */
+    override var quickReplies: List<GraineQuickReply> = emptyList()
+        private set
+
+    /**
+     * The agent ended the conversation: the chat window asks for a rating where
+     * the design does. The customer sending anything starts over.
+     */
+    override var ended: Boolean = false
+        private set
+
+    /** The customer's answer to "How was this chat?", once given — one per conversation. */
+    override var rating: GraineChatRating? = null
+        private set
+
+    /**
+     * The customer answered the rating ([rate], or the chat window's rating
+     * card). On the main thread. Also sent to the conversation as a quiet event.
+     */
+    var onRated: ((GraineChatRating) -> Unit)? = null
+
+    /**
+     * The app handles attachments: the chat window draws its paperclip (where
+     * the design asks for one) and a tap calls this. The SDK sends nothing
+     * itself — pick and upload the file, then tell the agent about it as you
+     * would any screen. Null: no paperclip.
+     */
+    var onAttach: (() -> Unit)? = null
+        set(v) { field = v; onMain { changed() } }
+
+    /** The card the app pinned ([pin]), or null. */
+    var pinned: GraineChatPin? = null
+        private set
 
     /**
      * This user's calls still to come ([GraineInApp.scheduledCalls]), soonest
@@ -188,11 +237,55 @@ class GraineChat internal constructor(
         changed()
     }
 
+    /**
+     * PIN WHAT THE CONVERSATION IS ABOUT — a card the chat window draws under
+     * its header or atop the thread, as the design says (nothing for a design
+     * that hides it). `pin(null)` takes it away. Never sent to the agent: tell
+     * the agent about the screen with the screen context, as always. Each line
+     * is cleaned to one line and cut to its length.
+     */
+    fun pin(pin: GraineChatPin?): Unit = onMain {
+        val title = pin?.let { ChatRules.line(it.title, PIN_TITLE_MAX) }.orEmpty()
+        val next = if (pin == null || title.isEmpty()) null else GraineChatPin(
+            title = title,
+            subtitle = ChatRules.line(pin.subtitle, PIN_SUBTITLE_MAX).ifEmpty { null },
+            imageUrl = pin.imageUrl?.trim()?.ifEmpty { null },
+            badge = ChatRules.line(pin.badge, PIN_BADGE_MAX).ifEmpty { null },
+        )
+        if (next == pinned) return@onMain
+        pinned = next
+        changed()
+    }
+
+    /**
+     * The customer's answer to "How was this chat?" — for an app drawing its
+     * own rating: `style` "thumbs" (value 1 up, 0 down), "stars" or "emoji"
+     * (1–5). Taken once per conversation and only after the agent ended it
+     * ([ended]); sent to the conversation as a quiet event, kept in [rating]
+     * and handed to [onRated]. Returns the rating taken, or null.
+     */
+    override fun rate(style: String, value: Int): GraineChatRating? {
+        if (Looper.myLooper() != Looper.getMainLooper()) { main.post { rate(style, value) }; return null }
+        // One answer per conversation, and only to a conversation that ended.
+        if (!ended || rating != null) return null
+        val r = ChatRules.rating(style, value)
+        rating = r
+        session?.rate(r)
+        changed()
+        runCatching { onRated?.invoke(r) }
+        return r
+    }
+
+    /** One of [quickReplies], sent as the customer's own message — a real turn, exactly as if typed. */
+    fun sendQuickReply(reply: GraineQuickReply) = send(reply.text)
+
     /** The customer's line: on screen at once, sent when it can be. Blank lines are ignored. */
     override fun send(text: String) {
         val line = text.trim()
         if (line.isEmpty()) return
         onMain {
+            // Whatever the agent suggested, the customer has moved on — past a conversation that had ended, too.
+            goingOn()
             // On screen at once: sent now when the chat is up, else waiting for it.
             transcript.customer(line, SystemClock.uptimeMillis(), System.currentTimeMillis(),
                 if (connected) GraineChatTurn.Delivery.SENT else GraineChatTurn.Delivery.SENDING)
@@ -217,6 +310,7 @@ class GraineChat internal constructor(
     /** Forget the lines on screen — a sign-out, a new topic. The conversation itself goes on. */
     fun clear(): Unit = onMain {
         transcript.clear()
+        fresh()
         changed()
     }
 
@@ -249,6 +343,7 @@ class GraineChat internal constructor(
             }
             transcript.clear()
             outbox.clear()
+            fresh()
             if (wasWanted && wanted) open()
             changed()
             done?.onResult(Unit, null)
@@ -259,6 +354,7 @@ class GraineChat internal constructor(
     internal fun memoryForgotten(): Unit = onMain {
         transcript.clear()
         outbox.clear()
+        fresh()
         changed()
     }
 
@@ -312,6 +408,7 @@ class GraineChat internal constructor(
         shut()
         transcript.clear()
         outbox.clear()
+        fresh()
         setState(connected = false, connecting = false)
         if (was && surfaces > 0) openSession()
         changed()
@@ -380,7 +477,9 @@ class GraineChat internal constructor(
         unwatchContext?.invoke(); unwatchContext = null
         session = null
         transcript.disconnected()
-        if (!wanted || !graine.foreground || graine.nativeCallLive()) {
+        // The agent ended this conversation and the server let it go: nothing to come back to. The customer's
+        // next message opens a new one (send), as after any close.
+        if (!wanted || !graine.foreground || graine.nativeCallLive() || ended) {
             setState(connected = false, connecting = false)
             changed()
             return
@@ -433,6 +532,7 @@ class GraineChat internal constructor(
 
         override fun onOpen() = mine {
             failed = false
+            everConnected = true
             // What a history on this connection replaces: what is settled now, before the waiting lines go.
             transcript.opened()
             // The session sends what was waiting right after it opens.
@@ -454,10 +554,14 @@ class GraineChat internal constructor(
 
         override fun onAgentTurnStart() = mine {
             transcript.agentTurnStart(System.currentTimeMillis())
+            // A new turn: the replies suggested for the one before it are spent.
+            quickReplies = emptyList()
             changed()
         }
 
         override fun onAgentWords(text: String) = mine {
+            // Words with no open turn begin one, and that too spends the replies offered before it.
+            if (!transcript.agentLive) quickReplies = emptyList()
             transcript.agentWords(text, System.currentTimeMillis())
             // A reply came: this connection works, and a later drop starts the ladder again.
             reconnect.worked()
@@ -486,9 +590,38 @@ class GraineChat internal constructor(
 
         override fun onHistory(turns: List<GraineChatTurn>) = mine {
             // The conversation continues: the earlier lines, before any agent message. Never reported as new ones.
-            if (transcript.restore(turns)) changed()
+            // Replies suggested before it belong to a moment that has been replaced.
+            if (transcript.restore(turns)) { quickReplies = emptyList(); changed() }
+        }
+
+        override fun onQuickReplies(replies: List<GraineQuickReply>) = mine {
+            when {
+                replies.isEmpty() -> quickReplies = emptyList()
+                // Offered after the conversation ended, they are nobody's to tap.
+                ended -> return@mine
+                else -> quickReplies = replies.toList()
+            }
+            changed()
+        }
+
+        override fun onConversationEnd() = mine {
+            // The open turn was closed by the session; typing stops, the replies go, and the rating may be asked.
+            transcript.disconnected()
+            quickReplies = emptyList()
+            ended = true
+            changed()
         }
     }
+
+    /** A conversation that goes on: no end, no rating, no replies left over from before. */
+    private fun goingOn() {
+        quickReplies = emptyList()
+        ended = false
+        rating = null
+    }
+
+    /** The chat on screen went: nothing of the last conversation's end, rating or replies is left. */
+    private fun fresh() = goingOn()
 
     // ── plumbing ──────────────────────────────────────────────────────────
 
@@ -526,5 +659,9 @@ class GraineChat internal constructor(
         const val CLOSE_UNSEEN_MS = 15_000L
         /** The upcoming calls are fetched again at most this often, unless asked. */
         const val UPCOMING_EVERY_MS = 10_000L
+        /** A pinned card's lines, in characters. */
+        const val PIN_TITLE_MAX = 60
+        const val PIN_SUBTITLE_MAX = 80
+        const val PIN_BADGE_MAX = 24
     }
 }

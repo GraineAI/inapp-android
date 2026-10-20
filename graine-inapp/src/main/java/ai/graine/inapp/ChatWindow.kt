@@ -1,48 +1,81 @@
 package ai.graine.inapp
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
-import android.graphics.Canvas
-import android.graphics.ColorFilter
 import android.graphics.Outline
-import android.graphics.Paint
-import android.graphics.PixelFormat
-import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.text.InputType
 import android.text.TextUtils
 import android.util.TypedValue
+import android.view.Choreographer
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.view.inputmethod.EditorInfo
+import android.widget.AbsListView
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import java.util.Date
-import java.util.Locale
-import java.util.TimeZone
 
 /**
- * THE CHAT WINDOW — contract/DESIGN.md → Chat window, from the design's
- * `chat` tokens: the frame in `chat.background` (outlined, `radius.xl`, the
- * floating shadow — none of it when the chat fills the screen); a 50 dp header
- * on `chat.headerBackground` with the avatar the design asks for, the title
- * (`chat.title`, else the heading) and its status ("Online" or the subtitle,
- * after a dot — `success` on a surface header, the title's colour on any
- * other); the thread, dotted when the design says so; one bubble per turn in
- * the design's bubble style, times under them when it shows them, the agent's
- * typing indicator while a reply is on its way; a conversation that continues
- * with a day line where the day changes and an earlier call as one "Voice call
- * · time" row (never its transcript), and "New conversation" in the header;
- * the empty chat; the design's starters above the composer until the customer
- * has said something (never while earlier messages are on screen); the
- * composer; and, first in the thread, the customer's Upcoming calls. The
- * pieces the design can leave out — the Upcoming calls card (and its title),
- * the earlier messages, the compose control — follow [ChatPieces].
+ * The chat's v2 state a window draws beside its messages — [GraineChat]'s
+ * quick replies, end, rating, pinned card, reconnect and the buttons it may
+ * offer — read from any [ChatSource] (an app's own carries what it carries).
+ */
+internal data class ChatExtras(
+    val quickReplies: List<GraineQuickReply> = emptyList(),
+    val ended: Boolean = false,
+    val rating: GraineChatRating? = null,
+    val pin: GraineChatPin? = null,
+    val connecting: Boolean = false,
+    val reconnecting: Boolean = false,
+    /** Connected at least once: a reconnect after that is announced. */
+    val everConnected: Boolean = false,
+    /** The agent takes calls and this SDK can start one from this chat: the microphone and the call button may show. */
+    val canCall: Boolean = false,
+    /** The app handles attachments ([GraineChat.onAttach]): the paperclip may show. */
+    val canAttach: Boolean = false,
+) {
+    companion object {
+        fun of(source: ChatSource, canCall: Boolean): ChatExtras {
+            val g = source as? GraineChat
+            return ChatExtras(
+                quickReplies = source.quickReplies,
+                ended = source.ended,
+                rating = source.rating,
+                pin = g?.pinned,
+                connecting = g?.connecting ?: !source.online,
+                reconnecting = source.reconnecting,
+                everConnected = g?.everConnected ?: false,
+                canCall = canCall,
+                canAttach = g?.onAttach != null,
+            )
+        }
+    }
+}
+
+/**
+ * THE CHAT WINDOW — contract/DESIGN.md → Chat window, and every piece of
+ * "Chat window v2" from the design's `chat` tokens ([Surfaces.styleOf]): the
+ * frame (outlined, `radius.xl`, the floating shadow — none of it when the chat
+ * fills the screen); the wallpaper, one surface from the header (when it has
+ * no fill of its own) to the composer (when it floats); the header in its
+ * style and alignment, its status line and call button; the pinned card as a
+ * bar; the calm reconnect banner; the thread — a lazy list of the pinned card,
+ * the upcoming calls, the welcome, day lines and earlier calls, the bubbles in
+ * their shape and groups with times, marks and status, the agent's quick
+ * replies, the starters, the typing indicator and the rating; the
+ * scroll-to-latest pill; the docked chips; and the composer — a bar, a pill or
+ * a floating capsule, with its microphone, paperclip and call button where the
+ * design and the app allow. A design from before v2 is the classic chat,
+ * drawn exactly as it always was.
  *
  * With window chrome a 32 dp title bar replaces the header: no avatar, the
  * title centred in monospace after the `success` dot while online, the
@@ -60,14 +93,14 @@ internal class ChatWindowView(
     /** The agent whose typefaces the window draws in; the next render follows a change. */
     var graine: GraineInApp,
     private val frame: ChatFrame = ChatFrame.WINDOW,
-) : LinearLayout(context) {
+) : LinearLayout(context), ThreadHost {
     /** Filling a space of its own rather than riding above the bar: the thread takes the height. */
     private val page = frame != ChatFrame.WINDOW
     /** No outline, corners or shadow of its own: a whole screen, or a sheet (which rounds its own top). */
     private val frameless = frame == ChatFrame.PAGE || frame == ChatFrame.SHEET || frame == ChatFrame.SCREEN
     var onCollapse: (() -> Unit)? = null
     var onSend: ((String) -> Unit)? = null
-    /** The customer asked to try again, after nothing could connect. */
+    /** The customer asked to try again, after nothing could connect — or tapped a message that was not sent. */
     var onRetry: (() -> Unit)? = null
     /** Cancel one of the Upcoming calls. */
     var onCancelCall: ((String) -> Unit)? = null
@@ -75,103 +108,252 @@ internal class ChatWindowView(
     var onBook: (() -> Unit)? = null
     /** "New conversation" — offered in the header only while earlier messages (restored turns) are on screen. */
     var onNewConversation: (() -> Unit)? = null
+    /** Call the agent — the microphone or the call button; drawn only where [ChatExtras.canCall]. */
+    var onCall: (() -> Unit)? = null
+    /** The paperclip; drawn only where [ChatExtras.canAttach]. */
+    var onAttach: (() -> Unit)? = null
+    /** The customer answered the rating. */
+    var onRate: ((String, Int) -> Unit)? = null
+    /** A quick reply tapped: the customer's own line. Unset, it is sent with [onSend]. */
+    var onQuickReply: ((GraineQuickReply) -> Unit)? = null
 
-    private val inner = LinearLayout(context).apply { orientation = VERTICAL }
+    private fun px(dp: Double) = Ui.dp(context, dp.toFloat())
+    private val density get() = resources.displayMetrics.density
+
+    // ── the frame and the wallpaper ───────────────────────────────────────
+
+    private val inner = FrameLayout(context)
+    private val column = LinearLayout(context).apply { orientation = VERTICAL }
+    private var wallpaper: WallpaperDrawable? = null
+
+    // ── the header ────────────────────────────────────────────────────────
+
     /** The header's place when the design opens the chat as a window. */
     private val titleBar = WindowTitleBar(context).apply { visibility = GONE }
-    private val barChevron = ImageView(context).apply { contentDescription = if (frame == ChatFrame.PAGE) "Close" else "Collapse"; isClickable = true; isFocusable = true }
-    private val header = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+    private val barChevron = icon(if (frame == ChatFrame.PAGE) "Close" else "Collapse")
+    private val barCompose = icon("New conversation").apply { visibility = GONE }
+    private val barCall = icon("Call").apply { visibility = GONE }
+    private val headerBox = FrameLayout(context)
+    private val headerFrost = FrostView(context).apply { visibility = GONE }
+    private val header = HeaderFrame(context)
+    private val leadChevron = icon("Close")
     private val mark = FrameLayout(context)
     private val title = TextView(context).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
     private val dot = View(context)
     private val status = TextView(context).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
-    private val chevron = ImageView(context).apply { contentDescription = if (frame == ChatFrame.PAGE) "Close" else "Collapse"; isClickable = true; isFocusable = true }
-    private val compose = ImageView(context).apply { contentDescription = "New conversation"; isClickable = true; isFocusable = true; visibility = GONE }
-    private val barCompose = ImageView(context).apply { contentDescription = "New conversation"; isClickable = true; isFocusable = true; visibility = GONE }
+    private val statusRow = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+    private val words = LinearLayout(context).apply { orientation = VERTICAL }
+    private val callButton = FrameLayout(context).apply { isClickable = true; isFocusable = true; visibility = GONE; accessibilityDelegate = ButtonRole }
+    private val callIcon = ImageView(context).apply { importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
+    private val compose = icon("New conversation").apply { visibility = GONE }
+    private val chevron = icon(if (frame == ChatFrame.PAGE) "Close" else "Collapse")
+    private val divider = View(context)
 
     /** What the chevron is called: "Collapse" back to a call, "Close" where the chat is all there is. */
     var collapseLabel: String
         get() = chevron.contentDescription?.toString().orEmpty()
-        set(v) { chevron.contentDescription = v; barChevron.contentDescription = v }
-    private val divider = View(context)
-    /** The thread's frame: the chat's background and its pattern, standing still while the messages scroll. */
-    private val threadFrame = FrameLayout(context)
-    private val thread = LinearLayout(context).apply { orientation = VERTICAL }
-    private val upcomingSlot = FrameLayout(context).apply { visibility = GONE }
-    private val emptySlot = FrameLayout(context).apply { visibility = GONE }
-    private val list = object : LinearLayout(context) {
-        override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-            super.onSizeChanged(w, h, oldw, oldh)
-            bubbleMax = Math.round((w - paddingLeft - paddingRight) * VoiceBar.BUBBLE_MAX_SHARE).toInt()
-            post { applyBubbleMax() }
-        }
-    }.apply { orientation = VERTICAL }
-    private val typingSlot = FrameLayout(context).apply { visibility = GONE }
-    private val scroll: ScrollView =
-        if (page) ScrollView(context).apply { isFillViewport = true } else CappedScrollView(context, Ui.dp(context, VoiceBar.CHAT_LIST_MAX))
-    private val starters = FlowRow(context, Ui.dp(context, STARTER_GAP), Ui.dp(context, STARTER_GAP)).apply { alignEnd = true; visibility = GONE }
-    private val composer = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        set(v) { chevron.contentDescription = v; barChevron.contentDescription = v; leadChevron.contentDescription = v }
+
+    // ── the pinned bar and the banner ─────────────────────────────────────
+
+    private val contextBar = FrameLayout(context).apply { visibility = GONE; importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES }
+    private val contextFrost = FrostView(context).apply { visibility = GONE }
+    private val contextRow = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS }
+    private val banner = FrameLayout(context).apply { visibility = GONE; accessibilityLiveRegion = ACCESSIBILITY_LIVE_REGION_POLITE }
+    private val bannerFrost = FrostView(context).apply { visibility = GONE }
+    private val bannerRow = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER }
+    private var shownBanner = ChatLook.Banner.NONE
+
+    // ── the thread ────────────────────────────────────────────────────────
+
+    private val body = FrameLayout(context)
+    private val list = ThreadList(context)
+    private val adapter = ThreadAdapter(this)
+    private val pill = LinearLayout(context).apply {
+        orientation = HORIZONTAL
+        gravity = Gravity.CENTER
+        visibility = GONE
+        isClickable = true
+        isFocusable = true
+        contentDescription = ChatLook.SCROLL_TO_LATEST
+        accessibilityDelegate = ButtonRole
+    }
+    private val pillIcon = ImageView(context).apply { importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
+    private val pillCount = TextView(context).apply { maxLines = 1; importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
+    /** The thread follows new rows (within 120 of the bottom). */
+    private var following = true
+    /** The list's scroll state: only the customer's own scrolling (and where it comes to rest) decides [following]. */
+    private var scrollState = AbsListView.OnScrollListener.SCROLL_STATE_IDLE
+    /** The pill's scroll to the newest row is under way: it is following, whatever passes on the way. */
+    private var pinning = false
+    /** How tall the thread may grow above the voice bar, dp (the keyboard takes some while it is up). */
+    private var capDp = VoiceBar.CHAT_LIST_MAX.toDouble()
+    /** Rows that arrived while the customer was reading further up. */
+    private var unseen = 0
+
+    // ── the bottom: components, docked chips, the composer ────────────────
+
+    private val floatSlot = FrameLayout(context)
+    private val bottomSlot = FrameLayout(context)
+    private val bottomStack = LinearLayout(context).apply { orientation = VERTICAL }
+    private val accessorySlot = FrameLayout(context)
+    private val docked = FrameLayout(context).apply { visibility = GONE }
+    private val composerBox = FrameLayout(context)
+    /** The capsule's shadow falls into the row's padding (the room under and beside it): never clipped square at its edges. */
+    private val composerRow = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; clipToPadding = false; clipChildren = false }
+    /** The floating composer's capsule: its frost and its field, clipped to its corners. */
+    private val capsule = FrameLayout(context)
+    private var capsuleRadiusPx = 0f
+    private val composerFrost = FrostView(context).apply { visibility = GONE }
+    private val fieldBox = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
     private val field = EditText(context).apply {
         isSingleLine = true
         imeOptions = EditorInfo.IME_ACTION_SEND
         inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        background = null
+        // The theme's 48 dp would set the field's height; the design's does.
+        minHeight = 0
+        minimumHeight = 0
     }
-    private val sendButton = RoundButton(context, VoiceBar.SEND)
-    private var bubbleMax = Int.MAX_VALUE
+    private val send = SendButton(context)
+    private val attach = FrameLayout(context).apply { isClickable = true; isFocusable = true; contentDescription = ChatLook.ATTACH; accessibilityDelegate = ButtonRole }
+    private val attachIcon = ImageView(context).apply { importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
+    private val composerCall = FrameLayout(context).apply { isClickable = true; isFocusable = true; accessibilityDelegate = ButtonRole }
+    private val composerCallIcon = ImageView(context).apply { importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
     private var accessory: View? = null
 
-    /** What is drawn now, so a streamed word redraws one bubble rather than the whole conversation. */
-    private var drawnLines: List<ChatRows.Row> = emptyList()
-    private var drawnLook: Any? = null
-    private val lineViews = ArrayList<View>()
+    // ── what is drawn now ─────────────────────────────────────────────────
+
+    override var scene: ChatScene = ChatScene(
+        Design.CLASSIC_LIGHT, Surfaces.styleOf(Design.CLASSIC_LIGHT), Surfaces.chatOf(Design.CLASSIC_LIGHT), 0, 0, "", null, null,
+        LogoPlate.ACCENT, Loaders.resolve(null), 0, false, false, frame,
+    )
+        private set
+    private var styled: ChatScene? = null
+    private var composer = ChatLook.composer(scene.s, canCall = false, canAttach = false)
+    private var extras = ChatExtras()
+    private var lastMessages: List<GraineChatTurn> = emptyList()
+    /** The last render, to draw again when the window learns its layout direction (it is only resolved once attached). */
+    private var redraw: (() -> Unit)? = null
+
+    override val agent: GraineInApp get() = graine
+    override val fillsSpace: Boolean get() = page
+    override val threadWidth: Int get() = maxOf(0, list.width - 2 * px(scene.s.density.edge))
 
     init {
         orientation = VERTICAL
         chevron.setOnClickListener { onCollapse?.invoke() }
         barChevron.setOnClickListener { onCollapse?.invoke() }
+        leadChevron.setOnClickListener { onCollapse?.invoke() }
         compose.setOnClickListener { onNewConversation?.invoke() }
         barCompose.setOnClickListener { onNewConversation?.invoke() }
-        titleBar.trailing(barChevron, Ui.dp(context, VoiceBar.ICON.toFloat()))
-        // Beside the chevron, one icon's width further in.
-        titleBar.addView(barCompose, FrameLayout.LayoutParams(Ui.dp(context, VoiceBar.ICON.toFloat()), Ui.dp(context, VoiceBar.ICON.toFloat()),
-            Gravity.RIGHT or Gravity.CENTER_VERTICAL).apply { rightMargin = Ui.dp(context, (WindowChrome.INSET + VoiceBar.ICON + VoiceBar.GAP).toFloat()) })
-        sendButton.setOnClickListener { submit() }
-        field.setOnEditorActionListener { _, action, _ -> if (action == EditorInfo.IME_ACTION_SEND) { submit(); true } else false }
+        callButton.setOnClickListener { onCall?.invoke() }
+        barCall.setOnClickListener { onCall?.invoke() }
+        composerCall.setOnClickListener { onCall?.invoke() }
+        attach.setOnClickListener { onAttach?.invoke() }
         status.setOnClickListener { onRetry?.invoke() }
-        val statusRow = LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            Ui.gap(this, Ui.dp(context, DOT_GAP))
-            addView(dot, LayoutParams(Ui.dp(context, VoiceBar.ONLINE_DOT.toFloat()), Ui.dp(context, VoiceBar.ONLINE_DOT.toFloat())))
-            addView(status)
+        pill.setOnClickListener { toLatest() }
+
+        // The title bar: the chevron at its right end, then compose and the call button further in.
+        titleBar.trailing(barChevron, px(VoiceBar.ICON))
+        titleBar.addView(barCompose, FrameLayout.LayoutParams(px(VoiceBar.ICON), px(VoiceBar.ICON), Gravity.RIGHT or Gravity.CENTER_VERTICAL)
+            .apply { rightMargin = px(WindowChrome.INSET + VoiceBar.ICON + VoiceBar.GAP) })
+        titleBar.addView(barCall, FrameLayout.LayoutParams(px(VoiceBar.ICON), px(VoiceBar.ICON), Gravity.RIGHT or Gravity.CENTER_VERTICAL)
+            .apply { rightMargin = px(WindowChrome.INSET + 2 * (VoiceBar.ICON + VoiceBar.GAP)) })
+
+        // The header: [chevron, full screen only] [avatar] [title and status] [call] [compose] [chevron].
+        statusRow.addView(dot, LayoutParams(px(VoiceBar.ONLINE_DOT), px(VoiceBar.ONLINE_DOT)))
+        statusRow.addView(status)
+        Ui.gap(statusRow, px(ChatWindowView.DOT_GAP.toDouble()))
+        words.addView(title)
+        words.addView(statusRow)
+        header.group.addView(mark, LayoutParams(px(ChatLook.AVATAR_START), px(ChatLook.AVATAR_START)))
+        header.group.addView(words, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        if (frame == ChatFrame.SCREEN) header.leading.addView(leadChevron, LayoutParams(px(VoiceBar.ICON), px(VoiceBar.ICON)))
+        callButton.addView(callIcon, FrameLayout.LayoutParams(px(VoiceBar.ICON), px(VoiceBar.ICON), Gravity.CENTER))
+        // A 44 target that takes no more room than the icons beside it.
+        val overhang = -px((ChatLook.TARGET - VoiceBar.ICON) / 2)
+        header.trailing.addView(callButton, LayoutParams(px(ChatLook.TARGET), px(ChatLook.TARGET)).apply { marginStart = overhang; marginEnd = overhang })
+        header.trailing.addView(compose, LayoutParams(px(VoiceBar.ICON), px(VoiceBar.ICON)))
+        if (frame != ChatFrame.SCREEN) header.trailing.addView(chevron, LayoutParams(px(VoiceBar.ICON), px(VoiceBar.ICON)))
+        headerBox.addView(headerFrost, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        headerBox.addView(header, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+
+        // The frost first, the piece's own (translucent) fill over it: a child draws above its parent's background.
+        contextBar.addView(contextFrost, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        contextBar.addView(contextRow, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        banner.addView(bannerFrost, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        banner.addView(bannerRow, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+
+        // The thread: the platform's recycled list, no dividers, no selector, rows that keep their own edges.
+        list.adapter = adapter
+        list.divider = null
+        list.dividerHeight = 0
+        list.selector = android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)
+        list.cacheColorHint = android.graphics.Color.TRANSPARENT
+        list.itemsCanFocus = true
+        list.clipToPadding = false
+        list.clipChildren = false
+        list.isVerticalFadingEdgeEnabled = false
+        list.overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+        list.transcriptMode = AbsListView.TRANSCRIPT_MODE_ALWAYS_SCROLL
+        list.setOnScrollListener(object : AbsListView.OnScrollListener {
+            override fun onScrollStateChanged(view: AbsListView, state: Int) {
+                scrollState = state
+                // Where a scroll comes to rest decides whether the thread follows new rows.
+                if (state == AbsListView.OnScrollListener.SCROLL_STATE_IDLE) { pinning = false; updateFollowing() }
+            }
+            override fun onScroll(view: AbsListView, first: Int, visible: Int, total: Int) {
+                // The customer's own scrolling only: a layout that moves the rows (the keyboard, a new row) is not them leaving.
+                if (scrollState != AbsListView.OnScrollListener.SCROLL_STATE_IDLE && !pinning) updateFollowing()
+            }
+        })
+        // A new size: a new widest bubble, so the rows on screen are bound again — and a thread that follows stays at its newest row.
+        list.addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+            if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) post { adapter.notifyDataSetChanged() }
         }
-        val words = LinearLayout(context).apply { orientation = VERTICAL; addView(title); addView(statusRow) }
-        // A full screen has no corner to close it by: there the chevron leads the header.
-        if (frame == ChatFrame.SCREEN) header.addView(chevron, LayoutParams(Ui.dp(context, VoiceBar.ICON.toFloat()), Ui.dp(context, VoiceBar.ICON.toFloat())))
-        header.addView(mark, LayoutParams(Ui.dp(context, VoiceBar.CHAT_MARK.toFloat()), Ui.dp(context, VoiceBar.CHAT_MARK.toFloat())))
-        header.addView(words, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        header.addView(compose, LayoutParams(Ui.dp(context, VoiceBar.ICON.toFloat()), Ui.dp(context, VoiceBar.ICON.toFloat())))
-        if (frame != ChatFrame.SCREEN) header.addView(chevron, LayoutParams(Ui.dp(context, VoiceBar.ICON.toFloat()), Ui.dp(context, VoiceBar.ICON.toFloat())))
-        thread.addView(upcomingSlot, Ui.matchWidth())
-        thread.addView(emptySlot, Ui.matchWidth())
-        thread.addView(list, Ui.matchWidth())
-        thread.addView(typingSlot, Ui.matchWidth())
-        scroll.addView(thread, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        threadFrame.addView(scroll, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, if (page) ViewGroup.LayoutParams.MATCH_PARENT else ViewGroup.LayoutParams.WRAP_CONTENT))
-        composer.addView(field, LayoutParams(0, Ui.dp(context, VoiceBar.FIELD.toFloat()), 1f))
-        composer.addView(sendButton)
-        inner.addView(titleBar, Ui.matchWidth())
-        inner.addView(header, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(context, VoiceBar.CHAT_HEADER.toFloat())))
-        inner.addView(divider, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1))
-        inner.addView(threadFrame, if (page) LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f) else Ui.matchWidth())
-        inner.addView(starters, Ui.matchWidth())
-        inner.addView(composer, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(context, VoiceBar.COMPOSER.toFloat())))
+        pill.addView(pillIcon, LayoutParams(px(ChatLook.PILL_ICON), px(ChatLook.PILL_ICON)))
+        pill.addView(pillCount)
+        Ui.gap(pill, px(6.0))
+        body.addView(list, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, if (page) ViewGroup.LayoutParams.MATCH_PARENT else ViewGroup.LayoutParams.WRAP_CONTENT))
+        body.addView(floatSlot, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
+        body.addView(pill, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL))
+        floatSlot.addOnLayoutChangeListener { _, _, t, _, b, _, ot, _, ob -> if (b - t != ob - ot) post { clearFloating() } }
+
+        // The bottom: a component, the docked chips, the composer — under the thread, or floating over it.
+        attach.addView(attachIcon, FrameLayout.LayoutParams(px(ChatLook.SIDE_ICON), px(ChatLook.SIDE_ICON), Gravity.CENTER))
+        composerCall.addView(composerCallIcon, FrameLayout.LayoutParams(px(ChatLook.SIDE_ICON), px(ChatLook.SIDE_ICON), Gravity.CENTER))
+        composerBox.addView(composerRow, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        capsule.addView(composerFrost, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        bottomStack.addView(accessorySlot, Ui.matchWidth())
+        bottomStack.addView(docked, Ui.matchWidth())
+        bottomStack.addView(composerBox, Ui.matchWidth())
+        bottomSlot.addView(bottomStack, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+        column.addView(titleBar, Ui.matchWidth())
+        column.addView(headerBox, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        column.addView(divider, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1))
+        column.addView(contextBar, Ui.matchWidth())
+        column.addView(banner, Ui.matchWidth())
+        column.addView(body, if (page) LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f) else Ui.matchWidth())
+        column.addView(bottomSlot, Ui.matchWidth())
+        inner.addView(column, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, if (page) ViewGroup.LayoutParams.MATCH_PARENT else ViewGroup.LayoutParams.WRAP_CONTENT))
         addView(inner, if (page) LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT) else Ui.matchWidth())
+
+        send.setOnClickListener { if (ChatLook.send(composer, field.text.isNullOrBlank(), scene.title).calls) onCall?.invoke() else submit() }
+        field.setOnEditorActionListener { _, action, _ -> if (action == EditorInfo.IME_ACTION_SEND) { submit(); true } else false }
         field.addTextChangedListener(object : android.text.TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: android.text.Editable?) { sendEnabled(!s.isNullOrBlank()) }
+            override fun afterTextChanged(s: android.text.Editable?) { drawSend() }
         })
+    }
+
+    private fun icon(label: String) = ImageView(context).apply {
+        contentDescription = label
+        isClickable = true
+        isFocusable = true
+        accessibilityDelegate = ButtonRole
     }
 
     /**
@@ -180,17 +362,9 @@ internal class ChatWindowView(
      * asked for it. Null removes it.
      */
     fun setAccessory(v: View?) {
-        accessory?.let { inner.removeView(it) }
+        accessory?.let { accessorySlot.removeView(it) }
         accessory = v
-        if (v != null) inner.addView(v, inner.indexOfChild(starters), Ui.matchWidth())
-    }
-
-    private var sendFill = 0
-    private var sendIcon: Drawable? = null
-
-    private fun sendEnabled(on: Boolean) {
-        val icon = sendIcon ?: return
-        sendButton.draw(sendFill, icon, "Send", on)
+        if (v != null) accessorySlot.addView(v, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     }
 
     private fun submit() {
@@ -200,55 +374,91 @@ internal class ChatWindowView(
         onSend?.invoke(text)
     }
 
-    private fun px(dp: Double) = Ui.dp(context, dp.toFloat())
-
-    /** Everything a render draws with, resolved once. */
-    private data class Look(
-        val t: ThemeTokens, val chat: ChatTokens, val accent: Int, val onAccent: Int, val heading: String,
-        val hostImage: String?, val logoUrl: String?, val logoPlate: LogoPlate, val loader: LoaderLook, val loaderColor: Int,
-    ) {
-        /** `chat.title`, or the Appearance heading when the design wrote none. */
-        val title: String get() = chat.title.ifEmpty { heading }
-    }
-
     /** One upcoming call as the card draws it. */
     data class UpcomingRow(val id: String, val at: Date, val cancelling: Boolean, val failed: Boolean)
 
+    // ── ThreadHost ────────────────────────────────────────────────────────
+
+    override fun retry() { onRetry?.invoke() }
+    override fun starter(text: String) { onSend?.invoke(text) }
+    override fun quickReply(reply: GraineQuickReply) { onQuickReply?.invoke(reply) ?: onSend?.invoke(reply.text) }
+    override fun rate(style: String, value: Int) { onRate?.invoke(style, value) }
+    override fun cancelCall(id: String) { onCancelCall?.invoke(id) }
+    override fun book() { onBook?.invoke() }
+
+    /** Long-press: the plain words to the clipboard, and "Copied" — Android 13+ confirms by itself. */
+    override fun copy(text: String) {
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
+        runCatching { cm.setPrimaryClip(ClipData.newPlainText(ChatLook.COPY, text)) }
+        if (Build.VERSION.SDK_INT < 33) Toast.makeText(context, ChatLook.COPIED, Toast.LENGTH_SHORT).show()
+        announceForAccessibility(ChatLook.COPIED)
+    }
+
+    // ── render ────────────────────────────────────────────────────────────
+
     /**
      * Draw the conversation in the design. Cheap enough to call on every
-     * change: only what changed is redrawn.
+     * change: only what changed is redrawn, and only the rows on screen.
      *
      * [replying]: the agent is working on a reply — the typing indicator.
      * [failed]: nothing could connect; the status says so and a tap retries.
      * [keyboardUp]: the thread gives up height while the keyboard is up (on the bar).
      * [upcoming]: the customer's booked calls, soonest first; [callName] names them.
      * [bookable]: the agent can be booked from the app — "Book a call" in the card, or in its place.
+     * [extras]: the v2 state — quick replies, the end, the rating, the pinned card, reconnecting, the call and attach buttons.
      */
     fun render(
         t: ThemeTokens, accent: Int, onAccent: Int, heading: String, hostImage: String?, logoUrl: String?, logoPlate: LogoPlate,
         messages: List<GraineChatTurn>, isOnline: Boolean, replying: Boolean = false, failed: Boolean = false, keyboardUp: Boolean = false,
         loader: LoaderLook = Loaders.resolve(null), loaderColor: Int = accent,
         upcoming: List<UpcomingRow> = emptyList(), callName: String = heading, bookable: Boolean = false,
+        extras: ChatExtras = ChatExtras(connecting = !isOnline && !failed),
     ) {
+        redraw = { render(t, accent, onAccent, heading, hostImage, logoUrl, logoPlate, messages, isOnline, replying, failed, keyboardUp, loader, loaderColor,
+            upcoming, callName, bookable, extras) }
         val chat = Surfaces.chatOf(t)
-        val look = Look(t, chat, accent, onAccent, heading, hostImage, logoUrl, logoPlate, loader, loaderColor)
+        val next = ChatScene(t, Surfaces.styleOf(t), chat, accent, onAccent, heading, hostImage, logoUrl, logoPlate, loader, loaderColor,
+            rtl = layoutDirection == View.LAYOUT_DIRECTION_RTL, moves = Themed.motionMs(context, t) > 0, frame = frame)
+        if (next != scene) scene = next
+        this.extras = extras
+        val sc = scene
+        val s = sc.s
+        if (styled != sc) { style(sc); styled = sc }
+        composer = ChatLook.composer(s, extras.canCall && onCall != null, extras.canAttach && onAttach != null)
+
         // What the window draws of the pieces the design can leave out: earlier messages, New conversation, booked calls.
         val pieces = ChatPieces.of(messages, chat, upcoming.size, bookable)
-        val shown = pieces.turns
-        val c = t.colors
+        renderHeader(sc, isOnline, failed, replying, extras)
+        renderCompose(sc, pieces)
+        renderPinBar(sc, extras.pin)
+        renderBanner(sc, isOnline, extras, messages)
+        capDp = (if (keyboardUp) VoiceBar.CHAT_LIST_MAX_TYPING else VoiceBar.CHAT_LIST_MAX).toDouble()
+        if (!page) list.maxHeightPx = px(capDp) + floatingUnder()
+        val chips = ChatLook.chips(s, chat.suggestions, pieces.starters, extras.quickReplies)
+        renderThread(sc, pieces, upcoming, callName, replying, chips, extras)
+        renderDocked(sc, chips)
+        renderComposer(sc)
+    }
+
+    // ── the look: what changes only with the design ───────────────────────
+
+    private fun style(sc: ChatScene) {
+        val t = sc.t
+        val s = sc.s
         val r = t.shape.radius
         val bw = Themed.px(context, t.shape.borderWidth)
-        val border = Themed.color(c.border)
-        val background = Themed.color(chat.background)
+        val border = Themed.color(t.colors.border)
 
+        // The frame: outlined, radius.xl, its depth — none of it for a chat that fills the screen.
+        val wall = WallpaperDrawable(s.wallpaper, density)
+        wallpaper = wall
         if (frameless) {
-            // A whole screen: no outline, corners or shadow. (A sheet's container rounds its top.)
-            if ((this.background as? android.graphics.drawable.ColorDrawable)?.color != background) setBackgroundColor(background)
+            background = null
+            setBackgroundColor(Themed.color(s.wallpaper.color))
             inner.setPadding(0, 0, 0, 0)
             inner.clipToOutline = false
         } else {
-            // The window: the chat's background, outlined, at radius.xl, with its depth; the inside clipped to the corners.
-            Themed.surface(this, t, background, Themed.px(context, r.xl).toFloat(), bw, border, t.elevation.floating, 0, 0, 0, 0)
+            Themed.surface(this, t, Themed.color(s.wallpaper.color), Themed.px(context, r.xl).toFloat(), bw, border, t.elevation.floating, 0, 0, 0, 0)
             val innerRadius = Themed.px(context, maxOf(0.0, r.xl - t.shape.borderWidth)).toFloat()
             inner.setPadding(bw, bw, bw, bw)
             inner.outlineProvider = object : ViewOutlineProvider() {
@@ -258,515 +468,599 @@ internal class ChatWindowView(
             }
             inner.clipToOutline = true
         }
-
-        renderHeader(look, isOnline, failed)
-        renderCompose(look, pieces)
-
-        // The thread: the chat's background, dotted when the design says so; its frame stands still while the messages scroll.
-        threadFrame.background = if (chat.pattern == "dots") DotsDrawable(background, Themed.color(chat.patternColor), resources.displayMetrics.density)
-        else android.graphics.drawable.ColorDrawable(background)
-        if (!page) (scroll as? CappedScrollView)?.maxHeightPx = Ui.dp(context, if (keyboardUp) VoiceBar.CHAT_LIST_MAX_TYPING else VoiceBar.CHAT_LIST_MAX)
-        val pad = px(VoiceBar.CHAT_LIST_PAD)
-        thread.setPadding(pad, pad, pad, pad)
-        Ui.gap(thread, Themed.px(context, t.spacing.gap))
-        Ui.gap(list, Themed.px(context, t.spacing.gap))
-        renderUpcoming(look, if (pieces.upcoming) upcoming else emptyList(), callName, pieces.upcomingTitle, pieces.book)
-        val grew = drawMessages(look, shown)
-        renderEmpty(look, shown.isEmpty())
-        renderTyping(look, replying)
-        if (grew) scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
-        renderStarters(look, pieces)
-
-        // Composer: on the chat's background, the design's field, the accent send button.
-        composer.setBackgroundColor(background)
-        composer.setPadding(px(VoiceBar.COMPOSER_PAD), 0, px(VoiceBar.COMPOSER_PAD), 0)
-        Ui.gap(composer, px(VoiceBar.COMPOSER_GAP))
-        field.hint = chat.placeholder
-        field.background = Ui.rounded(Themed.color(chat.composerBackground), Themed.px(context, r.xl).toFloat(), bw, Themed.color(chat.composerBorder))
-        field.setPadding(px(VoiceBar.FIELD_PAD), 0, px(VoiceBar.FIELD_PAD), 0)
-        field.setTextColor(Themed.color(chat.composerText))
-        field.setHintTextColor(Themed.color(chat.composerPlaceholder))
-        field.setTextSize(TypedValue.COMPLEX_UNIT_SP, (t.font.scale.body - 1).toFloat())
-        Themed.face(field, t.font.body, t.font.weights.body, graine)
-        sendFill = accent
-        sendIcon = IconDrawable(SdkIcons.SEND, t.icons.style, t.icons.stroke, onAccent, px(VoiceBar.ICON))
-        sendEnabled(!field.text.isNullOrBlank())
-    }
-
-    // ── the header ─────────────────────────────────────────────────────────
-
-    private fun renderHeader(look: Look, isOnline: Boolean, failed: Boolean) {
-        val t = look.t
-        val chat = look.chat
-        val r = t.shape.radius
-        val bw = Themed.px(context, t.shape.borderWidth)
-        val subtext = Themed.color(chat.headerSubtext)
-        val chevronIcon = if (frame == ChatFrame.PAGE) IconDrawable(SdkIcons.CLOSE, t.icons.style, t.icons.stroke, subtext, px(VoiceBar.ICON))
-        else IconDrawable(SdkIcons.CHEVRON, t.icons.style, t.icons.stroke, subtext, px(VoiceBar.ICON), flipped = true)
-        val window = WindowChrome.titleBar(t, WindowChrome.Surface.CHAT, look.title, isOnline)
-        titleBar.visibility = if (window != null) VISIBLE else GONE
-        header.visibility = if (window != null) GONE else VISIBLE
-        // The title bar draws its own bottom outline.
-        divider.visibility = header.visibility
-        if (window != null) {
-            titleBar.render(window, if (frameless) 0f else Themed.px(context, maxOf(0.0, r.xl - t.shape.borderWidth)).toFloat())
-            val closes = frame == ChatFrame.PAGE
-            barChevron.setImageDrawable(IconDrawable(if (closes) SdkIcons.CLOSE else SdkIcons.CHEVRON, t.icons.style, t.icons.stroke,
-                Themed.color(t.colors.textMuted), px(VoiceBar.ICON), flipped = !closes))
-            return
+        inner.background = wall
+        for (f in listOf(headerFrost, contextFrost, bannerFrost, composerFrost)) {
+            f.wallpaper = wall
+            f.blur(s.glass?.blur ?: 0.0)
         }
-        header.setBackgroundColor(Themed.color(chat.headerBackground))
+
+        // The header's fill: surface, accent, a gradient leading → trailing, or none (the wallpaper runs under it).
+        val h = s.header
+        val glassy = s.glass != null && (h.style == "surface" || h.style == "plain")
+        headerFrost.visibility = if (glassy) VISIBLE else GONE
+        header.background = when {
+            glassy -> android.graphics.drawable.ColorDrawable(Themed.alpha(Themed.color(h.fill.color), s.glass!!.opacity))
+            h.style == "plain" -> null
+            h.style == "gradient" -> GradientDrawable(
+                if (sc.rtl) GradientDrawable.Orientation.RIGHT_LEFT else GradientDrawable.Orientation.LEFT_RIGHT,
+                intArrayOf(Themed.color(h.fill.color), Themed.color(h.fill.colorTo ?: h.fill.color)),
+            )
+            else -> android.graphics.drawable.ColorDrawable(Themed.color(h.fill.color))
+        }
         header.setPadding(px(VoiceBar.CHAT_HEADER_PAD), 0, px(VoiceBar.CHAT_HEADER_PAD), 0)
-        Ui.gap(header, px(VoiceBar.GAP))
-        divider.setBackgroundColor(Themed.color(t.colors.border))
+        header.minimumHeight = px(ChatLook.HEADER)
+        headerBox.minimumHeight = px(ChatLook.HEADER)
+        header.gapPx = px(VoiceBar.GAP)
+        header.centered = h.align == "center"
+        Ui.gap(header.trailing, px(VoiceBar.GAP))
+        Ui.gap(header.group, px(VoiceBar.GAP))
+        val markSide = px(if (header.centered) ChatLook.AVATAR_CENTER else ChatLook.AVATAR_START)
+        mark.layoutParams = LayoutParams(markSide, markSide)
+        words.gravity = if (header.centered) Gravity.CENTER_HORIZONTAL else Gravity.START
+        title.gravity = if (header.centered) Gravity.CENTER_HORIZONTAL else Gravity.START
+        statusRow.gravity = if (header.centered) Gravity.CENTER else Gravity.CENTER_VERTICAL or Gravity.START
+        divider.setBackgroundColor(border)
         divider.layoutParams = (divider.layoutParams as LayoutParams).apply { height = maxOf(1, bw) }
-        mark.visibility = if (chat.avatar == "none") GONE else VISIBLE
-        if (chat.avatar != "none") fillAvatar(mark, look, VoiceBar.CHAT_MARK, VoiceBar.CHAT_MARK_GLYPH)
+
         val titleSp = minOf(t.font.scale.title, VoiceBar.CHAT_TITLE_MAX_SP)
-        title.text = look.title
-        title.setTextColor(Themed.color(chat.headerText))
+        title.setTextColor(Themed.color(h.fill.text))
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, titleSp.toFloat())
         Themed.face(title, t.font.heading, t.font.weights.title, graine)
         title.letterSpacing = t.font.letterSpacing.title.toFloat()
         Ui.lineHeight(title, (titleSp * t.font.lineHeight.title).toFloat())
-        // The dot: `success` on a surface header, the title's own colour on any other (an accent header).
-        val surfaceHeader = Design.normaliseHex(chat.headerBackground) == Design.normaliseHex(t.colors.surface)
-        dot.background = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
-            setColor(Themed.color(if (surfaceHeader) t.colors.success else chat.headerText))
-        }
-        dot.visibility = if (isOnline) VISIBLE else GONE
-        status.text = when {
-            isOnline -> chat.subtitle.ifEmpty { "Online" }
-            failed -> FAILED_TEXT
-            else -> look.loader.text.connecting ?: "Connecting…"
-        }
-        status.isClickable = failed && !isOnline
-        status.setTextColor(subtext)
+        status.setTextColor(Themed.color(h.fill.textMuted))
         status.setTextSize(TypedValue.COMPLEX_UNIT_SP, t.font.scale.caption.toFloat())
         Themed.face(status, t.font.body, t.font.weights.body, graine)
         status.letterSpacing = t.font.letterSpacing.body.toFloat()
-        chevron.setImageDrawable(chevronIcon)
+        dot.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Themed.color(h.dot)) }
+        val muted = Themed.color(h.fill.textMuted)
+        chevron.setImageDrawable(if (frame == ChatFrame.PAGE) IconDrawable(SdkIcons.CLOSE, t.icons.style, t.icons.stroke, muted, px(VoiceBar.ICON))
+            else IconDrawable(SdkIcons.CHEVRON, t.icons.style, t.icons.stroke, muted, px(VoiceBar.ICON), flipped = true))
+        leadChevron.setImageDrawable(IconDrawable(SdkIcons.CHEVRON, t.icons.style, t.icons.stroke, muted, px(VoiceBar.ICON), flipped = true))
+        compose.setImageDrawable(IconDrawable(SdkIcons.COMPOSE, t.icons.style, t.icons.stroke, muted, px(VoiceBar.ICON)))
+        callIcon.setImageDrawable(IconDrawable(SdkIcons.CALL, t.icons.style, t.icons.stroke, Themed.color(h.fill.text), px(VoiceBar.ICON)))
+        val barMuted = Themed.color(t.colors.textMuted)
+        barCompose.setImageDrawable(IconDrawable(SdkIcons.COMPOSE, t.icons.style, t.icons.stroke, barMuted, px(VoiceBar.ICON)))
+        barCall.setImageDrawable(IconDrawable(SdkIcons.CALL, t.icons.style, t.icons.stroke, barMuted, px(VoiceBar.ICON)))
+        val closes = frame == ChatFrame.PAGE
+        barChevron.setImageDrawable(IconDrawable(if (closes) SdkIcons.CLOSE else SdkIcons.CHEVRON, t.icons.style, t.icons.stroke, barMuted, px(VoiceBar.ICON), flipped = !closes))
+
+        // The avatar (none for `none`): in the launcher shape, a pill drawn as a circle.
+        mark.visibility = if (sc.chat.avatar == "none") GONE else VISIBLE
+        if (sc.chat.avatar != "none") {
+            val sizeDp = if (header.centered) ChatLook.AVATAR_CENTER else ChatLook.AVATAR_START
+            val markShape = if (t.shape.launcher == "pill") "circle" else t.shape.launcher
+            val tokens = if (sc.chat.avatar == "logo" && !sc.logoUrl.isNullOrEmpty()) t.copy(icons = t.icons.copy(launcher = null)) else t
+            Mark.fill(mark, tokens, sizeDp, sizeDp * VoiceBar.CHAT_MARK_GLYPH / VoiceBar.CHAT_MARK, markShape,
+                if (markShape == "circle") null else Design.launcherCorner(markShape, sizeDp, t.shape.radius),
+                sc.accent, sc.onAccent, sc.hostImage, sc.logoUrl, sc.logoPlate, CallScreen.initial(sc.title).ifEmpty { "A" })
+        }
+
+        // The pinned bar and the banner: the surface (frosted as the header is) and raised surface, a hairline under each.
+        val frostOn = s.glass != null
+        contextFrost.visibility = if (frostOn) VISIBLE else GONE
+        contextRow.background = hairlined(if (frostOn) Themed.alpha(Themed.color(t.colors.surface), s.glass!!.opacity) else Themed.color(t.colors.surface), border, bw)
+        contextRow.minimumHeight = px(ChatLook.CONTEXT_BAR)
+        contextRow.setPadding(px(12.0), 0, px(12.0), maxOf(1, bw))
+        Ui.gap(contextRow, px(10.0))
+        bannerFrost.visibility = if (frostOn) VISIBLE else GONE
+        bannerRow.background = hairlined(if (frostOn) Themed.alpha(Themed.color(t.colors.surfaceRaised), s.glass!!.opacity) else Themed.color(t.colors.surfaceRaised), border, bw)
+        bannerRow.minimumHeight = px(ChatLook.BANNER)
+        bannerRow.setPadding(0, 0, 0, maxOf(1, bw))
+
+        // The thread's edges: the rows keep the sides themselves; the list keeps the top and bottom.
+        val edge = px(s.density.edge)
+        list.setPadding(0, edge, 0, edge)
+        list.maxHeightPx = if (page) 0 else px(capDp)
+
+        // The pill: raised, outlined, the card's shadow, the arrow in `text`.
+        pill.background = Ui.rounded(Themed.color(t.colors.surfaceRaised), px(ChatLook.PILL / 2).toFloat(), maxOf(1, bw), border)
+        Themed.shadow(pill, t.elevation.card)
+        pill.minimumHeight = px(ChatLook.PILL)
+        pill.setPadding(px(12.0), px(4.0), px(12.0), px(4.0))
+        pillIcon.setImageDrawable(IconDrawable(SdkIcons.ARROW_DOWN, t.icons.style, t.icons.stroke, Themed.color(t.colors.text), px(ChatLook.PILL_ICON)))
+        pillCount.setTextColor(Themed.color(t.colors.text))
+        pillCount.setTextSize(TypedValue.COMPLEX_UNIT_SP, t.font.scale.caption.toFloat())
+        Themed.face(pillCount, t.font.body, t.font.weights.strong, graine)
+
+        styleComposer(sc)
+        adapter.notifyDataSetChanged()
+    }
+
+    /** A fill with a hairline under it. */
+    private fun hairlined(fill: Int, line: Int, width: Int): android.graphics.drawable.Drawable =
+        android.graphics.drawable.LayerDrawable(arrayOf(android.graphics.drawable.ColorDrawable(line), android.graphics.drawable.ColorDrawable(fill)))
+            .apply { setLayerInset(1, 0, 0, 0, maxOf(1, width)) }
+
+    // ── the header ────────────────────────────────────────────────────────
+
+    private fun renderHeader(sc: ChatScene, isOnline: Boolean, failed: Boolean, typing: Boolean, x: ChatExtras) {
+        val t = sc.t
+        val s = sc.s
+        val window = WindowChrome.titleBar(t, WindowChrome.Surface.CHAT, sc.title, isOnline)
+        titleBar.visibility = if (window != null) VISIBLE else GONE
+        headerBox.visibility = if (window != null) GONE else VISIBLE
+        // The title bar draws its own bottom outline; a header draws one only where the design says.
+        divider.visibility = if (window == null && s.header.divider) VISIBLE else GONE
+        val calls = ChatLook.headerCall(s, x.canCall && onCall != null)
+        if (window != null) {
+            titleBar.render(window, if (frameless) 0f else Themed.px(context, maxOf(0.0, t.shape.radius.xl - t.shape.borderWidth)).toFloat())
+            barCall.visibility = if (calls) VISIBLE else GONE
+            barCall.contentDescription = ChatLook.callLabel(sc.title)
+            callButton.visibility = GONE
+            return
+        }
+        barCall.visibility = GONE
+        callButton.visibility = if (calls) VISIBLE else GONE
+        callButton.contentDescription = ChatLook.callLabel(sc.title)
+        title.text = sc.title
+        val st = ChatLook.status(s.header, sc.chat.subtitle, ChatLook.typingWords(s.typing), isOnline, x.connecting, x.reconnecting, failed, typing,
+            x.ended, sc.loader.text.connecting ?: "Connecting…")
+        statusRow.visibility = if (st.kind == ChatLook.StatusKind.NONE) GONE else VISIBLE
+        dot.visibility = if (st.dot) VISIBLE else GONE
+        status.text = st.words ?: ""
+        status.isClickable = st.kind == ChatLook.StatusKind.FAILED
     }
 
     /** "New conversation": the compose icon beside the chevron, only while earlier messages are on screen and the design keeps it. */
-    private fun renderCompose(look: Look, pieces: ChatPieces) {
+    private fun renderCompose(sc: ChatScene, pieces: ChatPieces) {
         val show = onNewConversation != null && pieces.newConversation
-        val t = look.t
         val windowed = titleBar.visibility == VISIBLE
         compose.visibility = if (show && !windowed) VISIBLE else GONE
         barCompose.visibility = if (show && windowed) VISIBLE else GONE
-        if (!show) return
-        val color = Themed.color(if (windowed) t.colors.textMuted else look.chat.headerSubtext)
-        val icon = IconDrawable(SdkIcons.COMPOSE, t.icons.style, t.icons.stroke, color, px(VoiceBar.ICON))
-        (if (windowed) barCompose else compose).setImageDrawable(icon)
     }
 
-    /**
-     * The chat's avatar, by `chat.avatar`: `logo` — the brand's logo on its
-     * plate (no logo: the glyph when there is one, else the title's letter);
-     * `glyph` — the launcher mark in the accent. In the launcher's shape, a pill drawn as a circle.
-     */
-    private fun fillAvatar(box: FrameLayout, look: Look, sizeDp: Double, glyphDp: Double) {
-        val t = look.t
-        val markShape = if (t.shape.launcher == "pill") "circle" else t.shape.launcher
-        val tokens = if (look.chat.avatar == "logo" && !look.logoUrl.isNullOrEmpty()) t.copy(icons = t.icons.copy(launcher = null)) else t
-        Mark.fill(box, tokens, sizeDp, glyphDp, markShape,
-            if (markShape == "circle") null else Design.launcherCorner(markShape, sizeDp, t.shape.radius),
-            look.accent, look.onAccent, look.hostImage, look.logoUrl, look.logoPlate, CallScreen.initial(look.title).ifEmpty { "A" })
-    }
+    // ── the pinned bar ────────────────────────────────────────────────────
 
-    // ── the thread ─────────────────────────────────────────────────────────
+    private var drawnPin: Pair<GraineChatPin?, ChatScene>? = null
 
-    /** True when something was added or grew — the thread then scrolls to its end. */
-    private fun drawMessages(look: Look, turns: List<GraineChatTurn>): Boolean {
-        // A turn that is only a component draws no bubble: the component is drawn where components are.
-        // A conversation that continues: day lines where the day changes, and an earlier call as one row.
-        val rows = ChatRows.build(turns.filter { it.text.isNotEmpty() })
-        val sameLook = drawnLook == look
-        val old = drawnLines
-        // The common change: the same conversation, the last line grown or new lines after it.
-        val keep = if (!sameLook || rows.size < old.size) 0 else {
-            var k = 0
-            while (k < old.size && k < rows.size && old[k] == rows[k]) k++
-            if (k < old.size - 1) 0 else k
-        }
-        if (keep == 0) {
-            list.removeAllViews()
-            lineViews.clear()
-        } else {
-            while (lineViews.size > keep) list.removeView(lineViews.removeAt(lineViews.size - 1))
-        }
-        for (i in keep until rows.size) {
-            val v = when (val row = rows[i]) {
-                is ChatRows.Row.Day -> dayView(look, row)
-                is ChatRows.Row.Voice -> callView(look, row)
-                is ChatRows.Row.Turn -> lineView(look, row.turn)
-            }
-            lineViews.add(v)
-            list.addView(v)
-        }
-        val grew = rows.size != old.size || rows.lastOrNull() != old.lastOrNull()
-        drawnLines = rows
-        drawnLook = look
-        applyBubbleMax()
-        return grew
-    }
-
-    /** A day separator: centred, caption size, strong, muted (DESIGN.md "Day separators"). */
-    private fun dayView(look: Look, row: ChatRows.Row.Day): View {
-        val t = look.t
-        return TextView(context).apply {
-            text = ChatRows.dayLabel(row)
-            gravity = Gravity.CENTER
-            setTextColor(Themed.color(t.colors.textMuted))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, t.font.scale.caption.toFloat())
-            Themed.face(this, t.font.body, t.font.weights.strong, graine)
-            letterSpacing = t.font.letterSpacing.body.toFloat()
-            isFocusable = true
-            if (android.os.Build.VERSION.SDK_INT >= 28) isAccessibilityHeading = true
-            layoutParams = LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        }
-    }
-
-    /** An earlier call, as one row: the call icon and "Voice call · 6:05 PM" — that it happened, never what was said. */
-    private fun callView(look: Look, row: ChatRows.Row.Voice): View {
-        val t = look.t
-        val muted = Themed.color(t.colors.textMuted)
-        val clock = android.text.format.DateFormat.getTimeFormat(context)?.format(row.at)
-            ?: java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(row.at)
-        return LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.CENTER
-            Ui.gap(this, px(6.0))
-            contentDescription = ChatRows.callSpoken(clock)
-            importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
-            addView(ImageView(context).apply {
-                setImageDrawable(IconDrawable(SdkIcons.CALL, t.icons.style, t.icons.stroke, muted, px(14.0)))
-                importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
-            }, LayoutParams(px(14.0), px(14.0)))
-            addView(TextView(context).apply {
-                text = ChatRows.callLabel(clock)
-                maxLines = 1
-                setTextColor(muted)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, t.font.scale.caption.toFloat())
-                Themed.face(this, t.font.body, t.font.weights.body, graine)
-                importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
-            })
-            layoutParams = LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        }
-    }
-
-    private fun applyBubbleMax() {
-        for (v in lineViews) bubbleOf(v)?.maxWidth = bubbleMax
-    }
-
-    private fun bubbleOf(v: View): TextView? = (v as? TextView) ?: ((v as? LinearLayout)?.getChildAt(0) as? TextView)
-
-    private fun bodyText(t: ThemeTokens, s: String, color: Int) = TextView(context).apply {
-        text = s
-        setTextColor(color)
-        setTextSize(TypedValue.COMPLEX_UNIT_SP, t.font.scale.body.toFloat())
-        Themed.face(this, t.font.body, t.font.weights.body, graine)
-        letterSpacing = t.font.letterSpacing.body.toFloat()
-        Ui.lineHeight(this, (t.font.scale.body * t.font.lineHeight.body).toFloat())
-    }
-
-    /**
-     * A bubble, with the line under it when there is one — never inside it:
-     * its time, when the design shows times; "Not sent · tap to retry" for a
-     * message the chat could not deliver.
-     */
-    private fun lineView(look: Look, m: GraineChatTurn): View {
-        val customer = m.role != Role.AGENT
-        val bubble = bubbleView(look.t, m)
-        val gravity = if (customer) Gravity.END else Gravity.START
-        val failed = customer && m.delivery == GraineChatTurn.Delivery.FAILED
-        val under = when {
-            failed -> NOT_SENT
-            look.chat.showTimestamps -> android.text.format.DateFormat.getTimeFormat(context).format(m.at)
-            else -> null
-        }
-        if (under == null) {
-            bubble.layoutParams = LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { this.gravity = gravity }
-            return bubble
-        }
-        val t = look.t
-        return LinearLayout(context).apply {
+    /** The card the app pinned, as a bar under the header: thumbnail, title over subtitle, the badge at the trailing end. */
+    private fun renderPinBar(sc: ChatScene, pin: GraineChatPin?) {
+        val place = ChatLook.pin(pin, sc.s)
+        contextBar.visibility = if (place == "bar") VISIBLE else GONE
+        if (place != "bar" || pin == null) return
+        if (drawnPin == pin to sc) return
+        drawnPin = pin to sc
+        val t = sc.t
+        contextRow.removeAllViews()
+        contextBar.contentDescription = ChatLook.pinSpoken(pin)
+        contextRow.addView(PinViews.thumb(context, sc, graine, pin, ChatLook.CONTEXT_THUMB, t.shape.radius.sm),
+            LayoutParams(px(ChatLook.CONTEXT_THUMB), px(ChatLook.CONTEXT_THUMB)))
+        contextRow.addView(LinearLayout(context).apply {
             orientation = VERTICAL
-            layoutParams = LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-            addView(bubble, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { this.gravity = gravity })
             addView(TextView(context).apply {
-                text = under
-                setTextColor(Themed.color(if (failed) t.colors.danger else t.colors.textMuted))
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, maxOf(10.0, t.font.scale.caption - 1).toFloat())
-                Themed.face(this, t.font.body, t.font.weights.body, graine)
-                if (failed) { isClickable = true; setOnClickListener { onRetry?.invoke() } }
-            }, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                this.gravity = gravity
-                topMargin = px(TIME_GAP)
-            })
-        }
-    }
-
-    /** One message, per [VoiceBar.bubble]: `radius.lg`, the corner nearest the speaker `radius.sm`. */
-    private fun bubbleView(t: ThemeTokens, m: GraineChatTurn): TextView {
-        val customer = m.role != Role.AGENT
-        val b = VoiceBar.bubble(t, customer)
-        return bodyText(t, m.text, Themed.color(b.text)).apply {
-            maxWidth = bubbleMax
-            // Provisional: the agent's words still arriving, or the customer's waiting for the connection.
-            alpha = if (m.live || (customer && m.delivery != GraineChatTurn.Delivery.SENT)) VoiceBar.LIVE_ALPHA else 1f
-            if (b.plain) {
-                val p = px(2.0)
-                setPadding(p, p, p, p)
-                return@apply
-            }
-            val padH = Themed.px(context, t.spacing.cardPadding)
-            val padV = Themed.px(context, Math.round(t.spacing.cardPadding * 0.75).toDouble())
-            setPadding(padH, padV, padH, padV)
-            background = bubbleShape(t, b, customer)
-        }
-    }
-
-    private fun bubbleShape(t: ThemeTokens, b: VoiceBar.Bubble, customer: Boolean): GradientDrawable {
-        val lg = Themed.px(context, t.shape.radius.lg).toFloat()
-        val sm = Themed.px(context, t.shape.radius.sm).toFloat()
-        return GradientDrawable().apply {
-            // Top-left, top-right, bottom-right, bottom-left, each as x and y.
-            cornerRadii = if (customer) floatArrayOf(lg, lg, lg, lg, sm, sm, lg, lg) else floatArrayOf(lg, lg, lg, lg, lg, lg, sm, sm)
-            setColor(b.fill?.let { Themed.color(it) } ?: android.graphics.Color.TRANSPARENT)
-            b.outline?.let { setStroke(Themed.px(context, t.shape.borderWidth), Themed.color(it)) }
-        }
-    }
-
-    /** The agent is writing: the dashboard's loader (as dots) in an agent bubble — the shape of the reply about to stand there. */
-    private fun renderTyping(look: Look, replying: Boolean) {
-        typingSlot.removeAllViews()
-        typingSlot.visibility = if (replying) VISIBLE else GONE
-        if (!replying) return
-        val t = look.t
-        val b = VoiceBar.bubble(t, customer = false)
-        typingSlot.addView(FrameLayout(context).apply {
-            contentDescription = "${look.title} is typing"
-            val padH = Themed.px(context, t.spacing.cardPadding)
-            val padV = Themed.px(context, Math.round(t.spacing.cardPadding * 0.75).toDouble())
-            setPadding(padH, padV, padH, padV)
-            if (!b.plain) background = bubbleShape(t, b, customer = false)
-            addView(GraineLoaderView(context).apply {
-                // The dots whatever the dashboard's kind: a ring or the logo breathing in a bubble reads as an error, not typing.
-                configure(look.loader.copy(kind = "dots"), look.loaderColor, Themed.color(t.colors.border), TYPING_DOTS, look.logoUrl)
-            }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
-        }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.START))
-    }
-
-    /**
-     * Before any message, centred in the thread: the avatar at 48 (nothing for
-     * `none`), the title 12 below it, and the subtitle 4 below that — only
-     * when the design wrote one. No dot here.
-     */
-    private fun renderEmpty(look: Look, empty: Boolean) {
-        emptySlot.removeAllViews()
-        emptySlot.visibility = if (empty) VISIBLE else GONE
-        if (!empty) return
-        val t = look.t
-        val col = LinearLayout(context).apply { orientation = VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
-        if (look.chat.avatar != "none") {
-            val box = FrameLayout(context)
-            col.addView(box, LayoutParams(px(EMPTY_AVATAR), px(EMPTY_AVATAR)).apply { bottomMargin = px(12.0) })
-            fillAvatar(box, look, EMPTY_AVATAR, EMPTY_AVATAR * Design.LAUNCHER_GLYPH)
-        }
-        col.addView(TextView(context).apply {
-            text = look.title
-            gravity = Gravity.CENTER
-            maxLines = 2
-            ellipsize = TextUtils.TruncateAt.END
-            setTextColor(Themed.color(t.colors.text))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, minOf(t.font.scale.title, EMPTY_TITLE_MAX_SP).toFloat())
-            Themed.face(this, t.font.heading, t.font.weights.title, graine)
-            letterSpacing = t.font.letterSpacing.title.toFloat()
-        }, Ui.matchWidth())
-        if (look.chat.subtitle.isNotEmpty()) {
-            col.addView(TextView(context).apply {
-                text = look.chat.subtitle
-                gravity = Gravity.CENTER
-                setTextColor(Themed.color(t.colors.textMuted))
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, t.font.scale.caption.toFloat())
-                Themed.face(this, t.font.body, t.font.weights.body, graine)
-            }, Ui.matchWidth().apply { topMargin = px(4.0) })
-        }
-        emptySlot.addView(col, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
-            .apply { topMargin = px(if (page) 48.0 else 12.0) })
-    }
-
-    /**
-     * The starters: the design's suggestions, while the customer has sent
-     * nothing in this conversation — right-aligned above the composer, chips
-     * 34 high outlined in the accent; a tap sends its words as typed.
-     */
-    private fun renderStarters(look: Look, pieces: ChatPieces) {
-        val t = look.t
-        // Never while earlier messages are on screen: there is history to read.
-        val show = look.chat.suggestions.isNotEmpty() && pieces.starters
-        starters.visibility = if (show) VISIBLE else GONE
-        starters.removeAllViews()
-        if (!show) return
-        val edge = px(12.0)
-        starters.setPadding(edge, 0, edge, px(8.0))
-        starters.setBackgroundColor(Themed.color(look.chat.background))
-        val corner = Themed.px(context, minOf(t.shape.radius.xl, 17.0)).toFloat()
-        for (s in look.chat.suggestions) starters.addView(TextView(context).apply {
-            text = s
-            maxLines = 1
-            ellipsize = TextUtils.TruncateAt.END
-            gravity = Gravity.CENTER_VERTICAL
-            setTextColor(Themed.color(t.colors.text))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, (t.font.scale.body - 1).toFloat())
-            Themed.face(this, t.font.body, t.font.weights.strong, graine)
-            val h = px(14.0)
-            setPadding(h, 0, h, 0)
-            setMinHeight(px(STARTER_HEIGHT))
-            setHeight(px(STARTER_HEIGHT))
-            background = Ui.rounded(Themed.color(look.chat.background), corner, maxOf(1, Themed.px(context, t.shape.borderWidth)), look.accent)
-            isClickable = true
-            isFocusable = true
-            setOnClickListener { onSend?.invoke(s) }
-        })
-    }
-
-    /**
-     * UPCOMING CALLS — the customer's booked calls, first in the thread, as a
-     * component card: "Upcoming call(s)", then a row per call (at most three):
-     * the time in the device's own zone and words, the call name under it,
-     * Cancel at the right ("Cancelling…" while it goes; a failure says so and
-     * a tap retries) — and, where the agent can be booked from the app
-     * ([book]), "Book a call" under them; with none booked, that alone in the
-     * card's place.
-     */
-    private fun renderUpcoming(look: Look, rows: List<UpcomingRow>, callName: String, heading: String, book: Boolean) {
-        upcomingSlot.removeAllViews()
-        upcomingSlot.visibility = if (rows.isEmpty() && !book) GONE else VISIBLE
-        if (rows.isEmpty() && !book) return
-        if (rows.isEmpty()) {
-            upcomingSlot.addView(bookButton(look, standalone = true), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, px(40.0)))
-            return
-        }
-        val t = look.t
-        val c = t.colors
-        val bw = Themed.px(context, t.shape.borderWidth)
-        val pad = Themed.px(context, t.spacing.cardPadding)
-        val card = LinearLayout(context).apply { orientation = VERTICAL }
-        val body = LinearLayout(context).apply { orientation = VERTICAL; Ui.gap(this, Themed.px(context, t.spacing.gap)) }
-        val window = WindowChrome.titleBar(t, WindowChrome.Surface.COMPONENT, heading)
-        val fill = Themed.color(WindowChrome.cardFill(t))
-        val radius = Themed.px(context, t.shape.radius.lg).toFloat()
-        if (window != null) {
-            val bar = WindowTitleBar(context)
-            card.addView(bar, Ui.matchWidth())
-            card.addView(body, Ui.matchWidth())
-            bar.frame(card, body, window, t, fill, radius, bw, Themed.color(c.border), t.elevation.card, pad, pad, pad, pad)
-        } else {
-            Themed.surface(card, t, fill, radius, bw, Themed.color(c.border), t.elevation.card, pad, pad, pad, pad)
-            card.addView(body, Ui.matchWidth())
-            body.addView(TextView(context).apply {
-                text = heading
-                setTextColor(Themed.color(c.textMuted))
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, t.font.scale.caption.toFloat())
-                Themed.face(this, t.font.body, t.font.weights.strong, graine)
-            })
-        }
-        val clock = android.text.format.DateFormat.getTimeFormat(context)
-        val locale = Locale.getDefault()
-        val dayPattern = runCatching { android.text.format.DateFormat.getBestDateTimePattern(locale, "EEEdMMM") }.getOrNull() ?: "EEE d MMM"
-        val day = java.text.SimpleDateFormat(dayPattern, locale)
-        val now = Date()
-        for (row in rows) {
-            val when_ = when {
-                row.cancelling -> UpcomingCalls.CANCELLING
-                row.failed -> UpcomingCalls.CANCEL_FAILED
-                else -> UpcomingCalls.label(row.at, now, TimeZone.getDefault(), { clock.format(it) }, { day.format(it) })
-            }
-            body.addView(LinearLayout(context).apply {
-                orientation = HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                // The disc: the accent, the call icon in onAccent.
-                addView(FrameLayout(context).apply {
-                    background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(look.accent) }
-                    addView(ImageView(context).apply {
-                        setImageDrawable(IconDrawable(SdkIcons.CALL, t.icons.style, t.icons.stroke, look.onAccent, px(16.0)))
-                    }, FrameLayout.LayoutParams(px(16.0), px(16.0), Gravity.CENTER))
-                }, LayoutParams(px(32.0), px(32.0)))
-                addView(LinearLayout(context).apply {
-                    orientation = VERTICAL
-                    addView(TextView(context).apply {
-                        text = when_
-                        maxLines = 1
-                        ellipsize = TextUtils.TruncateAt.END
-                        setTextColor(Themed.color(c.text))
-                        setTextSize(TypedValue.COMPLEX_UNIT_SP, (t.font.scale.body - 1).toFloat())
-                        Themed.face(this, t.font.body, t.font.weights.strong, graine)
-                    })
-                    addView(TextView(context).apply {
-                        text = callName
-                        maxLines = 1
-                        ellipsize = TextUtils.TruncateAt.END
-                        setTextColor(Themed.color(c.textMuted))
-                        setTextSize(TypedValue.COMPLEX_UNIT_SP, t.font.scale.caption.toFloat())
-                        Themed.face(this, t.font.body, t.font.weights.body, graine)
-                    })
-                }, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = px(10.0); rightMargin = px(8.0) })
-                addView(TextView(context).apply {
-                    text = "Cancel"
-                    gravity = Gravity.CENTER
-                    setTextColor(Themed.color(c.text))
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, t.font.scale.caption.toFloat())
-                    Themed.face(this, t.font.body, t.font.weights.strong, graine)
-                    setPadding(px(12.0), 0, px(12.0), 0)
-                    background = Ui.rounded(android.graphics.Color.TRANSPARENT, Themed.px(context, minOf(t.shape.radius.md, 16.0)).toFloat(),
-                        maxOf(1, bw), Themed.color(c.border))
-                    isEnabled = !row.cancelling
-                    isClickable = !row.cancelling
-                    contentDescription = "Cancel the call ${if (when_.isNotEmpty()) when_ else ""}".trim()
-                    setOnClickListener { onCancelCall?.invoke(row.id) }
-                }, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, px(32.0)))
-            }, Ui.matchWidth())
-        }
-        if (book) body.addView(bookButton(look, standalone = false), LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, px(36.0)))
-        upcomingSlot.addView(card, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-    }
-
-    /**
-     * "Book a call" (BOOKING-SHEET.md §4) — opens the booking sheet. In the
-     * card, under its calls: outlined like Cancel, the full width. With no
-     * calls booked, a compact row in the card's place: the same, 40 high on
-     * `surfaceRaised`.
-     */
-    private fun bookButton(look: Look, standalone: Boolean): View {
-        val t = look.t
-        val c = t.colors
-        val bw = Themed.px(context, t.shape.borderWidth)
-        return LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.CENTER
-            Ui.gap(this, px(8.0))
-            background = Ui.rounded(if (standalone) Themed.color(c.surfaceRaised) else android.graphics.Color.TRANSPARENT,
-                Themed.px(context, minOf(t.shape.radius.md, 16.0)).toFloat(), maxOf(1, bw), Themed.color(c.border))
-            isClickable = true
-            isFocusable = true
-            contentDescription = Booking.CHAT_ROW
-            setOnClickListener { onBook?.invoke() }
-            addView(ImageView(context).apply {
-                setImageDrawable(IconDrawable(SdkIcons.CALL, t.icons.style, t.icons.stroke, look.accent, px(16.0)))
-                importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
-            }, LayoutParams(px(16.0), px(16.0)))
-            addView(TextView(context).apply {
-                text = Booking.CHAT_ROW
+                text = pin.title
                 maxLines = 1
-                setTextColor(Themed.color(c.text))
+                ellipsize = TextUtils.TruncateAt.END
+                setTextColor(Themed.color(t.colors.text))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, (t.font.scale.body - 1).toFloat())
                 Themed.face(this, t.font.body, t.font.weights.strong, graine)
-                importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
             })
+            pin.subtitle?.let { sub ->
+                addView(TextView(context).apply {
+                    text = sub
+                    maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END
+                    setTextColor(Themed.color(t.colors.textMuted))
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, t.font.scale.caption.toFloat())
+                    Themed.face(this, t.font.body, t.font.weights.body, graine)
+                })
+            }
+        }, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { topMargin = px(8.0); bottomMargin = px(8.0) })
+        pin.badge?.let { contextRow.addView(PinViews.badge(context, sc, graine, it)) }
+    }
+
+    // ── the reconnect banner ──────────────────────────────────────────────
+
+    private fun renderBanner(sc: ChatScene, isOnline: Boolean, x: ChatExtras, messages: List<GraineChatTurn>) {
+        val waiting = messages.any { it.role == Role.CUSTOMER && it.delivery == GraineChatTurn.Delivery.SENDING }
+        val next = ChatLook.banner(isOnline, x.connecting, x.reconnecting, x.everConnected, waiting)
+        if (next == shownBanner) return
+        val before = shownBanner
+        shownBanner = next
+        if (next == ChatLook.Banner.NONE) {
+            slide(banner, show = false)
+            return
+        }
+        val t = sc.t
+        bannerRow.removeAllViews()
+        Ui.gap(bannerRow, px(6.0))
+        val words = if (next == ChatLook.Banner.RECONNECTING) ChatLook.RECONNECTING else ChatLook.OFFLINE
+        if (next == ChatLook.Banner.RECONNECTING) {
+            bannerRow.addView(GraineLoaderView(context).apply {
+                configure(sc.loader, sc.loaderColor, Themed.color(t.colors.border), ChatLook.BANNER_LOADER, sc.logoUrl)
+            }, Ui.wrap())
+        } else {
+            bannerRow.addView(View(context).apply {
+                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Themed.color(t.colors.warning)) }
+            }, LayoutParams(px(ChatLook.BANNER_DOT), px(ChatLook.BANNER_DOT)))
+        }
+        bannerRow.addView(TextView(context).apply {
+            text = words
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            setTextColor(Themed.color(t.colors.textMuted))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, t.font.scale.caption.toFloat())
+            Themed.face(this, t.font.body, t.font.weights.body, graine)
+        })
+        banner.contentDescription = words
+        if (before == ChatLook.Banner.NONE) slide(banner, show = true)
+        // Said once, politely: calm, never a modal.
+        announceForAccessibility(words)
+    }
+
+    /** In and out over the design's duration, sliding from under the header; none under reduced motion. */
+    private fun slide(v: View, show: Boolean) {
+        val ms = Themed.motionMs(context, scene.t)
+        v.animate().cancel()
+        if (ms <= 0) { v.visibility = if (show) VISIBLE else GONE; v.translationY = 0f; v.alpha = 1f; return }
+        if (show) {
+            v.visibility = VISIBLE
+            v.alpha = 0f
+            v.translationY = -px(ChatLook.BANNER).toFloat()
+            v.animate().alpha(1f).translationY(0f).setDuration(ms).setInterpolator(Themed.interpolator(scene.t.motion)).start()
+        } else {
+            v.animate().alpha(0f).translationY(-v.height.toFloat()).setDuration(ms).withEndAction { v.visibility = GONE; v.translationY = 0f; v.alpha = 1f }.start()
+        }
+    }
+
+    // ── the thread ────────────────────────────────────────────────────────
+
+    /** The live turn being revealed, how much of it is shown, and the last frame's time. */
+    private var revealId: String? = null
+    private var revealShown = 0
+    private var revealAt = 0L
+    private val revealFrame = Choreographer.FrameCallback { now -> revealStep(now) }
+    private var revealPosted = false
+
+    private fun renderThread(
+        sc: ChatScene, pieces: ChatPieces, upcoming: List<UpcomingRow>, callName: String, typing: Boolean, chips: ChatLook.Chips, x: ChatExtras,
+    ) {
+        val s = sc.s
+        val d = s.density
+        // A turn that is only a component draws no bubble: the component is drawn where components are.
+        val turns = pieces.turns.filter { it.text.isNotEmpty() }
+        // A reply just begun starts its reveal before its row is drawn, so it never shows whole first.
+        lastMessages = pieces.turns
+        trackReveal(turns)
+        val rows = ChatRows.build(turns)
+        val positions = ChatLook.positions(rows)
+        val restored = pieces.turns.any { it.restored }
+        val items = ArrayList<ThreadItem>()
+        var after: String? = null
+        fun top(next: String, position: String = ChatRules.SINGLE): Int = if (items.isEmpty()) 0 else px(when {
+            after == "hero" -> ChatLook.HERO_AFTER
+            next == "replies" -> ChatLook.REPLIES_BELOW
+            else -> ChatLook.gapAbove(d, position, s.bubbles.grouping)
+        })
+        fun add(item: ThreadItem, kind: String) { items.add(item); after = kind }
+
+        if (ChatLook.pin(x.pin, s) == "card") add(ThreadItem.Pin(x.pin!!, top("pin")), "pin")
+        if (pieces.upcoming || pieces.book) add(ThreadItem.Upcoming(if (pieces.upcoming) upcoming else emptyList(), pieces.upcomingTitle, callName, pieces.book, top("upcoming")), "upcoming")
+        val welcome = ChatLook.welcome(s, rows.isNotEmpty(), restored)
+        val startersInWelcome = welcome != null && chips.startersInThread
+        if (welcome != null) {
+            add(ThreadItem.Welcome(welcome, if (startersInWelcome) chips.starters else emptyList(), chips.startersAsList, top("welcome")), welcome)
+        }
+        rows.forEachIndexed { i, row ->
+            when (row) {
+                is ChatRows.Row.Day -> add(ThreadItem.Day(row, top("day")), "day")
+                is ChatRows.Row.Voice -> add(ThreadItem.Voice(row, top("voice")), "voice")
+                is ChatRows.Row.Turn -> add(ThreadItem.Bubble(row.turn, positions[i], revealShownFor(row.turn), top("bubble", positions[i])), "bubble")
+            }
+        }
+        if (chips.startersInThread && !startersInWelcome) add(ThreadItem.Starters(chips.starters, chips.startersAsList, top("starters")), "starters")
+        if (chips.repliesInThread) add(ThreadItem.Replies(chips.replies, top("replies")), "replies")
+        if (typing) add(ThreadItem.Typing(top("typing")), "typing")
+        if (ChatLook.rating(s, x.ended)) add(ThreadItem.Rating(s.rating.style, x.rating, top("rating")), "rating")
+
+        // Scrolled up: nothing moves the thread, and what arrives is counted on the pill.
+        val before = adapter.items.mapTo(HashSet()) { it.key }
+        val arrived = items.count { it is ThreadItem.Bubble && it.key !in before }
+        if (!following && arrived > 0 && adapter.items.isNotEmpty()) unseen += arrived
+        val typingStarted = typing && adapter.items.none { it is ThreadItem.Typing }
+        adapter.submit(items)
+        if (typingStarted) announceForAccessibility(ChatLook.typingSpoken(sc.title))
+        drawPill()
+        postReveal()
+    }
+
+    // ── following the newest row, and the pill ────────────────────────────
+
+    /** How far the newest row's bottom is below the list's, dp; far when it is not on screen at all. */
+    private fun distanceFromBottomDp(): Double {
+        val n = adapter.count
+        if (n == 0 || list.childCount == 0) return 0.0
+        if (list.lastVisiblePosition < n - 1) return Double.MAX_VALUE
+        val last = list.getChildAt(list.childCount - 1) ?: return 0.0
+        return maxOf(0, last.bottom - (list.height - list.paddingBottom)) / density.toDouble()
+    }
+
+    private fun updateFollowing() {
+        val now = ChatLook.follows(distanceFromBottomDp())
+        if (now == following) return
+        following = now
+        if (now) unseen = 0
+        // Following: every change lands at the bottom. Reading further up: nothing moves the thread.
+        list.transcriptMode = if (now) AbsListView.TRANSCRIPT_MODE_ALWAYS_SCROLL else AbsListView.TRANSCRIPT_MODE_DISABLED
+        drawPill()
+    }
+
+    private fun drawPill() {
+        val show = !following && adapter.count > 0
+        pill.visibility = if (show) VISIBLE else GONE
+        val count = ChatLook.pillCount(unseen)
+        pillCount.visibility = if (count == null) GONE else VISIBLE
+        pillCount.text = count ?: ""
+        pill.contentDescription = if (count == null) ChatLook.SCROLL_TO_LATEST else "${ChatLook.SCROLL_TO_LATEST}, $count"
+    }
+
+    /** The pill tapped: to the newest row — animated, except under reduced motion — and the pill goes. */
+    private fun toLatest() {
+        val last = adapter.count - 1
+        if (last < 0) return
+        following = true
+        unseen = 0
+        list.transcriptMode = AbsListView.TRANSCRIPT_MODE_ALWAYS_SCROLL
+        if (scene.moves) { pinning = true; list.smoothScrollToPosition(last) } else adapter.notifyDataSetChanged()
+        drawPill()
+    }
+
+    // ── the bottom stack, docked chips and the composer ───────────────────
+
+    /** The bottom stack's place: under the thread for a bar or a pill; floating over its bottom for a capsule. */
+    private fun placeBottom(floating: Boolean) {
+        val want = if (floating) floatSlot else bottomSlot
+        if (bottomStack.parent === want) return
+        (bottomStack.parent as? ViewGroup)?.removeView(bottomStack)
+        want.addView(bottomStack, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
+        clearFloating()
+    }
+
+    /** What floats over the thread's bottom, px: the floating composer and what docks with it. */
+    private fun floatingUnder(): Int = if (bottomStack.parent === floatSlot) floatSlot.height else 0
+
+    /**
+     * A floating composer's thread scrolls under it, and its last row clears
+     * it; the pill sits 8 above it. Above the voice bar the thread's height
+     * cap is for what shows, so it grows by what floats over it.
+     */
+    private fun clearFloating() {
+        val edge = px(scene.s.density.edge)
+        val under = floatingUnder()
+        list.setPadding(0, edge, 0, edge + under)
+        if (!page) list.maxHeightPx = px(capDp) + under
+        (pill.layoutParams as FrameLayout.LayoutParams).bottomMargin = px(ChatLook.PILL_ABOVE) + under
+        pill.requestLayout()
+        // Still at the newest row when it followed.
+        if (following) adapter.notifyDataSetChanged()
+    }
+
+    private var drawnChips: Pair<ChatLook.Chips, ChatScene>? = null
+
+    /** Starters (and, `above-composer`, the quick replies) docked above the composer, on the customer's side. */
+    private fun renderDocked(sc: ChatScene, chips: ChatLook.Chips) {
+        val show = chips.startersDocked || chips.repliesDocked
+        docked.visibility = if (show) VISIBLE else GONE
+        if (!show) { drawnChips = null; return }
+        if (drawnChips == chips to sc) return
+        drawnChips = chips to sc
+        docked.removeAllViews()
+        val rows = ThreadRows(context, this, sc)
+        val views = if (chips.repliesDocked) chips.replies.map { r -> rows.chip(r.label) { quickReply(r) } }
+            else chips.starters.map { w -> rows.chip(w) { starter(w) } }
+        val edge = px(ChatLook.CHIP_EDGE)
+        val row = rows.chipRow(views, trailing = true, edgeIn = edge)
+        docked.addView(row, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        docked.setPadding(0, 0, 0, px(ChatLook.CHIP_ABOVE) - px(4.0))
+        // Over a strip, the strip's colour (v1: the chat's background, solid over any pattern); floating, nothing.
+        val strip = sc.s.composer.strip
+        if (strip != null) docked.setBackgroundColor(Themed.color(strip)) else docked.background = null
+    }
+
+    private fun styleComposer(sc: ChatScene) {
+        val t = sc.t
+        val s = sc.s
+        val cp = s.composer
+        val bw = Themed.px(context, t.shape.borderWidth)
+        val floating = cp.style == "floating"
+        placeBottom(floating)
+        (field.parent as? ViewGroup)?.removeView(field)
+        (send.parent as? ViewGroup)?.removeView(send)
+        (attach.parent as? ViewGroup)?.removeView(attach)
+        (composerCall.parent as? ViewGroup)?.removeView(composerCall)
+        (fieldBox.parent as? ViewGroup)?.removeView(fieldBox)
+        (capsule.parent as? ViewGroup)?.removeView(capsule)
+        composerRow.removeAllViews()
+        fieldBox.removeAllViews()
+        capsule.background = null
+        capsule.clipToOutline = false
+        capsule.elevation = 0f
+
+        // The field: its fill, outline and corners; the words, the placeholder.
+        field.hint = sc.chat.placeholder
+        field.setTextColor(Themed.color(cp.text))
+        field.setHintTextColor(Themed.color(cp.placeholder))
+        field.setTextSize(TypedValue.COMPLEX_UNIT_SP, (t.font.scale.body - 1).toFloat())
+        Themed.face(field, t.font.body, t.font.weights.body, graine)
+        val fieldFill = if (s.glass != null && floating) Themed.alpha(Themed.color(cp.fill), s.glass.opacity) else Themed.color(cp.fill)
+        val fieldRadius = Themed.px(context, cp.radius).toFloat()
+        fieldBox.background = Ui.rounded(fieldFill, fieldRadius, bw, Themed.color(cp.border))
+        fieldBox.minimumHeight = px(cp.height)
+        attachIcon.setImageDrawable(IconDrawable(SdkIcons.ATTACH, t.icons.style, t.icons.stroke, Themed.color(cp.icon), px(ChatLook.SIDE_ICON)))
+        composerCallIcon.setImageDrawable(IconDrawable(SdkIcons.CALL, t.icons.style, t.icons.stroke, Themed.color(cp.icon), px(ChatLook.SIDE_ICON)))
+        val side = px(ChatLook.SIDE_TARGET)
+        composerFrost.visibility = if (floating && s.glass != null) VISIBLE else GONE
+        composerBox.elevation = 0f
+        when (cp.style) {
+            "pill", "floating" -> {
+                // The send button inside the field at its trailing end; the paperclip and the call button inside at its leading end.
+                val inset = px(if (floating) ChatLook.SEND_INSET_FLOATING else ChatLook.SEND_INSET_PILL)
+                fieldBox.setPadding(inset, 0, inset, 0)
+                fieldBox.addView(attach, LayoutParams(side, side))
+                fieldBox.addView(composerCall, LayoutParams(side, side))
+                fieldBox.addView(field, LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+                fieldBox.addView(send, Ui.wrap())
+                field.setPadding(px(10.0), 0, px(6.0), 0)
+                if (floating) {
+                    // One raised capsule, 10 above the window's bottom and 10 in from its sides; no strip. Its fill (frosted
+                    // with glass), outline and shadow are the capsule's; the field inside it is bare.
+                    // The room under and beside it is the row's padding: a margin would shift the centred capsule off its row.
+                    val m = px(ChatLook.FLOATING_INSET)
+                    composerRow.background = null
+                    composerRow.setPadding(m, 0, m, m)
+                    // The capsule clips its frost and its field to its corners; the field's own fill (frosted) and outline draw over
+                    // the frost. The capsule's outline, from its own size, casts the shadow.
+                    capsule.background = null
+                    capsuleRadiusPx = fieldRadius
+                    capsule.outlineProvider = object : ViewOutlineProvider() {
+                        override fun getOutline(view: View, outline: Outline) {
+                            outline.setRoundRect(0, 0, view.width, view.height, minOf(capsuleRadiusPx, view.height / 2f))
+                        }
+                    }
+                    capsule.clipToOutline = true
+                    capsule.addView(fieldBox, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                    composerRow.addView(capsule, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                    composerBox.background = null
+                    // A translucent (glass) capsule casts no shadow, as the platform rules for any translucent fill.
+                    if (s.glass == null) Themed.shadow(capsule, cp.shadow)
+                    composerRow.minimumHeight = 0
+                } else {
+                    composerRow.setBackgroundColor(Themed.color(cp.strip ?: s.wallpaper.color))
+                    composerRow.setPadding(px(VoiceBar.COMPOSER_PAD), 0, px(VoiceBar.COMPOSER_PAD), 0)
+                    composerRow.minimumHeight = px(ChatLook.STRIP_PILL)
+                    composerRow.addView(fieldBox, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                    fieldBox.elevation = 0f
+                }
+            }
+            else -> {
+                // The bar (v1): a strip 58 high; the paperclip and the call button before the field; the send button 40, 10 from the sides, 8 apart.
+                composerRow.setBackgroundColor(Themed.color(cp.strip ?: s.wallpaper.color))
+                composerRow.setPadding(px(VoiceBar.COMPOSER_PAD), 0, px(VoiceBar.COMPOSER_PAD), 0)
+                composerRow.minimumHeight = px(ChatLook.STRIP_BAR)
+                Ui.gap(composerRow, px(VoiceBar.COMPOSER_GAP))
+                composerRow.addView(attach, LayoutParams(side, side))
+                composerRow.addView(composerCall, LayoutParams(side, side))
+                fieldBox.setPadding(0, 0, 0, 0)
+                fieldBox.addView(field, LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+                field.setPadding(px(VoiceBar.FIELD_PAD), 0, px(VoiceBar.FIELD_PAD), 0)
+                composerRow.addView(fieldBox, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                composerRow.addView(send, Ui.wrap())
+                fieldBox.elevation = 0f
+            }
+        }
+        if (cp.style != "bar") composerRow.showDividers = SHOW_DIVIDER_NONE
+    }
+
+    private fun renderComposer(sc: ChatScene) {
+        attach.visibility = if (composer.attach) VISIBLE else GONE
+        composerCall.visibility = if (composer.call) VISIBLE else GONE
+        composerCall.contentDescription = ChatLook.callLabel(sc.title)
+        drawSend()
+    }
+
+    /** The send button as it stands: the microphone while the field is empty (where the composer calls), else send. */
+    private fun drawSend() {
+        val sc = scene
+        val t = sc.t
+        val cp = sc.s.composer
+        val st = ChatLook.send(composer, field.text.isNullOrBlank(), sc.title)
+        // A host's accent (the bar's own) still paints the classic send button.
+        val fill = cp.sendFill?.let { if (Design.normaliseHex(it) == Design.normaliseHex(t.colors.accent)) sc.accent else Themed.color(it) }
+        val ink = if (Design.normaliseHex(cp.sendIcon) == Design.normaliseHex(t.colors.onAccent) && fill == sc.accent) sc.onAccent else Themed.color(cp.sendIcon)
+        val iconDp = if (cp.send == "icon") ChatLook.SEND_ICON_ONLY else VoiceBar.ICON
+        val drawable = IconDrawable(st.icon, t.icons.style, t.icons.stroke, ink, px(iconDp), mirrored = sc.rtl && st.icon == SdkIcons.SEND)
+        send.draw(ChatLook.sendSide(composer), if (cp.send == "icon") null else fill, ChatLook.sendCorners(cp.send, t.shape.radius.md), drawable, iconDp,
+            st.label, st.enabled)
+    }
+
+    // ── the reveal ────────────────────────────────────────────────────────
+
+    /** How much of a turn to draw: its revealed part while the reveal runs, else all of it (null). */
+    private fun revealShownFor(turn: GraineChatTurn): Int? = if (turn.id == revealId && revealShown < turn.text.length) revealShown else null
+
+    /**
+     * A reply still arriving is revealed smoothly, at least 90 characters a
+     * second and never far behind ([ChatRules.revealLength]); when the turn
+     * ends the rest is revealed at the same pace, then drawn whole. Only the
+     * live turn animates; nothing does when the design or the phone says no motion.
+     */
+    private fun trackReveal(turns: List<GraineChatTurn>) {
+        val last = turns.lastOrNull { it.role == Role.AGENT }
+        if (!scene.moves || last == null) { revealId = null; return }
+        if (last.live && last.id != revealId) {
+            revealId = last.id
+            revealShown = 0
+            revealAt = System.nanoTime()
+        }
+    }
+
+    /** The next frame of the reveal, while the turn being revealed has more to show. */
+    private fun postReveal() {
+        val id = revealId ?: return
+        val turn = lastMessages.lastOrNull { it.id == id } ?: return
+        if (revealShown < turn.text.length && !revealPosted) {
+            revealPosted = true
+            Choreographer.getInstance().postFrameCallback(revealFrame)
+        }
+    }
+
+    private fun revealStep(nowNanos: Long) {
+        revealPosted = false
+        val id = revealId ?: return
+        val turn = lastMessages.lastOrNull { it.id == id } ?: run { revealId = null; return }
+        val elapsed = (nowNanos - revealAt) / 1_000_000.0
+        revealAt = nowNanos
+        revealShown = ChatRules.revealLength(revealShown.toDouble(), turn.text.length.toDouble(), elapsed)
+        val i = adapter.items.indexOfFirst { it.key == "turn-$id" }
+        if (i >= 0) {
+            val item = adapter.items[i] as ThreadItem.Bubble
+            val next = adapter.items.toMutableList()
+            next[i] = item.copy(turn = turn, shown = if (revealShown < turn.text.length) revealShown else null)
+            adapter.submit(next)
+        }
+        if (revealShown < turn.text.length) { revealPosted = true; Choreographer.getInstance().postFrameCallback(revealFrame) }
+        else if (!turn.live) revealId = null
+    }
+
+    override fun onDetachedFromWindow() {
+        if (revealPosted) { Choreographer.getInstance().removeFrameCallback(revealFrame); revealPosted = false }
+        super.onDetachedFromWindow()
+    }
+
+    /** Right to left now (or no longer): the speaker's sides, tails, the header's gradient and the send icon mirror. */
+    override fun onRtlPropertiesChanged(layoutDirection: Int) {
+        super.onRtlPropertiesChanged(layoutDirection)
+        if (redraw == null) return  // nothing drawn yet (the first render reads the direction itself)
+        if ((layoutDirection == View.LAYOUT_DIRECTION_RTL) != scene.rtl) post { redraw?.invoke() }
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        postReveal()
+    }
+
+    // ── the wallpaper's surface and the frost's places ────────────────────
+
+    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+        super.onLayout(changed, l, t, r, b)
+        val wall = wallpaper ?: return
+        val s = scene.s
+        // One surface: from the header when it has no fill of its own, else the thread; to the window's bottom when the composer floats.
+        val top = if (s.header.style == "plain" && headerBox.visibility == VISIBLE) headerBox.top else body.top
+        wall.surfaceTop = (column.top + top).toFloat()
+        wall.surfaceBottom = if (s.composer.style == "floating") inner.height.toFloat() else (column.top + body.bottom).toFloat()
+        for (f in listOf(headerFrost, contextFrost, bannerFrost, composerFrost)) {
+            if (f.visibility != VISIBLE) continue
+            var x = 0f
+            var y = 0f
+            var v: View? = f
+            while (v != null && v !== inner) { x += v.left + v.translationX; y += v.top + v.translationY; v = v.parent as? View }
+            f.dx = x
+            f.dy = y
+            f.hostW = inner.width
+            f.hostH = inner.height
+            f.invalidate()
         }
     }
 
@@ -774,7 +1068,7 @@ internal class ChatWindowView(
         /** What the status says when nothing could connect, and a tap retries. */
         const val FAILED_TEXT = "Couldn’t connect · tap to retry"
         /** Under a message the chat could not deliver; a tap retries. */
-        const val NOT_SENT = "Not sent · tap to retry"
+        const val NOT_SENT = ChatLook.NOT_SENT
         /** The typing indicator's dots, dp. */
         const val TYPING_DOTS = 14
         const val DOT_GAP = 6
@@ -784,31 +1078,4 @@ internal class ChatWindowView(
         const val STARTER_GAP = 8
         const val STARTER_HEIGHT = 34.0
     }
-}
-
-/**
- * The thread's dots — DESIGN.md "Chat window" → Thread: dots 2 across in
- * `chat.patternColor` on an 18-point grid, the first centred 9 in from the
- * top-left, over the chat's background.
- */
-internal class DotsDrawable(private val background: Int, color: Int, private val density: Float) : Drawable() {
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color; style = Paint.Style.FILL }
-
-    override fun draw(canvas: Canvas) {
-        val b = bounds
-        canvas.drawColor(background)
-        val step = 18f * density
-        val radius = 1f * density
-        var y = b.top + 9f * density
-        while (y < b.bottom) {
-            var x = b.left + 9f * density
-            while (x < b.right) { canvas.drawCircle(x, y, radius, paint); x += step }
-            y += step
-        }
-    }
-
-    override fun setAlpha(alpha: Int) { paint.alpha = alpha }
-    override fun setColorFilter(colorFilter: ColorFilter?) { paint.colorFilter = colorFilter }
-    @Deprecated("Deprecated in Java")
-    override fun getOpacity(): Int = PixelFormat.OPAQUE
 }

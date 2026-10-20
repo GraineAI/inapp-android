@@ -290,6 +290,8 @@ class GraineWidgetView @JvmOverloads constructor(
         val dash = Appearance.resolve(appearance, Appearance.DEFAULT_ACCENT, "", origin = graine?.config?.baseUrl)
         /** The design's tokens for this view's light or dark. Null: no design. */
         val tokens: ThemeTokens? = graine?.themeTokens(context, host.scheme)
+        /** The chat window's cards (contract/DESIGN.md "Chat window v2" → Cards): the classic card from a design before v2. */
+        val cards: ChatStyleCards? = tokens?.let { Surfaces.styleOf(it).cards }
         val grammar: PlatformGrammar = Widgets.GRAMMAR.getValue(Widgets.resolvePlatform(look?.platform ?: "auto", "android", Build.MANUFACTURER))
         /** A platform chosen on the component is the component's own style: its grammar wins over the design. */
         private val pinned = look != null && look.platform != "auto"
@@ -299,7 +301,7 @@ class GraineWidgetView @JvmOverloads constructor(
         private val designAccent = tokens != null && host.accent == null && look?.accent == null
         /** dp. Host override, then the component's own, then a pinned platform's, then the design's, then the dashboard's. */
         val radius: Int = host.radius ?: look?.radius ?: (if (pinned) grammar.radius
-            else tokens?.let { Math.round(it.shape.radius.lg).toInt() } ?: Math.round(dash.radius).toInt())
+            else cards?.let { Math.round(it.radius).toInt() } ?: Math.round(dash.radius).toInt())
         /** Nothing more specific than the design chose the corners. */
         private val designCorners = tokens != null && host.radius == null && look?.radius == null && !pinned
         private val palette = Appearance.palette(host.scheme?.let { JSONObject().put("theme", it) } ?: appearance, Ui.isDeviceDark(context), accentHex)
@@ -355,15 +357,32 @@ class GraineWidgetView @JvmOverloads constructor(
         fun label(s: CharSequence, sp: Float, color: Int, weight: Int = 400, lines: Int = 0, role: Themed.Role? = null): TextView =
             Ui.text(context, s, sp, color, weight, lines).also { tv -> tokens?.let { Themed.type(tv, it, role, graine, sp, weight) } }
 
-        /** A card: raised, outlined, with the design's card shadow or hard offset. */
+        /**
+         * A card: raised, outlined when the chat's cards are, with their shadow — or the design's hard offset where
+         * they draw it (classic: the design's own card, as before).
+         */
         fun card(v: View, radiusPx: Float, l: Int, t: Int, r: Int, b: Int, legacyElevation: Int = 0) {
             val tk = tokens
-            if (tk == null) {
+            val c = cards
+            if (tk == null || c == null) {
                 v.background = Ui.rounded(raised, radiusPx, dp(1), border)
                 v.setPadding(l, t, r, b)
                 if (legacyElevation > 0) v.elevation = dp(legacyElevation).toFloat()
-            } else Themed.surface(v, tk, raised, radiusPx, line, border, tk.elevation.card, l, t, r, b)
+            } else {
+                val hard = c.hard && tk.elevation.hardOffset != null
+                val drawn = if (hard) tk else tk.copy(elevation = tk.elevation.copy(hardOffset = null))
+                Themed.surface(v, drawn, raised, radiusPx, if (c.border) line else 0, border, if (hard) null else c.shadow, l, t, r, b)
+            }
         }
+
+        /**
+         * A component's main button where its own look says filled, drawn as the chat's cards say (filled, outline,
+         * tonal, text) — unless the component (or the host) chose its own accent or pinned a platform: its own style wins.
+         */
+        val mainButton: ChatLook.Button? = cards?.takeIf { !pinned && host.accent == null && look?.accent == null }?.let { ChatLook.mainButton(it) }
+
+        /** A component's large image: its own height, or the shape the chat's cards give it (always 100–260). */
+        val imageShape: String = cards?.image ?: "auto"
     }
 
     private fun dp(v: Int) = Ui.dp(context, v)
@@ -893,7 +912,18 @@ class GraineWidgetView @JvmOverloads constructor(
             minHeight = dp(44)
             setPadding(dp(if (wide) 12 else 14), 0, dp(if (wide) 12 else 14), 0)
             val radius = s.button(pill = !wide)
+            val main = s.mainButton
             background = if (r.unavailable || outline) Ui.rounded(Color.TRANSPARENT, radius, if (s.tokens != null) maxOf(s.line, dp(1)) else dp(1.5f), if (r.unavailable) s.border else s.accent)
+            else if (main != null) {
+                // The chat's main-button treatment: filled, outline, tonal or the words alone.
+                setTextColor(Themed.color(main.text))
+                if (main.strong) s.tokens?.let { Themed.face(this, it.font.body, it.font.weights.strong, graine) }
+                when {
+                    main.border != null -> Ui.rounded(Color.TRANSPARENT, radius, maxOf(s.line, dp(1)), Themed.color(main.border))
+                    main.fill != null -> Ui.rounded(Themed.color(main.fill), radius)
+                    else -> null
+                }
+            }
             else Ui.rounded(s.accent, radius)
             contentDescription = a11y
             isEnabled = !r.unavailable
@@ -903,6 +933,18 @@ class GraineWidgetView @JvmOverloads constructor(
 
         fun image(w: Int, h: Int): View? = if (r.image.isEmpty()) null
         else roundedImage(context, r.image, s.picture, s.border).also { it.layoutParams = LayoutParams(w, h) }
+
+        /** The large picture on top: its own height, or the chat's card image shape — as tall as wide, 3:4 or 9:16 — always 100–260. */
+        fun largeImage(ownDp: Int): View? = if (r.image.isEmpty()) null
+        else if (s.imageShape == "auto") image(ViewGroup.LayoutParams.MATCH_PARENT, dp(ownDp))
+        else ShapedImage(context, s.imageShape, ownDp.toDouble()).apply {
+            scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+            background = android.graphics.drawable.GradientDrawable().apply { setColor(s.border); cornerRadius = s.picture }
+            clipToOutline = true
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            ImageLoader.load(this, r.image)
+            layoutParams = LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        }
 
         fun frame(v: LinearLayout, bordered: Boolean): View {
             if (bordered) v.background = Ui.rounded(Color.TRANSPARENT, corner, if (s.tokens == null) dp(if (picked == true) 2 else 1) else if (picked == true) s.line * 2 else s.line, if (picked == true) s.accent else s.border)
@@ -919,7 +961,7 @@ class GraineWidgetView @JvmOverloads constructor(
         when (variant) {
             "hero" -> {
                 val col = Ui.vertical(context, gap).apply { setPadding(pad, pad, pad, pad) }
-                image(ViewGroup.LayoutParams.MATCH_PARENT, dp(mapOf("small" to 100, "medium" to 140, "large" to 180).getValue(look.imageSize)))?.let { col.addView(it) }
+                largeImage(mapOf("small" to 100, "medium" to 140, "large" to 180).getValue(look.imageSize))?.let { col.addView(it) }
                 val words = Ui.vertical(context, dp(3))
                 badge()?.let { words.addView(it) }
                 words.addView(titleLine(true), Ui.matchWidth())
@@ -1045,6 +1087,16 @@ class GraineWidgetView @JvmOverloads constructor(
 }
 
 /** A 1px line along the bottom edge — a list row's separator. */
+/** A picture as tall as its width says ([ChatLook.imageHeight]): square, 3:4 or 9:16, never under 100 or over 260. */
+private class ShapedImage(context: Context, private val shape: String, private val ownDp: Double) : android.widget.ImageView(context) {
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val w = MeasureSpec.getSize(widthMeasureSpec)
+        val d = resources.displayMetrics.density
+        val h = Math.round(ChatLook.imageHeight(shape, w / d.toDouble(), ownDp) * d).toInt()
+        setMeasuredDimension(w, h)
+    }
+}
+
 private class Hairline(color: Int, private val thickness: Int) : android.graphics.drawable.Drawable() {
     private val paint = android.graphics.Paint().apply { this.color = color }
     override fun draw(canvas: android.graphics.Canvas) {

@@ -39,6 +39,20 @@ internal object SdkIcons {
     const val COMPOSE = "compose"
     /** The call screen's loudspeaker. */
     const val SPEAKER = "speaker"
+    // The chat window v2's own (contract/DESIGN.md "Chat window v2").
+    /** The composer's paperclip. */
+    const val ATTACH = "attach"
+    /** The rating's thumbs and star. */
+    const val THUMB_UP = "thumbUp"
+    const val THUMB_DOWN = "thumbDown"
+    const val STAR = "star"
+    /** The scroll-to-latest pill. */
+    const val ARROW_DOWN = "arrowDown"
+    /** A message's marks: sent, waiting for a connection, not sent. */
+    const val CHECK = "check"
+    const val CLOCK = "clock"
+    const val ALERT = "alert"
+    const val RETRY = "retry"
 
     /** design.json → icons, verbatim. */
     val ALL: Map<String, SdkIcon> = linkedMapOf(
@@ -64,6 +78,25 @@ internal object SdkIcons {
         CLOSE to SdkIcon(body = null, lines = "M6 6l12 12M18 6 6 18"),
         COMPOSE to SdkIcon(body = null, lines = "M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M18.4 2.6a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4z"),
         SPEAKER to SdkIcon(body = "M4 9.5h3.5L12 5.5v13l-4.5-4H4z", lines = "M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"),
+        // Paperclip, thumbs and star from Lucide (ISC).
+        ATTACH to SdkIcon(body = null, lines = "M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"),
+        THUMB_UP to SdkIcon(
+            body = "M15 5.88L14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88z",
+            lines = "M7 10v12",
+        ),
+        THUMB_DOWN to SdkIcon(
+            body = "M9 18.12L10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88z",
+            lines = "M17 14V2",
+        ),
+        STAR to SdkIcon(
+            body = "M11.525 2.295a0.53 0.53 0 0 1 0.95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166 0.756a0.53 0.53 0 0 1 0.294 0.904l-3.736 3.638a2.123 2.123 0 0 0 -0.611 1.878l0.882 5.14a0.53 0.53 0 0 1 -0.771 0.56l-4.618 -2.428a2.122 2.122 0 0 0 -1.973 0L6.396 21.01a0.53 0.53 0 0 1 -0.77 -0.56l0.881 -5.139a2.122 2.122 0 0 0 -0.611 -1.879L2.16 9.795a0.53 0.53 0 0 1 0.294 -0.906l5.165 -0.755a2.122 2.122 0 0 0 1.597 -1.16z",
+            lines = null,
+        ),
+        ARROW_DOWN to SdkIcon(body = null, lines = "M12 5v14M19 12l-7 7-7-7"),
+        CHECK to SdkIcon(body = null, lines = "M20 6L9 17l-5-5"),
+        CLOCK to SdkIcon(body = "M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18z", lines = "M12 7.5V12l3 2"),
+        ALERT to SdkIcon(body = "M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18z", lines = "M12 7.5v5M12 16.25v0.01"),
+        RETRY to SdkIcon(body = null, lines = "M3 12a9 9 0 0 1 15.36-6.36L21 8M21 3v5h-5M21 12a9 9 0 0 1-15.36 6.36L3 16M3 21v-5h5"),
     )
 
     /**
@@ -293,14 +326,22 @@ internal class IconDrawable(
     private val sizePx: Int,
     /** Turned 180° — the chat header's chevron, pointing down. */
     private val flipped: Boolean = false,
+    /** Mirrored left to right — the send icon in a right-to-left language. */
+    private val mirrored: Boolean = false,
+    /** Turned this many degrees about its centre — a list row's chevron, pointing to the trailing side. */
+    private val rotation: Float = 0f,
+    /** The body filled whatever the icon style — a chosen star. */
+    filled: Boolean = false,
 ) : Drawable() {
     /** One of [SdkIcons.ALL], by name. */
-    constructor(name: String, style: String?, stroke: Double, color: Int, sizePx: Int, flipped: Boolean = false) :
-        this(SdkIcons.ALL[name], style, stroke, color, sizePx, flipped)
+    constructor(
+        name: String, style: String?, stroke: Double, color: Int, sizePx: Int, flipped: Boolean = false,
+        mirrored: Boolean = false, rotation: Float = 0f, filled: Boolean = false,
+    ) : this(SdkIcons.ALL[name], style, stroke, color, sizePx, flipped, mirrored, rotation, filled)
 
     private val body = icon?.body?.let { SvgPath.path(it) }
     private val lines = icon?.lines?.let { SvgPath.path(it) }
-    private val treatment = SdkIcons.treatment(style, stroke)
+    private val treatment = SdkIcons.treatment(style, stroke).let { if (filled) it.copy(bodyFillAlpha = 1.0) else it }
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.style = Paint.Style.FILL }
     private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         this.style = Paint.Style.STROKE
@@ -317,6 +358,8 @@ internal class IconDrawable(
         canvas.translate(b.left.toFloat(), b.top.toFloat())
         canvas.scale(b.width() / 24f, b.height() / 24f)
         if (flipped) canvas.rotate(180f, 12f, 12f)
+        if (rotation != 0f) canvas.rotate(rotation, 12f, 12f)
+        if (mirrored) canvas.scale(-1f, 1f, 12f, 12f)
         line.alpha = scaled(color ushr 24, 1.0)
         body?.let { p ->
             if (treatment.bodyFillAlpha > 0) {

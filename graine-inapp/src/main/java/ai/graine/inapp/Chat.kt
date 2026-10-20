@@ -56,6 +56,35 @@ data class GraineChatTurn @JvmOverloads constructor(
 }
 
 /**
+ * One reply the agent suggests for the turn it just sent: the words on the
+ * chip ([label]) and what a tap sends as the customer's own message ([text]).
+ */
+data class GraineQuickReply(val label: String, val text: String)
+
+/**
+ * The customer's answer to "How was this chat?", asked once the agent ended
+ * the conversation. [style] is "thumbs", "stars" or "emoji"; thumbs are
+ * [value] 1 (up) or 0 (down) of [scale] 1, stars and faces 1–5 of 5.
+ */
+data class GraineChatRating(val value: Int, val scale: Int, val style: String)
+
+/**
+ * WHAT THE CONVERSATION IS ABOUT — a card the app pins to the chat window
+ * ([GraineChat.pin]): an item, an appointment, a ticket. Drawn as a bar under
+ * the header or as a card atop the thread, as the design says; never sent to
+ * the agent (tell the agent about the screen with the screen context). Each
+ * line is one line: [title] at most 60 characters, [subtitle] 80, [badge] 24.
+ */
+data class GraineChatPin @JvmOverloads constructor(
+    val title: String,
+    val subtitle: String? = null,
+    /** A picture for the thumbnail, filled and cropped; none draws the title's first letter. */
+    val imageUrl: String? = null,
+    /** A short word at the trailing end ("Active", "2 items"). */
+    val badge: String? = null,
+)
+
+/**
  * A TEXT CONVERSATION A CHAT WINDOW CAN DRAW — GraineAgentBarView's chat and
  * GraineChatView read one. The SDK's own is [GraineChat] (`GraineInApp.get().chat`),
  * the default everywhere; an app with a conversation of its own implements this.
@@ -70,6 +99,16 @@ interface ChatSource {
     val typing: Boolean get() = false
     /** Nothing could connect the conversation: the window says so and a send tries again. */
     val failed: Boolean get() = false
+    /** A dropped conversation is being made again: the window says "Reconnecting…". */
+    val reconnecting: Boolean get() = false
+    /** The replies the agent suggests for its latest turn, drawn as chips; a tap sends one as the customer's message. */
+    val quickReplies: List<GraineQuickReply> get() = emptyList()
+    /** The agent ended the conversation: the window asks for a rating where the design does. A message from the customer starts over. */
+    val ended: Boolean get() = false
+    /** The customer's answer to the rating, once given. */
+    val rating: GraineChatRating? get() = null
+    /** The customer answered the rating: thumbs 1/0, stars and emoji 1–5. Taken once, and only after the end; null when not taken. */
+    fun rate(style: String, value: Int): GraineChatRating? = null
     fun send(text: String)
     /** A chat window showing this conversation came on screen (`true`) or left it. A source with a connection opens it here. */
     fun shown(visible: Boolean) {}
@@ -92,6 +131,9 @@ internal object ChatFrames {
     /** `{type:"widget_result", widget_id, data}` — the structured half of a component's answer; the text turn follows. */
     fun widgetResult(widgetId: String, data: Map<String, Any?>): String =
         JSONObject().put("type", "widget_result").put("widget_id", widgetId).put("data", Protocol.toJson(data)).toString()
+
+    /** The customer's rating, as the quiet `chat_rating` app event (protocol.ts chatRatingFrame). */
+    fun rating(r: GraineChatRating): String = ChatRules.ratingFrame(r).toString()
 }
 
 /** Everything a text socket can deliver, typed. */
@@ -102,6 +144,10 @@ internal sealed class ChatInbound {
     data class Widget(val widget: JSONObject) : ChatInbound()
     data class WidgetPending(val hint: JSONObject) : ChatInbound()
     data class Action(val actionId: String, val name: String, val arguments: JSONObject) : ChatInbound()
+    /** The replies the agent suggests for its turn, cleaned (ChatRules.readQuickReplies); an empty list takes them away. */
+    data class QuickReplies(val replies: List<GraineQuickReply>) : ChatInbound()
+    /** The agent ended the conversation: the window may ask for a rating. */
+    object ConversationEnd : ChatInbound()
     object TurnStart : ChatInbound()
     object TurnEnd : ChatInbound()
     object Ignored : ChatInbound()
@@ -120,6 +166,9 @@ internal sealed class ChatInbound {
                 "end_of_stream" -> TurnEnd
                 // A history whose turns are not a list is not one: ignored, never an error.
                 "history" -> ChatHistory.read(o)?.let { History(it) } ?: Ignored
+                // Chat window v2 (contract/DESIGN.md "Wire"): replies whose `replies` is not a list are no news.
+                "quick_replies" -> ChatRules.readQuickReplies(o)?.let { QuickReplies(it) } ?: Ignored
+                "conversation_end" -> ConversationEnd
                 else -> Ignored
             }
         }
@@ -212,6 +261,10 @@ internal interface ChatSessionEvents {
     fun onWidgetPending(hint: JSONObject) {}
     /** The earlier conversation, restored, before any agent message: never the agent speaking now. */
     fun onHistory(turns: List<GraineChatTurn>) {}
+    /** The agent suggested replies for its turn; an empty list takes them away. */
+    fun onQuickReplies(replies: List<GraineQuickReply>) {}
+    /** The agent ended the conversation (after closing whatever turn was open). */
+    fun onConversationEnd() {}
 }
 
 internal class ChatSessionDeps(
@@ -282,6 +335,11 @@ internal class TextChatSession(
     /** Something the agent may speak up about (friction, a component closed, an in-app action that failed). */
     fun reportEvent(name: String, data: Map<String, Any?>) = scheduler.post {
         if (phase == Phase.OPEN) send(ChatFrames.appEvent(name, data))
+    }
+
+    /** The customer's rating, quiet. Best effort, as the other SDKs: with no connection it is announced to the app, not kept. */
+    fun rate(rating: GraineChatRating) = scheduler.post {
+        if (phase == Phase.OPEN) send(ChatFrames.rating(rating))
     }
 
     /**
@@ -444,6 +502,12 @@ internal class TextChatSession(
             is ChatInbound.WidgetPending -> events.onWidgetPending(f.hint)
             is ChatInbound.History -> events.onHistory(f.turns)
             is ChatInbound.Action -> runAction(f)
+            is ChatInbound.QuickReplies -> events.onQuickReplies(f.replies)
+            ChatInbound.ConversationEnd -> {
+                // The open turn is over with the conversation: its words are complete.
+                if (inTurn) { inTurn = false; events.onAgentTurnEnd() }
+                events.onConversationEnd()
+            }
             ChatInbound.Ignored -> Unit
         }
     }
@@ -508,6 +572,9 @@ internal class ChatTranscript(private val cap: Int = MAX_LINES) {
     /** The agent is working on a reply: the customer is waiting on one, or a turn has begun with no words yet. */
     val typing: Boolean get() = awaitingUntil != null ||
         list.lastOrNull()?.let { it.role == Role.AGENT && it.live && it.text.isEmpty() && it.component == null } == true
+
+    /** The agent's turn is open: words arriving now go into it rather than starting a new one. */
+    val agentLive: Boolean get() = list.lastOrNull()?.let { it.role == Role.AGENT && it.live } == true
 
     /** The customer's line. Whatever the agent was writing is finished: they have moved on. Returns the turn's id. */
     fun customer(text: String, now: Long, wallMs: Long = now, delivery: GraineChatTurn.Delivery = GraineChatTurn.Delivery.SENT): String {

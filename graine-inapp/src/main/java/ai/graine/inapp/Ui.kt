@@ -288,6 +288,12 @@ internal object Themed {
 internal class FlowRow(context: Context, private val gapH: Int, private val gapV: Int) : ViewGroup(context) {
     var alignEnd = false
         set(v) { field = v; requestLayout() }
+    /** Each row placed from the right, first child rightmost — a right-to-left language's reading order. */
+    var rightToLeft = false
+        set(v) { field = v; requestLayout() }
+    /** Each row centred (a hero's starters). */
+    var center = false
+        set(v) { field = v; requestLayout() }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val mode = MeasureSpec.getMode(widthMeasureSpec)
@@ -323,9 +329,10 @@ internal class FlowRow(context: Context, private val gapH: Int, private val gapV
         var y = 0
         for (row in rows) {
             val width = row.sumOf { it.measuredWidth } + gapH * (row.size - 1)
-            var cx = if (alignEnd) maxOf(0, maxW - width) else 0
+            var cx = if (center) maxOf(0, (maxW - width) / 2) else if (alignEnd) maxOf(0, maxW - width) else 0
             var rowH = 0
-            for (c in row) {
+            // Right to left: the same row, read from its right end.
+            for (c in if (rightToLeft) row.asReversed() else row) {
                 c.layout(paddingLeft + cx, paddingTop + y, paddingLeft + cx + c.measuredWidth, paddingTop + y + c.measuredHeight)
                 cx += c.measuredWidth + gapH
                 rowH = maxOf(rowH, c.measuredHeight)

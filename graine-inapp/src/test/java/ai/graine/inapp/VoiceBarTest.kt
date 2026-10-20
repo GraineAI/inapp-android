@@ -137,6 +137,11 @@ class IconTest {
         }
         assertEquals(listOf("mic", "micOff", "end", "send", "chat", "call", "chevron", "close", "compose", "speaker"),
             listOf(SdkIcons.MIC, SdkIcons.MIC_OFF, SdkIcons.END, SdkIcons.SEND, SdkIcons.CHAT, SdkIcons.CALL, SdkIcons.CHEVRON, SdkIcons.CLOSE, SdkIcons.COMPOSE, SdkIcons.SPEAKER))
+        // The chat window v2's own: the paperclip, the rating, the scroll-to-latest arrow and a message's marks.
+        assertEquals(listOf("attach", "thumbUp", "thumbDown", "star", "arrowDown", "check", "clock", "alert", "retry"),
+            listOf(SdkIcons.ATTACH, SdkIcons.THUMB_UP, SdkIcons.THUMB_DOWN, SdkIcons.STAR, SdkIcons.ARROW_DOWN, SdkIcons.CHECK, SdkIcons.CLOCK,
+                SdkIcons.ALERT, SdkIcons.RETRY))
+        assertEquals(19, SdkIcons.ALL.size)
     }
 
     /** Every point a path visits, control points included. */

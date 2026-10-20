@@ -68,6 +68,14 @@ class GraineChatView internal constructor(
     /** The close button was pressed. Unset, it does nothing: the screen is the app's to leave. */
     var onClose: (() -> Unit)? = null
 
+    /**
+     * Call the agent from this chat — set only where this screen can start
+     * one the way the voice bar does (the bar's own full-screen chat); then
+     * the design's microphone and call button are drawn. Unset, they are not.
+     */
+    internal var onCall: (() -> Unit)? = null
+        set(v) { field = v; render() }
+
     /** The components the agent draws in the chat, between the messages and the composer. */
     val widgetView: GraineWidgetView = GraineWidgetView(context)
 
@@ -88,6 +96,10 @@ class GraineChatView internal constructor(
         window.onBook = { Ui.activity(context)?.let { a -> graine.presentBooking(a) { _, _ -> } } }
         // A refusal leaves the conversation as it was; nothing to say over it.
         window.onNewConversation = { (source as? GraineChat)?.newConversation() }
+        window.onRate = { style, value -> source.rate(style, value) }
+        window.onQuickReply = { reply -> (source as? GraineChat)?.sendQuickReply(reply) ?: source.send(reply.text) }
+        window.onAttach = { (source as? GraineChat)?.onAttach?.invoke() }
+        window.onCall = { onCall?.invoke() }
         render()
     }
 
@@ -162,7 +174,8 @@ class GraineChatView internal constructor(
         window.render(t, accent, onAccent, dash.heading, null, dash.logoUrl, dash.logoPlate, s.messages, s.online,
             replying = s.typing, failed = s.failed, loader = loader, loaderColor = loaderColor,
             upcoming = (s as? GraineChat)?.upcomingRows() ?: emptyList(), callName = graine.schedulingRules.callName ?: dash.heading,
-            bookable = s is GraineChat && graine.bookingAvailable)
+            bookable = s is GraineChat && graine.bookingAvailable,
+            extras = ChatExtras.of(s, canCall = onCall != null))
         show(isAttachedToWindow && isShown)
     }
 }
@@ -192,6 +205,8 @@ class GraineChatActivity : Activity() {
         graine = g
         fromBar = intent?.getBooleanExtra(EXTRA_FROM_BAR, false) == true
         val chat = GraineChatView(this, null, leadingChevron = fromBar).apply { source = g.chat; onClose = { finish() } }
+        // The bar's full-screen chat calls as the bar's switch does: back to the bar, and the call starts there.
+        if (fromBar && VoiceBar.surfaces(g.appearance).canSwitch) chat.onCall = { g.chatScreenCall(); finish() }
         view = chat
         // Edge to edge or not, the conversation sits between the system bars and above the keyboard.
         chat.setOnApplyWindowInsetsListener { v, insets ->
@@ -226,15 +241,18 @@ class GraineChatActivity : Activity() {
     private fun paintBars() {
         val g = graine ?: return
         val t = g.themeTokens(this) ?: if (Ui.isDeviceDark(this)) Design.CLASSIC_DARK else Design.CLASSIC_LIGHT
-        val chat = Surfaces.chatOf(t)
-        window.decorView.setBackgroundColor(Themed.color(chat.background))
+        val style = Surfaces.styleOf(t)
+        // The header's fill behind the status bar (a plain header's is the wallpaper's top); the bottom of the window under the navigation bar.
+        val top = style.header.fill.color
+        val bottom = style.composer.strip ?: style.wallpaper.colorTo ?: style.wallpaper.color
+        window.decorView.setBackgroundColor(Themed.color(style.wallpaper.color))
         @Suppress("DEPRECATION")
         if (Build.VERSION.SDK_INT < 35) {
-            window.statusBarColor = Themed.color(chat.headerBackground)
-            window.navigationBarColor = Themed.color(chat.background)
+            window.statusBarColor = Themed.color(top)
+            window.navigationBarColor = Themed.color(bottom)
         }
         if (Build.VERSION.SDK_INT >= 30) {
-            val light = Appearance.luminance(chat.headerBackground) >= 0.4
+            val light = Appearance.luminance(top) >= 0.4
             val mask = android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
             window.insetsController?.setSystemBarsAppearance(if (light) mask else 0, mask)
         }

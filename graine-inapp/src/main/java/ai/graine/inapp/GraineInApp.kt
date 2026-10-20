@@ -1229,6 +1229,13 @@ class GraineInApp private constructor(
         chatScreenWatchers.forEach { it() }
     }
 
+    /** Bars to tell when that full-screen chat asked for a call (its microphone or call button): the bar places it as its own switch does. */
+    internal val chatScreenCallWatchers = CopyOnWriteArraySet<() -> Unit>()
+
+    internal fun chatScreenCall() {
+        chatScreenCallWatchers.forEach { it() }
+    }
+
     private var nightMode = runCatching { application.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK }.getOrDefault(0)
 
     private fun watchLifecycle() {

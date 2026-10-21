@@ -60,6 +60,13 @@ internal object Protocol {
         const val RECONNECTING = "graine:reconnecting"
         /** Where a connect is: registering · dialling · retrying · switching · failed (sdk/contract/DESIGN.md "Connecting"). */
         const val PROGRESS = "graine:progress"
+        /**
+         * The voice bar's levels, `{agent, mic}`, each 0–1: the agent's voice as
+         * it plays and the customer's microphone, as the page measures them —
+         * about five times a second while a call is live. A page that does not
+         * measure them never sends it.
+         */
+        const val LEVELS = "graine:levels"
     }
 
     /**
@@ -165,8 +172,16 @@ internal object Protocol {
             In.RECONNECTING -> PageMessage.Reconnecting(o.optBoolean("active"))
             // Passed on as the engine wrote it: a stage this build does not know is ignored where it is handled.
             In.PROGRESS -> PageMessage.Progress(o.optString("stage"))
+            In.LEVELS -> PageMessage.Levels(level(o, "agent"), level(o, "mic"))
             else -> null
         }
+    }
+
+    /** A level, held to 0–1; absent, null or not a number is null (the level stays as it was). */
+    private fun level(o: JSONObject, key: String): Float? {
+        val v = o.opt(key) as? Number ?: return null
+        val d = v.toDouble()
+        return if (d.isFinite()) d.coerceIn(0.0, 1.0).toFloat() else null
     }
 
     private fun JSONObject.optNumber(key: String): Double? =
@@ -246,6 +261,8 @@ internal sealed class PageMessage {
     data class Reconnecting(val active: Boolean) : PageMessage()
     /** `graine:progress` — the stage as the engine wrote it, known or not. */
     data class Progress(val stage: String) : PageMessage()
+    /** `graine:levels` — the agent's and the microphone's levels, 0–1; null for one the page did not say. */
+    data class Levels(val agent: Float?, val mic: Float?) : PageMessage()
 }
 
 /**

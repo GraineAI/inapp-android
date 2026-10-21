@@ -165,6 +165,12 @@ data class GraineSchedulingRules @JvmOverloads constructor(
     val hostedRinging: Boolean = false,
     /** The platforms Graine rings: "ios", "android". Empty: every one. */
     val platforms: List<String> = emptyList(),
+    /**
+     * The agent's calling window, as booking applies it: the booking sheet and
+     * [GraineInApp.bookingSlots] offer only the times inside it. Null when the
+     * agent has none — every time between [earliest] and [latest] is offered.
+     */
+    val callingWindow: GraineCallingWindow? = null,
 ) {
     /**
      * The dashboard's word on how this agent's native calls carry their audio
@@ -209,9 +215,67 @@ data class GraineSchedulingRules @JvmOverloads constructor(
                 callName = (o.opt("callName") as? String)?.trim()?.takeIf { it.isNotEmpty() },
                 hostedRinging = o.opt("hosted") == true,
                 platforms = platforms,
+                callingWindow = GraineCallingWindow.read(s?.opt("callingWindow")),
             ).also { r ->
                 r.audioTransport = (o.opt("audioTransport") as? String)?.trim()?.lowercase()?.takeIf { it == "webrtc" || it == "websocket" }
             }
+        }
+    }
+}
+
+/**
+ * THE AGENT'S CALLING WINDOW, as booking applies it (the session's
+ * `calls.scheduling.callingWindow`): the hours Graine may ring a booked call.
+ * [start] is offered, [end] is not ("HH:MM", 24-hour; a window never crosses
+ * midnight), on the [days] listed — 0 Monday … 6 Sunday — all read on the
+ * device's clock, in its own time zone, as Graine checks a booking.
+ */
+data class GraineCallingWindow(
+    /** The first time of day offered, "HH:MM". */
+    val start: String,
+    /** The time of day the window closes, "HH:MM" — never offered itself. */
+    val end: String,
+    /** The days it is open: 0 Monday … 6 Sunday, each once, in order. */
+    val days: List<Int>,
+) {
+    private val startMinute: Int get() = minuteOf(start)
+    private val endMinute: Int get() = minuteOf(end)
+
+    /** [atMs] on [calendar]'s clock (its zone) is inside the window: its weekday listed, start ≤ its time < end. */
+    internal fun allows(atMs: Long, calendar: Calendar): Boolean {
+        calendar.timeInMillis = atMs
+        // Calendar counts Sunday 1 … Saturday 7; the window counts Monday 0 … Sunday 6.
+        val weekday = (calendar.get(Calendar.DAY_OF_WEEK) + 5) % 7
+        if (weekday !in days) return false
+        val minute = calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE)
+        return minute in startMinute until endMinute
+    }
+
+    internal companion object {
+        private val HHMM = Regex("([01]\\d|2[0-3]):([0-5]\\d)")
+
+        private fun minuteOf(hhmm: String): Int = hhmm.substring(0, 2).toInt() * 60 + hhmm.substring(3, 5).toInt()
+
+        /**
+         * The window the session sent, or null — no window — when there is none
+         * or it cannot be read: times "HH:MM" with start before end; days a list
+         * whose whole numbers 0–6 are kept (each once, in order), every day when
+         * it is missing, and no window when none is left.
+         */
+        fun read(raw: Any?): GraineCallingWindow? {
+            val o = raw as? JSONObject ?: return null
+            fun clock(v: Any?): String? = (v as? String)?.trim()?.takeIf { HHMM.matches(it) }
+            val start = clock(o.opt("start")) ?: return null
+            val end = clock(o.opt("end")) ?: return null
+            if (start >= end) return null
+            val days = when (val d = o.opt("days")) {
+                null, JSONObject.NULL -> (0..6).toList()
+                is JSONArray -> (0 until d.length())
+                    .mapNotNull { i -> Js.finite(d.opt(i))?.takeIf { it % 1.0 == 0.0 && it in 0.0..6.0 }?.toInt() }
+                    .distinct().sorted()
+                else -> return null
+            }
+            return if (days.isEmpty()) null else GraineCallingWindow(start, end, days)
         }
     }
 }

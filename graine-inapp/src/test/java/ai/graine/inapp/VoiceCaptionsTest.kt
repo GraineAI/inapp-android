@@ -134,6 +134,42 @@ class VoiceCaptionsTest {
         stop()
     }
 
+    // ── the voice bar's levels (0.14.1) ──────────────────────────────────────
+
+    @Test fun theLevelsAreReadWhenThePageSendsThemEachHeldToZeroToOne() {
+        assertEquals(PageMessage.Levels(0.42f, 0.1f), Protocol.parse("""{"type":"graine:levels","agent":0.42,"mic":0.1}"""))
+        assertEquals("held to 0–1", PageMessage.Levels(1f, 0f), Protocol.parse("""{"type":"graine:levels","agent":3,"mic":-1}"""))
+        assertEquals("a level that is not a number is not one", PageMessage.Levels(null, null),
+            Protocol.parse("""{"type":"graine:levels","agent":"loud","mic":null}"""))
+    }
+
+    @Test fun theLevelsFollowThePageWhileACallIsLiveAndAreZeroOtherwise() {
+        val g = graine()
+        val v = g.voice
+        val heard = mutableListOf<Pair<Float, Float>>()
+        g.addListener(object : GraineListener {
+            override fun onLevels(agent: Float, mic: Float) { heard += agent to mic }
+        })
+        v.handle(PageMessage.Levels(0.5f, 0.5f))
+        assertEquals("no call, no levels", 0f to 0f, v.agentLevel to v.micLevel)
+        assertTrue("nothing moved: nobody is told", heard.isEmpty())
+        v.handle(PageMessage.Call(connected = true, connecting = false))
+        v.handle(PageMessage.Levels(0.42f, 0.1f))
+        assertEquals(0.42f to 0.1f, v.agentLevel to v.micLevel)
+        v.handle(PageMessage.Levels(null, 0.3f))
+        assertEquals("one the page did not say stays as it was", 0.42f to 0.3f, v.agentLevel to v.micLevel)
+        v.handle(PageMessage.Levels(0.42f, 0.3f))
+        assertEquals("the same levels are no news", 2, heard.size)
+        v.handle(PageMessage.Muted(true))
+        assertEquals("muted: the microphone is 0", 0f, v.micLevel)
+        v.handle(PageMessage.Levels(0.2f, 0.6f))
+        assertEquals(0.2f to 0f, v.agentLevel to v.micLevel)
+        v.handle(PageMessage.Muted(false))
+        v.handle(PageMessage.Ended)
+        assertEquals("the call is over: 0, and the listeners hear it", 0f to 0f, v.agentLevel to v.micLevel)
+        assertEquals(0f to 0f, heard.last())
+    }
+
     // ── the call in one word, and what it runs on (0.14.0) ───────────────────
 
     @Test fun theCallInOneWordAndWhatItRunsOnAreTheVoicesOwn() {

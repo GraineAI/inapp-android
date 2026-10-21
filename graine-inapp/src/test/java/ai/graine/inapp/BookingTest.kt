@@ -271,6 +271,58 @@ class BookingTest {
         assertTrue("a window narrower than five minutes offers nothing", none.isEmpty())
     }
 
+    // ── the agent's calling window ───────────────────────────────────────────
+
+    /** 09:00–21:00, Monday to Friday. 14 Oct 2026 is a Wednesday. */
+    private val windowed = rules.copy(callingWindow = GraineCallingWindow("09:00", "21:00", listOf(0, 1, 2, 3, 4)))
+
+    @Test fun theWindowNarrowsEachDayAndTheDaysItLeavesOutAreNotOffered() {
+        val days = Booking.days(windowed, at(2026, 10, 14, 18, 3), kolkata, ::date)
+        assertEquals(listOf("Today", "Tomorrow", "Fri 16 Oct", "Mon 19 Oct"), days.take(4).map { it.label })
+        assertEquals("today: from the first time to the window's last", at(2026, 10, 14, 18, 10), days[0].firstMs)
+        assertEquals("the window's end is never offered", at(2026, 10, 14, 20, 55), days[0].lastMs)
+        assertEquals("tomorrow opens with the window", at(2026, 10, 15, 9, 0), days[1].firstMs)
+        assertEquals(at(2026, 10, 15, 20, 55), days[1].lastMs)
+        assertTrue("no Saturday or Sunday", days.none { it.label.startsWith("Sat") || it.label.startsWith("Sun") })
+        assertEquals("the eleven weekdays from today to the furthest day", 11, days.size)
+        val tomorrow = Booking.slots(windowed, at(2026, 10, 14, 18, 3), kolkata, at(2026, 10, 15, 12, 0))
+        assertEquals("09:00 to 20:55, every five minutes", 144, tomorrow.size)
+        assertTrue("a Saturday offers nothing", Booking.slots(windowed, at(2026, 10, 14, 18, 3), kolkata, at(2026, 10, 17, 12, 0)).isEmpty())
+    }
+
+    @Test fun afterTheWindowClosesTodayIsNotOffered() {
+        val days = Booking.days(windowed, at(2026, 10, 14, 21, 30), kolkata, ::date)
+        assertEquals("Tomorrow", days.first().label)
+        assertEquals(at(2026, 10, 15, 9, 0), days.first().firstMs)
+    }
+
+    @Test fun theSheetOpensInsideTheWindowAndItsPickerStaysThere() {
+        val flow = BookingFlow(windowed, at(2026, 10, 14, 18, 3), null, kolkata, ::date)
+        assertEquals("opens on the first time offered", at(2026, 10, 14, 18, 10), flow.atMs)
+        flow.pickDay(1)
+        assertEquals("tomorrow, the same time", at(2026, 10, 15, 18, 10), flow.atMs)
+        flow.pickTime(7, 0)
+        assertEquals("before the window opens: its first time", at(2026, 10, 15, 9, 0), flow.atMs)
+        flow.pickTime(22, 30)
+        assertEquals("after it closes: its last time", at(2026, 10, 15, 20, 55), flow.atMs)
+        val early = BookingFlow(windowed, at(2026, 10, 15, 6, 0), null, kolkata, ::date)
+        assertEquals("before the window opens today: the sheet opens at the window", at(2026, 10, 15, 9, 0), early.atMs)
+    }
+
+    @Test fun anAgentReadsItsWindowFromTheSession() {
+        val g = agent(session("""{"hosted":true,"scheduling":{"usersCanBook":true,"minLeadMinutes":5,"maxDaysAhead":14,
+            "callingWindow":{"start":"09:00","end":"21:00","days":[4,0,1,2,3]}}}"""))
+        assertEquals(GraineCallingWindow("09:00", "21:00", listOf(0, 1, 2, 3, 4)), g.schedulingRules.callingWindow)
+        val slots = g.bookingSlots(Date(System.currentTimeMillis() + 86_400_000L))
+        val clock = Calendar.getInstance()
+        assertTrue("only inside the window, on the phone's clock", slots.all { s ->
+            clock.time = s
+            val minute = clock.get(Calendar.HOUR_OF_DAY) * 60 + clock.get(Calendar.MINUTE)
+            clock.get(Calendar.DAY_OF_WEEK) in Calendar.MONDAY..Calendar.FRIDAY && minute in 9 * 60 until 21 * 60
+        })
+        assertNull("no window: none", GraineSchedulingRules.parse(JSONObject(bookable)).callingWindow)
+    }
+
     @Test fun pickingADayKeepsTheTimeWhereItCanAndClampsWhereItCannot() {
         val flow = BookingFlow(rules, at(2026, 10, 14, 18, 3), null, kolkata, ::date)
         assertEquals("opens on the first time offered", at(2026, 10, 14, 18, 10), flow.atMs)

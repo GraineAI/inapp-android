@@ -752,6 +752,29 @@ class PrepareCallTest {
         })
     }
 
+    @Test fun theCallsCaptionsAreWhatWasSaidKeptThroughItsEndThenGone() {
+        val g = started()
+        connectedAtTheTap(g)
+        controls.single().deliver("{\"type\":\"control_ready\"}"); pump()
+        assertTrue("nothing said yet", g.calls.captions.isEmpty())
+        controls.single().deliver("{\"type\":\"interim_transcript_received\",\"content\":\"I need\"}"); pump()
+        assertEquals(listOf(GraineCaption(Role.CUSTOMER, "I need", true)), g.calls.captions)
+        controls.single().deliver("{\"type\":\"transcript\",\"content\":\"I need help\"}"); pump()
+        controls.single().deliver("{\"type\":\"text\",\"data\":\"Sure! I can\"}"); pump()
+        assertEquals("a live line is replaced as its words arrive, a settled one stays",
+            listOf(GraineCaption(Role.CUSTOMER, "I need help", false), GraineCaption(Role.AGENT, "Sure! I can", true)), g.calls.captions)
+        var atEnd: List<GraineCaption>? = null
+        g.calls.addListener(object : GraineCallListener {
+            override fun onCallState(state: GraineCallState, call: GraineCall?) {
+                if (state == GraineCallState.ENDED) atEnd = g.calls.captions
+            }
+        })
+        g.calls.end(); pump()
+        assertEquals("its end still carries what was said", 2, atEnd?.size)
+        assertEquals(GraineCallState.IDLE, g.calls.state)
+        assertTrue("no call: nothing kept", g.calls.captions.isEmpty())
+    }
+
     @Test fun aServiceThatCannotStartNeverEndsACallWhoseAudioIsFlowing() {
         val g = started()
         val outcomes = outcomesOf(g)

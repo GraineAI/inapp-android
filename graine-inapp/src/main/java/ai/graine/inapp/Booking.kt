@@ -119,22 +119,31 @@ internal object Booking {
 
     /**
      * Every day from the one `first(now)` falls on to the one `last(now)` falls
-     * on, each holding only the times between the two — the chips. A day with
-     * no time left in it is not offered. [date] writes a day's chip after
-     * Today and Tomorrow.
+     * on, each holding only the times between the two — the chips — and, when
+     * the agent has a calling window ([GraineSchedulingRules.callingWindow]),
+     * only the times inside it: a day's first and last time are its first and
+     * last inside the window. A day with no time left in it is not offered.
+     * [date] writes a day's chip after Today and Tomorrow.
      */
     fun days(rules: GraineSchedulingRules, nowMs: Long, zone: TimeZone, date: (Long) -> String): List<Day> {
         val from = first(rules, nowMs)
         val to = last(rules, nowMs)
         if (from > to) return emptyList()
+        val window = rules.callingWindow
+        val clock = Calendar.getInstance(zone)
         val out = ArrayList<Day>()
         var start = startOfDay(from, zone)
         val lastStart = startOfDay(to, zone)
         while (start <= lastStart && out.size < 400) {
             val next = nextDay(start, zone)
             if (next <= start) break
-            val dayFirst = maxOf(from, start)
-            val dayLast = minOf(to, roundDown(next - 1))
+            var dayFirst = maxOf(from, start)
+            var dayLast = minOf(to, roundDown(next - 1))
+            if (window != null) {
+                // The day's 5-minute steps, narrowed to the first and the last inside the window.
+                while (dayFirst <= dayLast && !window.allows(dayFirst, clock)) dayFirst += STEP_MS
+                while (dayLast >= dayFirst && !window.allows(dayLast, clock)) dayLast -= STEP_MS
+            }
             if (dayFirst <= dayLast) out += Day(start, dayFirst, dayLast, dayLabel(start, nowMs, zone, date))
             start = next
         }
@@ -143,15 +152,22 @@ internal object Booking {
 
     /**
      * Every time the sheet would offer on the day [dayMs] falls on in [zone]:
-     * each 5-minute step from that day's first time to its last ([days]),
-     * oldest first; empty for a day the sheet does not offer.
+     * each 5-minute step from that day's first time to its last ([days]) that
+     * is inside the agent's calling window, when it has one, oldest first;
+     * empty for a day the sheet does not offer.
      */
     fun slots(rules: GraineSchedulingRules, nowMs: Long, zone: TimeZone, dayMs: Long): List<Long> {
         val start = startOfDay(dayMs, zone)
         val day = days(rules, nowMs, zone) { "" }.firstOrNull { it.startMs == start } ?: return emptyList()
+        val window = rules.callingWindow
+        val clock = Calendar.getInstance(zone)
         val out = ArrayList<Long>()
         var at = day.firstMs
-        while (at <= day.lastMs) { out += at; at += STEP_MS }
+        // Every step between the first and the last: the night the clocks go back can repeat the window's end.
+        while (at <= day.lastMs) {
+            if (window == null || window.allows(at, clock)) out += at
+            at += STEP_MS
+        }
         return out
     }
 

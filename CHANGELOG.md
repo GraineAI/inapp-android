@@ -1,3 +1,9 @@
+## 0.14.1
+
+- **Booking follows the agent's calling hours.** `bookingSlots(day)` and the SDK's booking sheet offer only times inside the agent's calling window, in the user's time zone, so a picker of your own never offers a time Graine would refuse. The window is part of the scheduling rules (`callingWindow`: start, end, days).
+- **Talk levels while live:** `GraineVoice.agentLevel` and `micLevel` (0–1, about five times a second) and `GraineListener.onLevels(agent, mic)`, for a voice visualiser of your own.
+- **The call's transcript:** `GraineCalls.captions`, the call's recent lines as the call screen draws them.
+
 ## 0.14.0
 
 - **Closing the chat no longer ends the conversation.** With no window showing it, the chat stays connected until it has been idle for 5 minutes — no message either way, Graine's own idle window — instead of closing 15 seconds after it left the screen, so the chat opened again continues the same conversation, with no new welcome. `GraineChat.CLOSE_UNSEEN_MS` is now `300_000L`. `endOnBackground` and `close()` end it as before.
@@ -13,6 +19,8 @@
 - **Calls start on the loudspeaker.** An agent call, placed by your app or a scheduled ring the user answers, now starts on the speaker unless a headset is connected (a headset connected mid-call takes the call). `setSpeaker(false)` moves it to the earpiece as before, and `GraineCalls.speaker` reports the route the phone really uses. To start on the earpiece, set `GraineCalls.speakerByDefault = false` before the call.
 - **A call connects sooner on a slow network.** A call no longer waits on the background readiness check before it dials; the request that sets the call up gives up after 1.5 seconds and takes Graine's web route instead; and the 12-second dial budget starts once that request has answered, so a slow setup no longer eats the time a call has to connect.
 - **Why a call ended.** `GraineCallOutcome.endCause` says what ended it: `local_end` (your app or the user), `remote_bye` (the agent's side), `media_drop` (the connection was lost), `audio_watch` (the call's audio could not start) or `failed`. Every call end also sends a row that Execution Logs shows. `endReason` is unchanged.
+- **Chat sessions:** `GraineChat.sessionId`, `GraineChat.sessions` (`GraineChatSession`) and `session` on every turn — the id Execution Logs shows.
+- **Talk reports its transport while live:** `GraineVoice.transport` is set as soon as a call connects, and a fallback keeps its reason.
 
 ## 0.13.1
 

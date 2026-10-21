@@ -185,6 +185,19 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
     var transportFallbackReason: String? = null
         private set
 
+    /**
+     * How loud the agent's voice is as it plays, 0–1, as the call page
+     * measures it — about five times a second while a call is live, and 0
+     * otherwise. For a meter or a visualiser of your own; each change reaches
+     * [GraineListener.onLevels]. New in 0.14.1.
+     */
+    var agentLevel = 0f
+        private set
+
+    /** How loud the customer's microphone is, 0–1 — as [agentLevel], and 0 while muted. New in 0.14.1. */
+    var micLevel = 0f
+        private set
+
     /** What the call is doing, in one word — see [CallPhase]. A bar says "Thinking…" from this. */
     val phase: CallPhase
         get() = CallPhase.of(reconnecting, connectivity, connecting, ready, connected, agentSpeaking, awaitingAgent)
@@ -404,6 +417,7 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
     /** Stop sending the customer's voice without ending the call. */
     fun setMuted(value: Boolean) {
         muted = value
+        if (value) heard(null, 0f)
         post(Protocol.out(Protocol.Out.SET_MUTED, "muted" to value))
     }
 
@@ -523,6 +537,18 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
         rearm()
         if (liveChanged) graine.callStateChanged(connected)
         if (changed) report { it.onCallState(connected, connecting) }
+        // No call, no levels: the last ones heard never outlive it.
+        if (!connected) heard(0f, 0f)
+    }
+
+    /** The page's levels: followed while a call is live (the microphone's while it is not muted), 0 otherwise. */
+    private fun heard(agent: Float?, mic: Float?) {
+        val nextAgent = if (connected) agent ?: agentLevel else 0f
+        val nextMic = if (connected && !muted) mic ?: micLevel else 0f
+        if (nextAgent == agentLevel && nextMic == micLevel) return
+        agentLevel = nextAgent
+        micLevel = nextMic
+        report { it.onLevels(nextAgent, nextMic) }
     }
 
     private fun setConnectivity(state: Connectivity, reason: String?) {
@@ -566,7 +592,8 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
                 if (msg.connected) graine.currentContextFrame()?.let { postContext(it) }
                 if (!msg.connected && !msg.connecting) startedCall = false
             }
-            is PageMessage.Muted -> muted = msg.muted
+            is PageMessage.Muted -> { muted = msg.muted; if (msg.muted) heard(null, 0f) }
+            is PageMessage.Levels -> heard(msg.agent, msg.mic)
             is PageMessage.Caption -> {
                 // Before the listeners hear it, so a bar reading `phase` in onCaption sees this line.
                 agentSpeaking = msg.role == Role.AGENT && msg.live
@@ -722,8 +749,10 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
     private inner class Bridge {
         @JavascriptInterface
         fun postMessage(json: String?) {
-            if (graine.config.debug) Log.d(GraineInApp.TAG, "← page ${json?.take(600)}")
-            val msg = Protocol.parse(json) ?: return
+            val msg = Protocol.parse(json)
+            // The levels come five times a second while live: kept out of the debug log, which they would drown.
+            if (graine.config.debug && msg !is PageMessage.Levels) Log.d(GraineInApp.TAG, "← page ${json?.take(600)}")
+            if (msg == null) return
             graine.main.post { handle(msg) }
         }
     }

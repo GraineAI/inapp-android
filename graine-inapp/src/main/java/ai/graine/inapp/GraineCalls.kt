@@ -178,6 +178,16 @@ class GraineCalls internal constructor(
     @Volatile var caption: Triple<Role, String, Boolean>? = null
         private set
 
+    /**
+     * What has been said on this call, oldest first — the agent's lines as
+     * they are spoken and the customer's as they are heard, a live line
+     * replaced as its words arrive; the last 12. Kept until the call is over
+     * (its ENDED state still carries it), empty with no call. Each change
+     * reaches [GraineCallListener.onCallCaption]. New in 0.14.1.
+     */
+    @Volatile var captions: List<GraineCaption> = emptyList()
+        private set
+
     /** When the call connected (SystemClock.elapsedRealtime millis, which keep counting in deep sleep), for a duration display; 0 before. */
     @Volatile var connectedAt = 0L
         private set
@@ -867,6 +877,7 @@ class GraineCalls internal constructor(
             override fun onCaption(role: Role, text: String, live: Boolean) = onMain {
                 if (machine.call?.callId != c.callId) return@onMain
                 caption = Triple(role, text, live)
+                captions = CaptionLog.fold(captions, GraineCaption(role, text, live))
                 report { it.onCallCaption(role, text, live) }
             }
             override fun onAgentSpeaking(speaking: Boolean) = onMain {
@@ -955,8 +966,8 @@ class GraineCalls internal constructor(
             GraineCallState.CONNECTING -> cancelRing()
             GraineCallState.ACTIVE -> Unit
             GraineCallState.ENDED -> teardown()
-            // The outcome has carried the report and the cause; the next call starts its own.
-            GraineCallState.IDLE -> { connection = null; connectionReport = null; endCause = null }
+            // The outcome has carried the report and the cause; the next call starts its own, and its own words.
+            GraineCallState.IDLE -> { connection = null; connectionReport = null; endCause = null; captions = emptyList() }
         }
         report { it.onCallState(s, c) }
     }

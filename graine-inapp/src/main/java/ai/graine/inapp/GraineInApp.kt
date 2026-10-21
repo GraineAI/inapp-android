@@ -146,6 +146,12 @@ interface GraineListener {
     /** The network interrupted the call and it is being re-established. Not an end. */
     fun onReconnecting(active: Boolean) {}
     /**
+     * The voice bar's levels moved ([GraineVoice.agentLevel],
+     * [GraineVoice.micLevel]), each 0–1 — about five times a second while a
+     * call is live, and once more to 0 when it ends. New in 0.14.1.
+     */
+    fun onLevels(agent: Float, mic: Float) {}
+    /**
      * Where a call being placed is ([GraineVoice.connectStage]), whether the
      * customer has waited on it long enough to say so ([GraineVoice.slowConnect]),
      * and whether it could not be connected at all ([GraineVoice.callFailed]).
@@ -1018,9 +1024,11 @@ class GraineInApp private constructor(
      * in the phone's time zone — every 5 minutes from the soonest the agent's
      * rules allow ([GraineSchedulingRules.earliest], rounded up) to the
      * latest ([GraineSchedulingRules.latest]), oldest first — for a picker of
-     * your own. Empty for a day outside the rules. Graine still checks what
-     * only it knows (the calling hours, the calls already booked) when the
-     * time is booked.
+     * your own — and, when the agent has a calling window
+     * ([GraineSchedulingRules.callingWindow]), only the times inside it, on
+     * the phone's clock. Empty for a day outside the rules. Graine checks the
+     * time again when it is booked, with what only it knows (the calls
+     * already booked).
      */
     fun bookingSlots(day: java.util.Date): List<java.util.Date> =
         Booking.slots(schedulingRules, System.currentTimeMillis(), java.util.TimeZone.getDefault(), day.time).map { java.util.Date(it) }

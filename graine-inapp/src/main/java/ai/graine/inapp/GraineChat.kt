@@ -4,6 +4,9 @@ import android.os.Looper
 import android.os.SystemClock
 import org.json.JSONObject
 import java.util.concurrent.CopyOnWriteArraySet
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import kotlin.coroutines.suspendCoroutine
 
 /**
  * THE TEXT CONVERSATION WITH THE AGENT — the chat the voice bar switches to,
@@ -25,12 +28,18 @@ import java.util.concurrent.CopyOnWriteArraySet
  * opening the chat ends a voice call (and another agent's chat), starting a
  * call ends the chat, and a native call holds the chat until it is over.
  *
- * Closing the chat window does not end the conversation: with no window
- * showing it, it stays connected until it has been idle for [CLOSE_UNSEEN_MS]
- * (no message either way), so opening the chat again within that time goes on
- * with the same one. When Graine ends the conversation itself — idle, or at
- * its time limit — nothing reconnects by itself: the lines stay, the window
- * says "Disconnected", and opening the chat or a [send] connects again.
+ * Closing the chat window ends the conversation shortly after: once no window
+ * shows it, it closes [closeDelaySeconds] later — 15 seconds unless
+ * [GraineConfig.chatCloseDelaySeconds] says otherwise — unless a window shows
+ * it again or a message goes either way in that time (a quick hop to the
+ * booking sheet or a component keeps it). Opening the chat again afterwards
+ * connects again, and a signed-in user's conversation continues from Graine's
+ * history, with no new welcome. When Graine ends the conversation itself —
+ * idle, or at its time limit — nothing reconnects by itself: the lines stay,
+ * the window says "Disconnected", and opening the chat or a [send] connects again.
+ *
+ * The user's earlier sessions with the agent, and each one's chat history,
+ * are [pastSessions] and [sessionTranscript].
  *
  * The agent may suggest replies for its turn ([quickReplies], sent with
  * [sendQuickReply]) and end the conversation ([ended]), after which the
@@ -120,6 +129,39 @@ class GraineChat internal constructor(
     val sessions: List<GraineChatSession> get() = ChatSessions.of(messages, sessionId)
 
     /**
+     * THE USER'S PAST SESSIONS with this agent — their earlier chats, talks
+     * and calls, newest first, as Execution History lists them
+     * ([GrainePastSessions]: `sessions`, `loading`, `hasMore`, `error`). Empty
+     * until [refreshPastSessions]; [loadMorePastSessions] appends the next
+     * page, and [sessionTranscript] answers one session's chat history. Only
+     * for the user identify() names, from a device bound to them — `error`
+     * says why not (`identity_required`, `device_limit`, `rate_limited`,
+     * `unavailable`, `network`) — and cleared when the identity changes
+     * (another user, or nobody). The session open now is never in it. Changes
+     * reach every change listener. New in 0.14.3.
+     */
+    var pastSessions: GrainePastSessions = GrainePastSessions()
+        private set
+
+    /**
+     * How long the conversation stays connected once no window shows it, in
+     * seconds: it closes this long after the last window left it — or after
+     * the last message either way, whichever is later — unless a window shows
+     * it again first. Starts as [GraineConfig.chatCloseDelaySeconds] (15 by
+     * default); 0 closes it as soon as the last window leaves. Kept within
+     * 0–300 (a negative value is 0). Set it any time: a close already waiting
+     * takes the new delay. New in 0.14.3.
+     */
+    var closeDelaySeconds: Int
+        get() = (closeDelayMs / 1000L).toInt()
+        set(value) {
+            closeDelayMs = closeDelayMsOf(value)
+            onMain { if (unseen) closeWhenIdle() }
+        }
+
+    @Volatile private var closeDelayMs: Long = closeDelayMsOf(graine.config.chatCloseDelaySeconds)
+
+    /**
      * The replies the agent suggests for its latest turn — drawn as chips by
      * the SDK's chat window; read them to draw your own, and send one with
      * [sendQuickReply]. Gone once the customer sends anything, the agent starts
@@ -191,8 +233,10 @@ class GraineChat internal constructor(
     /** Chat windows on screen now. */
     private var surfaces = 0
     private var retry: Runnable? = null
-    /** Every window that showed the conversation has left it: it is kept until it has been idle for [CLOSE_UNSEEN_MS]. */
+    /** Every window that showed the conversation has left it: it closes [closeDelaySeconds] after that, or after its last message. */
     private var unseen = false
+    /** When the last window left it, on the scheduler's clock. */
+    private var unseenSince = 0L
     /** When the conversation last opened or carried a message either way, on the scheduler's clock: idle since then. */
     private var lastActivity = 0L
     private val closeUnseen = Runnable { if (unseen) closeWhenIdle() }
@@ -272,6 +316,121 @@ class GraineChat internal constructor(
     /** The card's rows, as the chat window draws them. */
     internal fun upcomingRows(): List<ChatWindowView.UpcomingRow> = upcomingCalls.mapNotNull { c ->
         c.at?.let { ChatWindowView.UpcomingRow(c.id, it, c.id in cancelling, c.id in cancelFailed) }
+    }
+
+    // ── past sessions ─────────────────────────────────────────────────────
+
+    /** Moves on with every refresh and every change of identity: an answer to a request made before is not shown. */
+    private var pastGeneration = 0
+    /** Where the next page starts — the last page's `next`; null before the first page and after the last. */
+    private var pastCursor: String? = null
+
+    /**
+     * Load the first page of [pastSessions] — the user's most recent
+     * sessions with this agent — replacing what was loaded. While it loads,
+     * `loading` is true and what was loaded stays; a refusal keeps it too,
+     * with `error` saying why. With nobody signed in nothing is asked: `error`
+     * is `identity_required` at once. New in 0.14.3.
+     */
+    fun refreshPastSessions(): Unit = onMain { fetchPastSessions(more = false) }
+
+    /**
+     * Load the next page of [pastSessions] and append it — a session already
+     * listed is not listed twice. Nothing happens while a page is loading, and
+     * when there is no next page (`hasMore` false, or nothing loaded yet:
+     * [refreshPastSessions] loads the first). After a refusal, calling it
+     * again asks for the same page. New in 0.14.3.
+     */
+    fun loadMorePastSessions(): Unit = onMain { fetchPastSessions(more = true) }
+
+    /**
+     * ONE PAST SESSION'S CHAT HISTORY, oldest first — the session as
+     * [pastSessions] describes it, and every message said in it. [done] hears
+     * it once, on the main thread, or why not: `INVALID_REQUEST` for a blank
+     * id and `IDENTITY_REQUIRED` with nobody signed in (nothing is sent);
+     * `NOT_FOUND` for a session Graine does not know or that is another
+     * user's — and for an answer that arrives after the identity changed;
+     * `DEVICE_LIMIT`, `RATE_LIMITED`, `UNAVAILABLE`, `NETWORK`. New in 0.14.3.
+     */
+    fun sessionTranscript(id: String, done: GraineCallback<GraineSessionTranscript>): Unit = onMain {
+        val wanted = id.trim()
+        if (wanted.isEmpty()) {
+            main.post { done.onResult(null, GraineError(GraineErrorCode.INVALID_REQUEST, "No session id.")) }
+            return@onMain
+        }
+        // Who the user is waits for the agent's settings: they name the trait that identifies them.
+        graine.loadSession {
+            val who = graine.identityEnvelope()
+            val value = who.value
+            if (value == null) {
+                done.onResult(null, GraineError(GraineErrorCode.IDENTITY_REQUIRED, NOBODY))
+                return@loadSession
+            }
+            graine.request(EmbedApi.SESSION_TRANSCRIPT, who.who(JSONObject()).put("id", wanted)) { r ->
+                when {
+                    // Asked for someone who is no longer the one signed in: not this user's session.
+                    graine.identityEnvelope().value != value ->
+                        done.onResult(null, GraineError(GraineErrorCode.NOT_FOUND, "That session is not this user's."))
+                    r is EmbedReply.Ok -> done.onResult(PastSessionsWire.transcript(r.body, wanted), null)
+                    r is EmbedReply.Failed -> done.onResult(null, r.error)
+                }
+            }
+        }
+    }
+
+    /**
+     * [sessionTranscript], suspending: the transcript, or a
+     * [GraineRequestException] carrying what the callback would have heard.
+     * New in 0.14.3.
+     */
+    suspend fun sessionTranscript(id: String): GraineSessionTranscript = suspendCoroutine { c ->
+        sessionTranscript(id) { value, error ->
+            if (value != null) c.resume(value)
+            else c.resumeWithException(GraineRequestException(error ?: GraineError(GraineErrorCode.UNAVAILABLE, "Graine did not answer.")))
+        }
+    }
+
+    /** Main thread. */
+    private fun fetchPastSessions(more: Boolean) {
+        val cursor = pastCursor
+        if (more && (pastSessions.loading || cursor == null)) return
+        if (!more) pastGeneration++
+        val generation = pastGeneration
+        setPastSessions(pastSessions.copy(loading = true, error = null))
+        // Who the user is waits for the agent's settings: they name the trait that identifies them.
+        graine.loadSession {
+            if (pastGeneration != generation) return@loadSession
+            val who = graine.identityEnvelope()
+            if (who.value == null) {
+                pastCursor = null
+                setPastSessions(GrainePastSessions(error = GraineErrorCode.IDENTITY_REQUIRED.wire))
+                return@loadSession
+            }
+            val body = who.who(JSONObject())
+            if (more && cursor != null) body.put("cursor", cursor)
+            graine.request(EmbedApi.PAST_SESSIONS, body) { r -> pastSessionsAnswered(r, more, generation) }
+        }
+    }
+
+    /** Main thread. An answer asked for before a refresh or another identity is not shown. */
+    private fun pastSessionsAnswered(r: EmbedReply, more: Boolean, generation: Int) {
+        if (pastGeneration != generation) return
+        when (r) {
+            is EmbedReply.Ok -> {
+                val page = PastSessionsWire.page(r.body)
+                pastCursor = page.next
+                val sessions = if (more) PastSessionsWire.appending(page.sessions, pastSessions.sessions) else page.sessions
+                setPastSessions(GrainePastSessions(sessions, loading = false, hasMore = page.next != null, error = null))
+            }
+            // What was loaded stays, and so does the page asked for: asking again asks for it again.
+            is EmbedReply.Failed -> setPastSessions(pastSessions.copy(loading = false, error = r.error.code.wire))
+        }
+    }
+
+    private fun setPastSessions(next: GrainePastSessions) {
+        if (next == pastSessions) return
+        pastSessions = next
+        changed()
     }
 
     /**
@@ -424,8 +583,9 @@ class GraineChat internal constructor(
             main.removeCallbacks(closeUnseen)
             if (!wanted || (session == null && !opening && retry == null)) connect()
         } else if (surfaces == 0 && wanted) {
-            // Gone from every screen: the conversation is kept for the next screen until it has been idle for CLOSE_UNSEEN_MS.
+            // Gone from every screen: kept for a quick hop (the booking sheet, a component), then closed.
             unseen = true
+            unseenSince = scheduler.now()
             closeWhenIdle()
         }
     }
@@ -476,7 +636,9 @@ class GraineChat internal constructor(
      *     the next connection;
      *  4. a chat that was connected or connecting and is wanted connects again
      *     at once, with a ticket for the new identity; otherwise the next open
-     *     connects.
+     *     connects;
+     *  5. the past sessions are the identity's too: cleared, and a page still
+     *     on its way for the identity before is never shown.
      * Called only when the identity's value changed: other traits, or the
      * memory choice, change nothing on an open chat.
      */
@@ -492,6 +654,9 @@ class GraineChat internal constructor(
         cancelling.clear()
         cancelFailed.clear()
         lastUpcomingFetch = 0L
+        pastGeneration++
+        pastCursor = null
+        pastSessions = GrainePastSessions()
         disconnected = false
         remaking = false
         setState(connected = false, connecting = false)
@@ -617,13 +782,14 @@ class GraineChat internal constructor(
     }
 
     /**
-     * No window shows the conversation: it closes once it has been idle for
-     * [CLOSE_UNSEEN_MS] — now, when it already has, else when that time comes.
-     * A message before then starts the wait again ([active]).
+     * No window shows the conversation: it closes [closeDelaySeconds] after
+     * the last window left it or after its last message, whichever is later —
+     * now, when that time has passed, else when it comes. A message before
+     * then starts the wait again ([active]).
      */
     private fun closeWhenIdle() {
         main.removeCallbacks(closeUnseen)
-        val left = lastActivity + CLOSE_UNSEEN_MS - scheduler.now()
+        val left = maxOf(lastActivity, unseenSince) + closeDelayMs - scheduler.now()
         if (left > 0) main.postDelayed(closeUnseen, left) else close()
     }
 
@@ -783,13 +949,22 @@ class GraineChat internal constructor(
 
     companion object {
         /**
-         * How long a conversation no window shows stays connected with no
-         * message either way — Graine's own idle window, 5 minutes — before it
-         * closes: counted from its last message, not from when the last window
-         * left. Opening the chat again within it goes on with the same
-         * conversation; a message in the meantime starts it again.
+         * How long a conversation no window shows stays connected by default,
+         * in milliseconds — 15 seconds after the last window left it, or after
+         * its last message, whichever is later — before it closes
+         * ([GraineConfig.chatCloseDelaySeconds] and [closeDelaySeconds] change
+         * it). A window showing it again within that time keeps it, so a quick
+         * hop to the booking sheet or a component goes on with the same
+         * conversation. It was 5 minutes in 0.14.0–0.14.1.
          */
-        const val CLOSE_UNSEEN_MS = 300_000L
+        const val CLOSE_UNSEEN_MS = 15_000L
+        /** The longest [closeDelaySeconds] may be: 5 minutes, Graine's own idle limit. */
+        internal const val CLOSE_DELAY_MAX_SECONDS = 300
+        /** The message an identity is asked for in: nobody is signed in. */
+        private const val NOBODY = "Nobody is signed in: identify() the user first."
+
+        /** A close delay in seconds, kept within 0–[CLOSE_DELAY_MAX_SECONDS], as milliseconds. */
+        internal fun closeDelayMsOf(seconds: Int): Long = seconds.coerceIn(0, CLOSE_DELAY_MAX_SECONDS) * 1000L
         /** The upcoming calls are fetched again at most this often, unless asked. */
         const val UPCOMING_EVERY_MS = 10_000L
         /** A pinned card's lines, in characters. */

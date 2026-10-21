@@ -19,6 +19,28 @@ public class JavaInteropTest {
         assertTrue(config.getEndOnBackground());
     }
 
+    @Test public void pastSessionsAndTheCloseDelayAreReadFromJava() {
+        GrainePastSessions state = new GrainePastSessions();
+        assertTrue(state.getSessions().isEmpty());
+        assertNull(state.getError());
+        GraineSessionSummary s = new GraineSessionSummary("ex-1", new java.util.Date(0L));
+        assertEquals(GraineSessionChannel.CHAT, s.getChannel());
+        assertEquals("", s.getPreview());
+        GraineSessionTranscript t = new GraineSessionTranscript("ex-1");
+        assertTrue(t.getTurns().isEmpty());
+        GraineCallback<GraineSessionTranscript> done = (transcript, error) -> assertNull(error);
+        done.onResult(t, null);
+        // The callback form, as a Java app calls it: this line compiling is the test.
+        GraineChat chat = null;
+        if (chat != null) {
+            chat.sessionTranscript("ex-1", done);
+            chat.refreshPastSessions();
+            chat.loadMorePastSessions();
+            chat.setCloseDelaySeconds(30);
+        }
+        assertEquals(15, new GraineConfig("https://www.graine.ai", "pk_live_test").getChatCloseDelaySeconds());
+    }
+
     @Test public void callPermissionsAreReadAndAnsweredFromJava() {
         GraineCallPermissionsCallback done = permissions -> assertTrue(permissions.getAllGranted());
         done.onResult(new GraineCallPermissions(GraineCallPermissionStatus.GRANTED, GraineCallPermissionStatus.GRANTED,

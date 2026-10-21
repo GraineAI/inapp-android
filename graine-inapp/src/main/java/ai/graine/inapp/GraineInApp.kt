@@ -74,6 +74,16 @@ data class GraineConfig @JvmOverloads constructor(
      * [GraineChat.open] wins for that open.
      */
     val chatSize: GraineChatSize? = null,
+    /**
+     * How long the chat stays connected once no window shows it, in seconds:
+     * the conversation closes this long after the last window left it (or
+     * after its last message, whichever is later), unless a window shows it
+     * again first — long enough for a quick hop to the booking sheet or a
+     * component. 15 by default; 0 closes it as soon as the last window leaves;
+     * kept within 0–300 (a negative value is 0). [GraineChat.closeDelaySeconds]
+     * changes it while the app runs. New in 0.14.3.
+     */
+    val chatCloseDelaySeconds: Int = 15,
 ) {
     data class Timing @JvmOverloads constructor(
         val stallMs: Long = 15_000,

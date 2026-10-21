@@ -17,7 +17,7 @@ Integration guide: https://www.graine.ai/docs/in-app/android
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    implementation("ai.graine:inapp-android:0.14.1")
+    implementation("ai.graine:inapp-android:0.14.3")
 }
 ```
 
@@ -279,8 +279,8 @@ ring, the call screen or the outcomes.
 
 ```kotlin
 dependencies {
-    implementation("ai.graine:inapp-android:0.14.1")
-    implementation("ai.graine:inapp-android-rtc:0.14.1")   // same version as the SDK
+    implementation("ai.graine:inapp-android:0.14.3")
+    implementation("ai.graine:inapp-android-rtc:0.14.3")   // same version as the SDK
 }
 ```
 
@@ -343,14 +343,22 @@ and shows the user's booked calls on an Upcoming calls card they can cancel from
 `send`, `connect`, `close`, and `connected`, `connecting`, `reconnecting` while a dropped chat is made
 again, `failed` once it gave up), and a `ChatSource` of your own can stand in its place.
 
-Closing the chat screen does not end the conversation: with no chat window
-showing it, it stays connected until it has been idle for 5 minutes (no
-message either way, `GraineChat.CLOSE_UNSEEN_MS`), so opening the chat again
-within that time goes on where it was, with no new welcome. When Graine ends a
-conversation itself — idle, or at its time limit — the chat does not reconnect
-by itself: the lines stay, the header says "Disconnected", and opening the chat
-or sending a message connects again. `close()` and the app going to the
-background end it as before.
+Closing the chat screen ends the conversation shortly after: with no chat
+window showing it, it closes 15 seconds after the last window left (or after
+the last message, whichever is later) — `GraineConfig.chatCloseDelaySeconds`,
+0–300, sets another delay, and `chat.closeDelaySeconds` changes it while the
+app runs. A window showing it again in that time goes on where it was, so a
+quick hop to the booking sheet keeps it; opened later, a signed-in user's
+conversation continues from Graine's history, with no new welcome. When Graine
+ends a conversation itself — idle, or at its time limit — the chat does not
+reconnect by itself: the lines stay, the header says "Disconnected", and
+opening the chat or sending a message connects again. `close()` and the app
+going to the background end it at once.
+
+The user's earlier sessions with the agent — like the dashboard's Execution
+History — are `chat.pastSessions` (`refreshPastSessions()`,
+`loadMorePastSessions()`), and `chat.sessionTranscript(id)` answers one
+session's messages, for a history screen of your own.
 
 ### Conversations continue
 

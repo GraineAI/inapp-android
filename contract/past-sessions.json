@@ -1,0 +1,102 @@
+{
+  "comment": "Past sessions (SDK 0.14.3): a signed-in app user's earlier sessions with an agent, like the dashboard's Execution History, and each one's transcript. Per user (the identity the app set with identify()) per agent (a web-call twin shares its primary's), only from a device bound to that user, never anyone else's. WIRE — two public routes, authenticated exactly like /api/embed/memory/list: POST /api/embed/sessions/list {publishableKey, installId, identity, cursor?, limit? (1–50, default 20)} → {sessions:[{id, startedAt, endedAt, durationSeconds, channel, direction, status, turns, preview}], next: string|null}, newest first; POST /api/embed/sessions/transcript {publishableKey, installId, identity, id} → {id, startedAt, endedAt, durationSeconds, channel, direction, status, turns:[{role, text, at}]}. `id` is the session's execution id (the id the session frame carries and Execution History shows); times are ISO-8601 UTC; channel is chat | voice | call; direction is inbound | outbound | null; status is the outcome in plain words (completed, missed, failed, …; pass through any other word); preview is the first customer line, at most 120 characters; role is user | assistant on the wire, customer | agent in the SDKs. The session that is open right now is never in the list. Refusals: {error, code} with code identity_required (400, no signed-in user), device_limit (403, this device is not bound to the user), not_found (404, unknown or not this user's — another user's session is a 404, never a 403), rate_limited (429), unavailable (503); the SDKs keep the code as the state's error word. SDK STATE (PUBLIC-STATE.md §1): chat.pastSessions {sessions, loading, hasMore, error}, empty until refreshPastSessions(); loadMorePastSessions() appends the next page; sessionTranscript(id) answers one transcript; an identity change clears the state (DESIGN.md \"Who a chat belongs to\"). Sections: `pages` (a list response → the items the SDK keeps; an item without an id or a readable startedAt is skipped; endedAt/durationSeconds unreadable → null; a channel other than voice/call is chat; a direction other than inbound/outbound is null; turns not a whole number ≥ 0 → 0; preview not a string → \"\"), `append` (pages in order → the state after each), `transcripts` (a transcript response → its turns; a turn without a user/assistant role, a string text or a readable at is skipped), `refusals` (status + body → the error word).",
+  "pages": [
+    {
+      "name": "a page of sessions, newest first, as the SDK keeps them",
+      "response": {
+        "sessions": [
+          { "id": "ex-7a1c0001", "startedAt": "2026-10-21T12:00:05Z", "endedAt": "2026-10-21T12:04:41Z", "durationSeconds": 276, "channel": "chat", "direction": null, "status": "completed", "turns": 9, "preview": "Can I move my check-in call to Friday?" },
+          { "id": "ex-31f00002", "startedAt": "2026-10-20T08:00:00Z", "endedAt": "2026-10-20T08:03:12Z", "durationSeconds": 192, "channel": "call", "direction": "outbound", "status": "completed", "turns": 14, "preview": "Hi, yes I can talk now." }
+        ],
+        "next": "c2"
+      },
+      "sessions": [
+        { "id": "ex-7a1c0001", "startedAt": "2026-10-21T12:00:05Z", "endedAt": "2026-10-21T12:04:41Z", "durationSeconds": 276, "channel": "chat", "direction": null, "status": "completed", "turns": 9, "preview": "Can I move my check-in call to Friday?" },
+        { "id": "ex-31f00002", "startedAt": "2026-10-20T08:00:00Z", "endedAt": "2026-10-20T08:03:12Z", "durationSeconds": 192, "channel": "call", "direction": "outbound", "status": "completed", "turns": 14, "preview": "Hi, yes I can talk now." }
+      ],
+      "next": "c2"
+    },
+    {
+      "name": "unreadable items are skipped and loose fields fall back",
+      "response": {
+        "sessions": [
+          { "startedAt": "2026-10-21T12:00:05Z", "channel": "chat", "turns": 3, "preview": "no id" },
+          { "id": "ex-bad-time", "startedAt": "yesterday", "channel": "chat", "turns": 3, "preview": "bad time" },
+          { "id": "ex-loose0003", "startedAt": "2026-10-19T18:30:00Z", "endedAt": "soon", "durationSeconds": "long", "channel": "sms", "direction": "sideways", "status": "missed", "turns": -2, "preview": 42 }
+        ],
+        "next": null
+      },
+      "sessions": [
+        { "id": "ex-loose0003", "startedAt": "2026-10-19T18:30:00Z", "endedAt": null, "durationSeconds": null, "channel": "chat", "direction": null, "status": "missed", "turns": 0, "preview": "" }
+      ],
+      "next": null
+    },
+    {
+      "name": "a voice session and an unknown status word pass through",
+      "response": {
+        "sessions": [
+          { "id": "ex-voice0004", "startedAt": "2026-10-18T09:00:00Z", "endedAt": "2026-10-18T09:01:00Z", "durationSeconds": 60, "channel": "voice", "direction": "inbound", "status": "ended_by_agent", "turns": 4, "preview": "What time is my appointment?" }
+        ],
+        "next": null
+      },
+      "sessions": [
+        { "id": "ex-voice0004", "startedAt": "2026-10-18T09:00:00Z", "endedAt": "2026-10-18T09:01:00Z", "durationSeconds": 60, "channel": "voice", "direction": "inbound", "status": "ended_by_agent", "turns": 4, "preview": "What time is my appointment?" }
+      ],
+      "next": null
+    }
+  ],
+  "append": [
+    {
+      "name": "refresh, then load more, then the end",
+      "steps": [
+        { "refresh": { "sessions": [{ "id": "a1", "startedAt": "2026-10-21T10:00:00Z", "channel": "chat", "status": "completed", "turns": 2, "preview": "One" }], "next": "c2" } },
+        { "more": { "sessions": [{ "id": "a2", "startedAt": "2026-10-20T10:00:00Z", "channel": "call", "direction": "outbound", "status": "completed", "turns": 6, "preview": "Two" }], "next": null } }
+      ],
+      "states": [
+        { "ids": ["a1"], "hasMore": true },
+        { "ids": ["a1", "a2"], "hasMore": false }
+      ]
+    },
+    {
+      "name": "a refresh replaces what was loaded; an id already kept is not added twice",
+      "steps": [
+        { "refresh": { "sessions": [{ "id": "a1", "startedAt": "2026-10-21T10:00:00Z", "channel": "chat", "turns": 2, "preview": "One" }], "next": "c2" } },
+        { "more": { "sessions": [{ "id": "a1", "startedAt": "2026-10-21T10:00:00Z", "channel": "chat", "turns": 2, "preview": "One" }, { "id": "a3", "startedAt": "2026-10-19T10:00:00Z", "channel": "chat", "turns": 1, "preview": "Three" }], "next": null } },
+        { "refresh": { "sessions": [{ "id": "a4", "startedAt": "2026-10-22T10:00:00Z", "channel": "chat", "turns": 5, "preview": "Four" }], "next": null } }
+      ],
+      "states": [
+        { "ids": ["a1"], "hasMore": true },
+        { "ids": ["a1", "a3"], "hasMore": false },
+        { "ids": ["a4"], "hasMore": false }
+      ]
+    }
+  ],
+  "transcripts": [
+    {
+      "name": "a session's turns, oldest first, in the SDK's words",
+      "response": {
+        "id": "ex-7a1c0001", "startedAt": "2026-10-21T12:00:05Z", "endedAt": "2026-10-21T12:04:41Z", "durationSeconds": 276, "channel": "chat", "direction": null, "status": "completed",
+        "turns": [
+          { "role": "assistant", "text": "Hi Meera, how can I help?", "at": "2026-10-21T12:00:05Z" },
+          { "role": "user", "text": "Can I move my check-in call to Friday?", "at": "2026-10-21T12:00:20Z" },
+          { "role": "system", "text": "dropped", "at": "2026-10-21T12:00:21Z" },
+          { "role": "assistant", "text": 7, "at": "2026-10-21T12:00:22Z" },
+          { "role": "assistant", "text": "Done: Friday at 10:00.", "at": "not a time" },
+          { "role": "assistant", "text": "Done: Friday at 10:00.", "at": "2026-10-21T12:00:25Z" }
+        ]
+      },
+      "turns": [
+        { "role": "agent", "text": "Hi Meera, how can I help?", "at": "2026-10-21T12:00:05Z" },
+        { "role": "customer", "text": "Can I move my check-in call to Friday?", "at": "2026-10-21T12:00:20Z" },
+        { "role": "agent", "text": "Done: Friday at 10:00.", "at": "2026-10-21T12:00:25Z" }
+      ]
+    }
+  ],
+  "refusals": [
+    { "name": "no signed-in user", "status": 400, "body": { "error": "Sign the user in first.", "code": "identity_required" }, "error": "identity_required" },
+    { "name": "a device not bound to the user", "status": 403, "body": { "error": "This device is not one of the user's.", "code": "device_limit" }, "error": "device_limit" },
+    { "name": "another user's or an unknown session", "status": 404, "body": { "error": "Session not found.", "code": "not_found" }, "error": "not_found" },
+    { "name": "too many requests", "status": 429, "body": { "error": "Slow down.", "code": "rate_limited" }, "error": "rate_limited" },
+    { "name": "the service is down, with no code", "status": 503, "body": {}, "error": "unavailable" }
+  ]
+}

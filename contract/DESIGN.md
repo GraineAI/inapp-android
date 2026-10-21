@@ -638,21 +638,24 @@ with the screen context, as always).
   `weights.title`, `min(scale.title, 16)`, the subtitle and badge as in `bar`.
 - Screen reader: "Pinned: {title}, {subtitle}, {badge}".
 
-**How long a conversation lasts** (0.14.0) — one rule for every SDK's chat
-and the website's. Closing the chat window does not end the conversation:
-with no window showing it, it stays connected until it has been idle for 5
-minutes — no message either way, the same window Graine's server applies — and
-only then closes. Opening the chat again within that time continues the same
-conversation: nothing on screen changes and there is no new welcome. A message
-that arrives while no window shows it starts the 5 minutes again. The app going
-to the background still ends it where the SDK did so before (`endOnBackground`),
-and so does `close()`. When Graine ends the conversation itself — idle
-(WebSocket close 4408, `idle_timeout`) or at the session's time limit (4410) —
-the chat does NOT reconnect by itself: the lines stay, the header's status line
-reads "Disconnected", and the next thing the customer does — opening the chat,
-sending a message — connects again (continued when Graine can continue it,
-else **A new conversation under earlier lines**). Any other unexpected close
-is a dropped connection and reconnects as before, behind the reconnect banner.
+**How long a conversation lasts** (0.14.3) — one rule for every SDK's chat
+and the website's. A chat that no window shows closes `chatCloseDelaySeconds`
+(an app setting: 15 by default, 0 = at once, at most 300) after it left the last one — the grace covers a quick hop, such as the booking sheet or a
+component — unless a window shows it again or a message is sent in that time.
+An open chat session is a conversation in Call History, timed and billed, so a
+chat nobody is looking at must not stay open (0.14.0–0.14.1 kept it for 5 idle
+minutes; the conversation no longer needs that). Opening the chat again connects
+and the server continues the conversation from its history (a `history` frame,
+no new welcome) for an identified user; that conversation's earlier sessions are
+the user's past sessions. The app going to the background still ends it where
+the SDK did so before (`endOnBackground`), and so does `close()`. When Graine
+ends the conversation itself — idle (WebSocket close 4408, `idle_timeout`) or at
+the session's time limit (4410) — the chat does NOT reconnect by itself: the lines
+stay, the header's status line reads "Disconnected", and the next thing the
+customer does — opening the chat, sending a message — connects again (continued
+when Graine can continue it, else **A new conversation under earlier lines**). Any
+other unexpected close is a dropped connection and reconnects as before, behind
+the reconnect banner.
 
 **Who a chat belongs to** (0.14.0) — one rule for every SDK's chat and the
 website's. A chat connection belongs to whoever was identified when its ticket

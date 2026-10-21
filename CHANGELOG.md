@@ -1,3 +1,8 @@
+## 0.14.3
+
+- **Past sessions, like Execution History.** The signed-in user's earlier sessions with the agent, from Call History, newest first and paged: id, start and end, duration, chat / voice / call, direction, how it ended, message count and a preview, and each one's full transcript on request. Only the user's own sessions, only on a device bound to them. `GraineChat.pastSessions`, `refreshPastSessions()`, `loadMorePastSessions()`, `sessionTranscript(id)`.
+- **A chat session closes with its screen.** When no window shows the chat, its session closes `chatCloseDelaySeconds` later (15 by default, 0 = at once, at most 300), instead of staying connected for 5 idle minutes, so a chat nobody is looking at is never an open, billed session. Opening the chat again continues the conversation from its history. `GraineConfig.chatCloseDelaySeconds`.
+
 ## 0.14.1
 
 - **Booking follows the agent's calling hours.** `bookingSlots(day)` and the SDK's booking sheet offer only times inside the agent's calling window, in the user's time zone, so a picker of your own never offers a time Graine would refuse. The window is part of the scheduling rules (`callingWindow`: start, end, days).

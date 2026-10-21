@@ -123,6 +123,10 @@ internal class EmbedApi(
         const val FORGET = "/api/embed/memory/forget"
         const val MEMORIES = "/api/embed/memory/list"
         const val NEW_CONVERSATION = "/api/embed/conversation/new"
+        /** The signed-in user's past sessions, a page at a time (contract/past-sessions.json). */
+        const val PAST_SESSIONS = "/api/embed/sessions/list"
+        /** One past session's transcript. */
+        const val SESSION_TRANSCRIPT = "/api/embed/sessions/transcript"
 
         /** The server's `{error, code}`; a code it did not send is read from the status. */
         @JvmOverloads

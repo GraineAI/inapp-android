@@ -43,13 +43,34 @@ class PrepareCallTest {
         override fun registerActivityLifecycleCallbacks(callback: ActivityLifecycleCallbacks) { lifecycle = callback }
     }
 
-    /** The phone under the call: its lock screen as the test says, and audio that does nothing. */
+    /** The phone under the call: its lock screen as the test says, audio that does nothing, and a route that says where it went. */
     private class FakePhone : CallPhone {
         var locked = false
+        /** A headset is connected: the loudspeaker by default gives way to it. */
+        var headset = false
+        /** Each acquire: the loudspeaker wanted, and whether by default. */
+        val acquired = mutableListOf<Pair<Boolean, Boolean>>()
+        val choices = mutableListOf<Boolean>()
+        var refreshes = 0
+        /** What the phone answers a focus request. */
+        var focusGranted = true
+        /** Run at each acquire: what the test wants to see at that moment. */
+        var onAcquire: () -> Unit = {}
+        var reapplies = 0
+        /** The interruptions the route can tell, for the test to raise. */
+        var interrupt: (CallInterruption) -> Unit = {}
         override fun locked(): Boolean = locked
-        override fun route(onInterruption: (CallInterruption) -> Unit): CallRoute = object : CallRoute {
-            override fun acquire(speaker: Boolean) {}
-            override fun setSpeaker(on: Boolean) {}
+        override fun route(onInterruption: (CallInterruption) -> Unit, onSpeaker: (Boolean) -> Unit): CallRoute = object : CallRoute {
+            override fun acquire(speaker: Boolean, byDefault: Boolean): Boolean {
+                acquired += speaker to byDefault
+                interrupt = onInterruption
+                onAcquire()
+                onSpeaker(speaker && !(byDefault && headset))
+                return focusGranted
+            }
+            override fun setSpeaker(on: Boolean) { choices += on; onSpeaker(on) }
+            override fun refresh() { refreshes++ }
+            override fun reapply(): Boolean { reapplies++; return focusGranted }
             override fun release() {}
         }
         override fun audio(): CallAudioIO = FakeAudio()
@@ -709,6 +730,230 @@ class PrepareCallTest {
         pump()
         assertTrue(invites() > 0)
         g.calls.end(); pump()
+    }
+
+    // ── the call's audio always starts, and the SDK never ends a call that works ──
+
+    /** A call placed at the tap in the app in front, connected: its audio is flowing. */
+    private fun connectedAtTheTap(g: GraineInApp): GraineCallService {
+        inFront(g)
+        prepare(g)
+        g.calls.startCall(activity, "help", vars, agent = g.name)!!
+        pump()
+        assertTrue("dialled at the tap, the service not up yet", invites() > 0)
+        peers.single().ice("connected"); pump()
+        assertEquals(GraineCallState.ACTIVE, g.calls.state)
+        return GraineCallService()
+    }
+
+    private fun outcomesOf(g: GraineInApp) = mutableListOf<GraineCallOutcome>().also { list ->
+        g.calls.addListener(object : GraineCallListener {
+            override fun onCallOutcome(callId: String, outcome: GraineCallOutcome) { list += outcome }
+        })
+    }
+
+    @Test fun aServiceThatCannotStartNeverEndsACallWhoseAudioIsFlowing() {
+        val g = started()
+        val outcomes = outcomesOf(g)
+        connectedAtTheTap(g)
+        val byes = sipSockets.sumOf { it.requests("BYE").size }
+        g.calls.serviceFailed(IllegalStateException("startForeground not allowed"))
+        pump()
+        assertEquals("the call goes on", GraineCallState.ACTIVE, g.calls.state)
+        assertTrue("nothing reported: it did not end", outcomes.isEmpty())
+        assertEquals("no BYE", byes, sipSockets.sumOf { it.requests("BYE").size })
+        g.calls.end(); pump()
+        assertEquals("local_end", outcomes.single().endCause)
+    }
+
+    @Test fun aServiceTheSystemStopsNeverEndsACallWhoseAudioIsFlowing() {
+        val g = started()
+        val outcomes = outcomesOf(g)
+        val service = connectedAtTheTap(g)
+        g.calls.serviceStarted(service); pump()
+        g.calls.serviceStopped(service); pump()
+        assertEquals(GraineCallState.ACTIVE, g.calls.state)
+        assertTrue(outcomes.isEmpty())
+        g.calls.end(); pump()
+        assertEquals(GraineCallOutcome.Kind.ENDED, outcomes.single().kind)
+    }
+
+    @Test fun aCallWaitingForItsServiceStartsWithoutItWhenTheAppIsInFrontAndFailsWhenItCannotRecord() {
+        val g = started()
+        val outcomes = outcomesOf(g)
+        prepare(g)
+        g.calls.startCall(activity, "help", vars, agent = g.name)!!
+        pump()
+        assertEquals("nothing of the app in front: waiting for the service", 0, invites())
+        inFront(g)
+        g.calls.serviceFailed(IllegalStateException("startForeground not allowed")); pump()
+        assertTrue("the app is in front now: it may record, so the call starts", invites() > 0)
+        assertEquals(GraineCallState.CONNECTING, g.calls.state)
+        g.calls.end(); pump()
+        outcomes.clear()
+        // Nothing of the app in front, nothing dialled: it cannot record, so it fails — and says so.
+        app.lifecycle!!.onActivityPaused(activity)
+        val before = invites()
+        prepare(g)
+        g.calls.startCall(activity, "help", vars, agent = g.name)!!
+        pump()
+        g.calls.serviceFailed(IllegalStateException("startForeground not allowed")); pump()
+        assertEquals("nothing dialled", before, invites())
+        assertEquals(GraineCallOutcome.Kind.FAILED, outcomes.single().kind)
+        assertEquals("failed", outcomes.single().endCause)
+    }
+
+    @Test fun theRouteIsSetBeforeAnyOfTheAgentsAudioCanPlay() {
+        val g = started()
+        var invitesAtAcquire = -1
+        var playingAtAcquire: Boolean? = null
+        phone.onAcquire = {
+            invitesAtAcquire = invites()
+            playingAtAcquire = peers.lastOrNull()?.audioActive?.any { it.second } == true
+        }
+        connectedAtTheTap(g)
+        assertEquals("the mode, the focus and the device before the INVITE", 0, invitesAtAcquire)
+        assertEquals("and before any playout", false, playingAtAcquire)
+        assertTrue("then the agent's audio plays", peers.single().audioActive.last().second)
+        g.calls.end(); pump()
+    }
+
+    @Test fun aFocusThePhoneDeniesIsSaidAndTheCallPlaysAnyway() {
+        val g = started()
+        phone.focusGranted = false
+        connectedAtTheTap(g)
+        assertTrue("never silent: the playout runs", peers.single().audioActive.last().second)
+        assertEquals(GraineCallState.ACTIVE, g.calls.state)
+        g.calls.end(); pump()
+    }
+
+    @Test fun noAgentAudioThreeSecondsAfterTheAnswerAppliesTheRouteAgainOnceAndNeverEndsTheCall() {
+        val g = started()
+        val outcomes = outcomesOf(g)
+        connectedAtTheTap(g)
+        clock.advance(GraineCalls.AUDIO_CHECK_MS - 1)
+        assertEquals(0, phone.reapplies)
+        clock.advance(1)
+        assertEquals("once, at three seconds", 1, phone.reapplies)
+        idle(60_000)
+        assertEquals("never again", 1, phone.reapplies)
+        assertEquals("and the call goes on: there is no watchdog that hangs up", GraineCallState.ACTIVE, g.calls.state)
+        assertTrue(outcomes.isEmpty())
+        g.calls.end(); pump()
+    }
+
+    @Test fun theAgentsAudioHeardInTimeLeavesTheRouteAloneAndIsKeptOnTheEndedRow() {
+        val g = started()
+        connectedAtTheTap(g)
+        controls.single().deliver("{\"type\":\"control_ready\"}"); pump()
+        peers.single().stats = rtcStats(bytes = 1600, level = 0.3)
+        clock.advance(400); pump()
+        clock.advance(GraineCalls.AUDIO_CHECK_MS); pump()
+        assertEquals("heard: nothing to apply again", 0, phone.reapplies)
+        g.calls.end(); pump()
+        val ended = controls.single().sent.map { JSONObject(it) }
+            .single { it.optString("type") == "app_event" && it.getJSONObject("event").getString("name") == "ended" }
+        assertTrue("voice_heard on the ended row", ended.getJSONObject("event").getJSONObject("data").getBoolean("voice_heard"))
+    }
+
+    /** Calls start on the loudspeaker (the earpiece was the "silent call"), a headset keeps the call, and the user still decides. */
+    @Test fun aCallStartsOnTheLoudspeakerUnlessAHeadsetIsThereAndTheUserStillDecides() {
+        val g = started()
+        val heardSpeaker = mutableListOf<Boolean>()
+        g.calls.addListener(object : GraineCallListener {
+            override fun onCallControls(muted: Boolean, speaker: Boolean) { heardSpeaker += speaker }
+        })
+        assertTrue("the default", g.calls.speakerByDefault)
+        prepare(g)
+        g.calls.startCall(activity, "help", vars, agent = g.name)!!
+        pump()
+        g.calls.serviceStarted(GraineCallService())
+        pump()
+        assertEquals("the loudspeaker, by default", listOf(true to true), phone.acquired)
+        assertTrue("the state is the route", g.calls.speaker)
+        peers.single().ice("connected"); pump()
+        assertEquals("chosen again as the call's audio starts", 1, phone.refreshes)
+        g.calls.setSpeaker(false); pump()
+        assertFalse("the user's choice: the earpiece", g.calls.speaker)
+        assertEquals(listOf(true, false), heardSpeaker)
+        g.calls.end(); pump()
+        assertFalse("no call, no loudspeaker", g.calls.speaker)
+        // The next call: a headset keeps it.
+        phone.headset = true
+        prepare(g)
+        g.calls.startCall(activity, "help", vars, agent = g.name)!!
+        pump()
+        g.calls.serviceStarted(GraineCallService())
+        pump()
+        assertEquals(true to true, phone.acquired.last())
+        assertFalse("the headset has the call", g.calls.speaker)
+        g.calls.end(); pump()
+        // Set off before a call: the earpiece first, as before.
+        g.calls.speakerByDefault = false
+        phone.headset = false
+        prepare(g)
+        g.calls.startCall(activity, "help", vars, agent = g.name)!!
+        pump()
+        g.calls.serviceStarted(GraineCallService())
+        pump()
+        assertEquals(false to true, phone.acquired.last())
+        assertFalse(g.calls.speaker)
+        g.calls.end(); pump()
+    }
+
+    @Test fun anEndedCallSaysWhoEndedIt() {
+        val g = started()
+        val outcomes = mutableListOf<GraineCallOutcome>()
+        g.calls.addListener(object : GraineCallListener {
+            override fun onCallOutcome(callId: String, outcome: GraineCallOutcome) { outcomes += outcome }
+        })
+        prepare(g)
+        g.calls.startCall(activity, "help", vars, agent = g.name)!!
+        pump()
+        g.calls.serviceStarted(GraineCallService())
+        pump()
+        peers.single().ice("connected"); pump()
+        controls.single().deliver("{\"type\":\"control_ready\"}"); pump()
+        g.calls.end(); pump()
+        assertEquals("the user ended it", "local_end", outcomes.last().endCause)
+        assertEquals(GraineCallOutcome.EndReason.LOCAL, outcomes.last().endReason)
+        // The hang-up told the agent's side why, on the call's own channel.
+        val ended = controls.single().sent.map { JSONObject(it) }
+            .single { it.optString("type") == "app_event" && it.getJSONObject("event").getString("name") == "ended" }
+        assertEquals("local_end", ended.getJSONObject("event").getJSONObject("data").getString("cause"))
+    }
+
+    /** The same facts as the rows, on GraineCalls: growing as the call goes, heard by its listeners, and on its outcome. */
+    @Test fun theConnectionReportGrowsAsTheCallGoesAndRidesItsOutcome() {
+        val g = started()
+        val heard = mutableListOf<GraineCallConnection>()
+        val outcomes = mutableListOf<GraineCallOutcome>()
+        g.calls.addListener(object : GraineCallListener {
+            override fun onCallConnection(connection: GraineCallConnection) { heard += connection }
+            override fun onCallOutcome(callId: String, outcome: GraineCallOutcome) { outcomes += outcome }
+        })
+        prepare(g)
+        idle(30_000)
+        g.calls.startCall(activity, "help", vars, agent = g.name)!!
+        pump()
+        clock.advance(400)
+        g.calls.serviceStarted(GraineCallService())
+        pump()
+        assertNull("nothing known before it connects", g.calls.connection)
+        clock.advance(60)
+        peers.single().ice("connected"); pump()
+        val c = g.calls.connection!!
+        assertEquals("webrtc", c.transport)
+        assertEquals(true, c.prepared)
+        assertEquals(30L, c.preparedAgeSeconds)
+        assertEquals("from the tap, the service's 400 ms inside", 400L, c.setupMs)
+        assertNull("logged in before the tap", c.loginMs)
+        assertEquals("the listeners heard it", c, heard.last())
+        g.calls.end(); pump()
+        val ended = outcomes.last()
+        assertEquals(GraineCallOutcome.Kind.ENDED, ended.kind)
+        assertEquals("the outcome carries the report as it stood", c, ended.connection)
+        assertNull("no call, no report", g.calls.connection)
     }
 
     /**

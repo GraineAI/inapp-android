@@ -37,6 +37,33 @@ enum class CallPhase {
 }
 
 /**
+ * Where the voice bar's call is, in one word — what the SDK's bar says, first
+ * match wins: FAILED (a setting someone must fix, [GraineVoice.error], or a
+ * start nothing could carry, [GraineVoice.callFailed]), RECONNECTING,
+ * CONNECTING, MUTED, THINKING, SPEAKING, LISTENING; with no call, ENDED once
+ * a call has ended (until the next starts), else IDLE. [wire] is the word
+ * every Graine SDK uses.
+ */
+enum class GraineVoiceStatus(val wire: String) {
+    IDLE("idle"), CONNECTING("connecting"), LISTENING("listening"), THINKING("thinking"), SPEAKING("speaking"),
+    RECONNECTING("reconnecting"), MUTED("muted"), FAILED("failed"), ENDED("ended");
+
+    companion object {
+        /** The rule, from the call's [phase] and flags. An engine reloading with no call is no call recovering. */
+        internal fun of(phase: CallPhase, connected: Boolean, connecting: Boolean, muted: Boolean, failed: Boolean, ended: Boolean): GraineVoiceStatus = when {
+            failed -> FAILED
+            phase == CallPhase.RECONNECTING && (connected || connecting) -> RECONNECTING
+            connecting -> CONNECTING
+            !connected -> if (ended) ENDED else IDLE
+            muted -> MUTED
+            phase == CallPhase.THINKING -> THINKING
+            phase == CallPhase.SPEAKING -> SPEAKING
+            else -> LISTENING
+        }
+    }
+}
+
+/**
  * THE VOICE BAR'S RULES, AS NUMBERS — contract/DESIGN.md → Voice bar and Chat
  * window, the Garage's phone preview. Pure: no view, no context, so every size,
  * word and timing the bar draws is proven on the JVM; GraineAgentBarView only
@@ -123,6 +150,8 @@ internal object VoiceBar {
         val chatOnline: Boolean = false,
         /** Nothing could connect the chat, after every retry ([ChatSource.failed]). */
         val chatFailed: Boolean = false,
+        /** Graine ended the chat's conversation itself — idle, or its time limit — and nothing reconnects until the customer opens it or writes ([GraineChat.disconnected]). */
+        val chatDisconnected: Boolean = false,
         /** The engine page's view of the network; null until it says. */
         val online: Boolean? = null,
         val reconnecting: Boolean = false,
@@ -168,6 +197,8 @@ internal object VoiceBar {
             s.chatOnline -> Status("Online")
             // Said, not spun: a loader over a chat that has stopped trying is the lie the call's words avoid too.
             s.chatFailed -> Status(ChatWindowView.FAILED_TEXT)
+            // Graine ended it and nothing is trying: as the chat window's header says it, until the customer opens it or writes.
+            s.chatDisconnected -> Status(ChatLook.DISCONNECTED)
             else -> Status("Connecting…", "connecting")
         }
         // The network gets named, or the agent takes the blame for it.

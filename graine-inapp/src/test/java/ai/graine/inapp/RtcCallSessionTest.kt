@@ -105,6 +105,33 @@ class RtcCallSessionTest {
     private val peer: FakePeer get() = peers.last()
     private val control: FakeSipSocket get() = controlSockets.single()
 
+    /** The twelve seconds are the call's after its credential, never spent on a mint still on its way. */
+    @Test fun theTwelveSecondsStartWhenTheMintAnswersNotBeforeIt() {
+        val held = mutableListOf<() -> Unit>()
+        val slow = RtcEnv(
+            scheduler = sched,
+            createPeer = { _, l -> FakePeer().also { it.listener = l; peers += it } },
+            http = env.http,
+            io = { work -> held += work },
+            // The signalling socket never opens: only the budget can end the attempt.
+            openSip = { url, protocols, l -> FakeSipSocket().also { s -> s.url = url; s.protocols = protocols; s.listener = l; sipSockets += s } },
+            openControl = { url, l -> FakeSipSocket().also { it.url = url; it.listener = l; controlSockets += it } },
+            sipRandom = FixedSipRandom(),
+            newSessionId = { "0123456789abcdef0123456789abcdef" },
+            wallClock = { 1_800_000_000_000L },
+            steps = { step, detail -> steps += "$step: $detail" },
+        )
+        val s = RtcCallSession(request, slow)
+        s.dial(deps, listener); pump()
+        sched.advance(RtcDial.ATTEMPT_BUDGET_MS + 3_000); pump()
+        assertTrue("a mint still on its way spends none of the budget", log.isEmpty())
+        held.removeAt(0)(); pump()
+        sched.advance(RtcDial.ATTEMPT_BUDGET_MS - 100); pump()
+        assertTrue("twelve seconds from the mint's answer, not from the dial", log.isEmpty())
+        sched.advance(100); pump()
+        assertEquals(listOf("fallback register_failed"), log)
+    }
+
     /** Minted, registered and gathered (a srflx candidate): ready to dial. */
     private fun prepared(): RtcCallSession {
         val s = RtcCallSession(request, env)

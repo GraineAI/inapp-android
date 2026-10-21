@@ -171,6 +171,16 @@ object GraineCallsHost {
     @JvmStatic
     fun setSpeaker(on: Boolean) = onMain { core.setSpeaker(on) }
 
+    /**
+     * Calls start on the loudspeaker (true, the default) unless a headset is
+     * connected, or on the earpiece (false) — [GraineCalls.speakerByDefault].
+     * Applied now and kept with the options for the next cold start, as
+     * `configure`'s `speakerByDefault` is; before `configure`, held until it
+     * runs. For the call in progress, [setSpeaker].
+     */
+    @JvmStatic
+    fun setSpeakerByDefault(on: Boolean) = onMain { core.setSpeakerByDefault(on) }
+
     // ── permissions and setup ───────────────────────────────────────────────
 
     /**
@@ -436,6 +446,7 @@ object GraineCallsHost {
                 ringTimeoutMs = options.ringTimeoutMs,
                 callTransport = options.callTransport,
             ))
+            g.calls.speakerByDefault = options.speakerByDefault
         }
 
         override fun startCall(activity: Any?, reason: String?, variables: Map<String, Any?>): String? =
@@ -459,6 +470,8 @@ object GraineCallsHost {
         override fun setMuted(muted: Boolean) { calls?.setMuted(muted) }
 
         override fun setSpeaker(on: Boolean) { calls?.setSpeaker(on) }
+
+        override fun setSpeakerByDefault(on: Boolean) { calls?.speakerByDefault = on }
 
         // Who the user is and the screen are the app's: on one agent, every agent has them.
         override fun identify(traits: Map<String, Any?>?) { graine?.identify(traits) }
@@ -510,6 +523,8 @@ object GraineCallsHost {
                 agent = call?.let { c.agentFor(it.callId).name },
                 transport = c.transport,
                 transportFallbackReason = c.transportFallbackReason,
+                connection = c.connection,
+                agentLevel = CallsHostSnapshot.level(c.agentLevel),
             )
         }
 
@@ -537,5 +552,9 @@ object GraineCallsHost {
         override fun onCallReconnecting(reconnecting: Boolean) = core.engineChanged()
 
         override fun onCallControls(muted: Boolean, speaker: Boolean) = core.engineChanged()
+
+        override fun onCallConnection(connection: GraineCallConnection) = core.engineChanged()
+
+        override fun onAgentLevel(level: Float) = core.engineChanged()
     }
 }

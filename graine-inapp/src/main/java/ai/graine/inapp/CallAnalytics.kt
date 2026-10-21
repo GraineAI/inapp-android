@@ -67,6 +67,25 @@ internal object CallAnalytics {
         "codec" to listOf("opus", "PCMU", "PCMA", "G722", "G729", "iLBC", "ISAC", "L16"),
     )
 
+    /**
+     * HOW THE CALL ENDED, once, as it ends — sent ahead of the contract: [ROWS]
+     * is protocol.ts's to the byte, and this row joins it there. Until then it
+     * is filed like every telemetry row (a raw timeline shows its detail). Its
+     * `cause` is [CallEnd]'s word; `after_ms` how long the call had its audio;
+     * `voice_heard` whether the agent's voice had reached the phone.
+     */
+    const val ENDED = "ended"
+
+    /** Rows sent ahead of the contract, kept apart from [ROWS]: built by the same rules. */
+    val AHEAD: Map<String, List<Pair<String, String>>> = linkedMapOf(
+        ENDED to listOf("cause" to "enum:end_cause", "transport" to "enum:transport", "after_ms" to MS, "voice_heard" to BOOL),
+    )
+
+    /** Their closed lists. */
+    private val AHEAD_ENUMS: Map<String, List<String>> = linkedMapOf(
+        "end_cause" to listOf(CallEnd.LOCAL_END, CallEnd.REMOTE_BYE, CallEnd.MEDIA_DROP, CallEnd.AUDIO_WATCH, CallEnd.FAILED),
+    )
+
     /** THE ROWS, each with its keys in the order they are sent and the type of each value. */
     val ROWS: Map<String, List<Pair<String, String>>> = linkedMapOf(
         // Once, when the call is connected on whichever transport carries it. fallback_reason only on a fallback.
@@ -100,13 +119,7 @@ internal object CallAnalytics {
      * keeps neither the key order (on the JVM) nor "opus/48000" unescaped.
      */
     fun event(name: String, input: Map<String, *>?): String? {
-        val keys = ROWS[name] ?: return null
-        val data = LinkedHashMap<String, Any>()
-        if (input != null) for ((key, type) in keys) {
-            if (!input.containsKey(key)) continue
-            clean(type, input[key])?.let { data[key] = it }
-            if (data.size >= MAX_KEYS) break
-        }
+        val data = cleaned(name, input) ?: return null
         val sb = StringBuilder(192)
         sb.append("{\"name\":")
         Json.quote(sb, name)
@@ -127,6 +140,26 @@ internal object CallAnalytics {
         }
         return sb.append("}}").toString()
     }
+
+    /** A row's data as it is sent: only its keys, in its order, each cleaned to its type; null for a name that is not a row. */
+    private fun cleaned(name: String, input: Map<String, *>?): LinkedHashMap<String, Any>? {
+        val keys = ROWS[name] ?: AHEAD[name] ?: return null
+        val data = LinkedHashMap<String, Any>()
+        if (input != null) for ((key, type) in keys) {
+            if (!input.containsKey(key)) continue
+            clean(type, input[key])?.let { data[key] = it }
+            if (data.size >= MAX_KEYS) break
+        }
+        return data
+    }
+
+    /**
+     * A row's data as plain values, exactly as it is sent — integers as Long,
+     * a percentage as a Double of its two decimals — for the call's own
+     * connection report ([CallConnectionReport]). Null for a name that is not a row.
+     */
+    fun values(name: String, input: Map<String, *>?): Map<String, Any>? =
+        cleaned(name, input)?.mapValues { (_, v) -> if (v is Hundredths) v.n / 100.0 else v }
 
     /** The frame a row travels in, on either channel: `{"type":"app_event","event":…}`. Null for a name that is not a row. */
     fun frame(name: String, input: Map<String, *>?): String? = event(name, input)?.let { "{\"type\":\"app_event\",\"event\":$it}" }
@@ -163,7 +196,7 @@ internal object CallAnalytics {
         PERCENT -> number(v)?.let { Hundredths(Math.min(Math.floor(it * 100 + 0.5), LIMITS.getValue(PERCENT) * 100.0).toLong()) }
         BOOL -> v as? Boolean
         CODEC -> codec(v)
-        else -> (v as? String)?.takeIf { ENUMS[type.removePrefix("enum:")]?.contains(it) == true }
+        else -> (v as? String)?.takeIf { type.removePrefix("enum:").let { list -> (ENUMS[list] ?: AHEAD_ENUMS[list])?.contains(it) == true } }
     }
 
     /** A number, finite and not negative. A numeric string or a boolean is not one. */
@@ -207,6 +240,7 @@ internal object CallAnalytics {
      *   recovery   "redial after 1.2s"
      *   quality    "64s · loss 0.3% · jitter 12 ms"
      *   media      "no audio path (ice_timeout)"
+     *   ended      "hung up on this side after 3.2s, the agent heard"
      * Each part only when its value survived.
      */
     private fun detail(name: String, d: Map<String, Any>): String {
@@ -250,7 +284,84 @@ internal object CallAnalytics {
                 ms("jitter_avg_ms")?.let { "jitter $it ms" },
             ).joinToString(" · ").ifEmpty { "call quality" }
             MEDIA -> (d["reason"] as? String)?.let { "no audio path ($it)" } ?: "no audio path"
+            ENDED -> when (d["cause"]) {
+                CallEnd.LOCAL_END -> "hung up on this side"
+                CallEnd.REMOTE_BYE -> "the far side hung up"
+                CallEnd.MEDIA_DROP -> "the audio path dropped"
+                CallEnd.AUDIO_WATCH -> "nothing arrived: ended on this side"
+                CallEnd.FAILED -> "failed"
+                else -> "ended"
+            } + (ms("after_ms")?.let { " after ${seconds(it)}" } ?: "") + when (d["voice_heard"]) {
+                true -> ", the agent heard"
+                false -> ", the agent not heard"
+                else -> ""
+            }
             else -> name
+        }
+    }
+}
+
+/**
+ * ONE CALL'S CONNECTION REPORT, folded from its analytics rows as they are
+ * made ([GraineCalls.connection], [GraineCallOutcome.connection]): the facts
+ * Execution Logs' Connection card shows, in its words. The tap's wait is the
+ * card's segments — setup, then login (the device signing in, inside the
+ * setup of a call set up after the tap; a prepared call logged in before the
+ * tap, so it has none), the answer, the agent's first words — the audio is
+ * the quality row's (or the reading so far, while the call is live), its
+ * verdict on the thresholds the SDK's connection indicator uses, and every
+ * recovery row counts once. Pure; main thread.
+ */
+internal class CallConnectionReport {
+    /** The report so far; null before any row. */
+    var value: GraineCallConnection? = null
+        private set
+
+    /** One row (or, for [CallAnalytics.QUALITY], a reading of the audio so far), as [CallAnalytics.values] cleans it. A row it has no fact from changes nothing. */
+    fun fold(name: String, input: Map<String, *>?) {
+        val d = CallAnalytics.values(name, input) ?: return
+        val r = value ?: GraineCallConnection()
+        fun ms(key: String): Long? = d[key] as? Long
+        value = when (name) {
+            CallAnalytics.TRANSPORT -> r.copy(transport = when (d["transport"]) {
+                "rtc" -> CallTransportChoice.WEBRTC
+                "ws" -> CallTransportChoice.WEBSOCKET
+                else -> r.transport
+            })
+            CallAnalytics.CONNECT -> {
+                val prepared = (d["mode"] as? String)?.let { it == "prepared" } ?: d["warm"] as? Boolean
+                val setup = ms("setup_ms")
+                val login = if (prepared == true) null else ms("register_ms")
+                val inSetup = if (setup != null && login != null) minOf(login, setup) else null
+                r.copy(
+                    prepared = prepared,
+                    preparedAgeSeconds = if (prepared == true) ms("prepared_age_s") else null,
+                    credential = d["mint_route"] as? String,
+                    setupMs = setup?.let { it - (inSetup ?: 0L) },
+                    loginMs = if (setup != null) inSetup else login,
+                    answerMs = ms("dial_ms"),
+                )
+            }
+            CallAnalytics.VOICE -> r.copy(tapToVoiceMs = ms("tap_to_voice_ms"), firstWordsMs = ms("answer_to_voice_ms"))
+            CallAnalytics.RECOVERY -> r.copy(recoveries = r.recoveries + 1)
+            CallAnalytics.QUALITY -> {
+                val loss = d["loss_pct"] as? Double
+                val jitter = ms("jitter_avg_ms")
+                val rtt = ms("rtt_avg_ms")
+                if (loss == null && jitter == null && rtt == null && ms("jitter_max_ms") == null) return
+                r.copy(audio = GraineCallConnection.Audio(loss, jitter, ms("jitter_max_ms"), rtt, verdict(loss, jitter, rtt)))
+            }
+            else -> return
+        }
+    }
+
+    companion object {
+        /** "good", "fair" or "poor" — Execution Logs' verdict, on the connection indicator's thresholds; null with nothing measured. */
+        fun verdict(lossPct: Double?, jitterMs: Long?, rttMs: Long?): String? = when {
+            lossPct == null && jitterMs == null && rttMs == null -> null
+            (lossPct ?: 0.0) >= 8 || (jitterMs ?: 0L) >= 80 || (rttMs ?: 0L) >= 400 -> GraineCallConnection.POOR
+            (lossPct ?: 0.0) >= 2 || (jitterMs ?: 0L) >= 30 || (rttMs ?: 0L) >= 150 -> GraineCallConnection.FAIR
+            else -> GraineCallConnection.GOOD
         }
     }
 }

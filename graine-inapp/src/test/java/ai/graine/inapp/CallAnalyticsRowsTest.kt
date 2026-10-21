@@ -78,11 +78,15 @@ class CallAnalyticsRowsTest {
         wsHost = "wss://ws.graine.ai",
     )
 
+    /** What the call's connection report heard: each row as it was made, and the readings of the audio so far. */
+    private val reported = mutableListOf<Pair<String, Map<String, Any?>>>()
+
     private val listener = object : RtcCallSession.Listener {
         override fun onMedia() { log += "media" }
         override fun onFallback(reason: String, detail: String) { log += "fallback $reason" }
         override fun onEnded(reason: GraineCallOutcome.EndReason, error: String?) { log += "ended ${reason.wire}" }
         override fun onRows(frames: List<String>) { handedOver += frames }
+        override fun onRow(name: String, data: Map<String, Any?>) { reported += name to data }
     }
 
     private fun deps(tapAt: Long? = null) = RtcDialDeps({ _, _, answer -> answer(ActionResult.ok()) }, { null }, tapAt = tapAt, requested = "auto")
@@ -377,7 +381,7 @@ class CallAnalyticsRowsTest {
         peer.ice("connected"); pump()
         s.hangUp(); pump()
         val all = rows()
-        assertEquals(listOf("transport", "connect", "voice", "recovery", "quality"), names(all))
+        assertEquals(listOf("transport", "connect", "voice", "recovery", "quality", "ended"), names(all))
         val secrets = listOf(SESSION, "call_1", "u-42", "inst-1", "agent-web-1", "web-XXXX", "Asha", "kyc_help", Trace.APP_SID, "pk_test_key", "Asia/Kolkata", "customer")
         for (r in all) {
             for (x in secrets) assertFalse("$x in $r", r.contains(x))
@@ -385,10 +389,15 @@ class CallAnalyticsRowsTest {
             val data = (OrderedJson.parse(r) as Map<String, Any?>)["data"] as Map<String, Any?>
             assertTrue(r, data.size <= CallAnalytics.MAX_KEYS)
             val name = JSONObject(r).getString("name")
-            assertEquals("only the row's keys, in its order", CallAnalytics.ROWS.getValue(name).map { it.first }.filter { it in data }, data.keys.toList())
+            val keys = CallAnalytics.ROWS[name] ?: CallAnalytics.AHEAD.getValue(name)
+            assertEquals("only the row's keys, in its order", keys.map { it.first }.filter { it in data }, data.keys.toList())
             for ((k, v) in data) if (v is String) {
-                val type = CallAnalytics.ROWS.getValue(name).first { it.first == k }.second
-                val list = if (type == "codec") CallAnalytics.ENUMS.getValue("codec") else CallAnalytics.ENUMS.getValue(type.removePrefix("enum:"))
+                val type = keys.first { it.first == k }.second
+                val list = when (type) {
+                    "codec" -> CallAnalytics.ENUMS.getValue("codec")
+                    "enum:end_cause" -> listOf(CallEnd.LOCAL_END, CallEnd.REMOTE_BYE, CallEnd.MEDIA_DROP, CallEnd.AUDIO_WATCH, CallEnd.FAILED)
+                    else -> CallAnalytics.ENUMS.getValue(type.removePrefix("enum:"))
+                }
                 assertTrue("$k=$v is a word of its list", list.any { v == it || v.startsWith("$it/") })
             }
         }
@@ -529,9 +538,146 @@ class CallAnalyticsRowsTest {
         assertNull(CallTransports.claim("call_t"))
     }
 
+    // ── how the call ended (0.14.0): the `ended` row, ahead of the contract ──
+
+    private fun ended(rows: List<String> = rows()) = JSONObject(row("ended", rows))
+
+    @Test fun aCallThisSideEndsSaysSoBeforeTheBye() {
+        val s = live()
+        control.deliver(READY); pump()
+        peer.stats = stats(received = 500, lost = 0, jitter = 0.01, rtt = 0.04)
+        sched.advance(3_000); pump()
+        var endedAtBye: Boolean? = null
+        sip.onSend = { if (it.startsWith("BYE ") && endedAtBye == null) endedAtBye = names().contains("ended") }
+        s.hangUp(); pump()
+        assertEquals("written before the BYE", true, endedAtBye)
+        assertEquals(listOf("quality", "ended"), names().takeLast(2))
+        val e = ended()
+        assertEquals(
+            "{\"name\":\"ended\",\"detail\":\"hung up on this side after 3.0s, the agent heard\",\"quiet\":true,\"telemetry\":true,\"data\":" +
+                "{\"cause\":\"local_end\",\"transport\":\"rtc\",\"after_ms\":3000,\"voice_heard\":true}}",
+            row("ended"),
+        )
+        assertEquals("the call's report heard it too", "ended", reported.last().first)
+        assertEquals("local_end", e.getJSONObject("data").getString("cause"))
+    }
+
+    @Test fun theFarSidesByeSaysRemoteBye() {
+        live()
+        control.deliver(READY); pump()
+        sched.advance(1_000); pump()
+        val invite = sip.requests("INVITE").last()
+        val ack = sip.requests("ACK").last()
+        sip.deliver(sbc.inDialog("BYE", invite, ack, cseq = 1)); pump()
+        assertEquals(listOf("ended remote"), log)
+        val data = ended().getJSONObject("data")
+        assertEquals("remote_bye", data.getString("cause"))
+        assertFalse("nothing heard yet", data.getBoolean("voice_heard"))
+    }
+
+    @Test fun anAudioPathThatDroppedSaysMediaDrop() {
+        live()
+        control.deliver(READY); pump()
+        peer.ice("disconnected"); pump()
+        sched.advance(RtcMediaWatch.RECOVERY_WINDOW_MS); pump()
+        assertEquals(listOf("ended failed"), log)
+        assertEquals("media_drop", ended().getJSONObject("data").getString("cause"))
+    }
+
+    @Test fun theAppSaysWhyItEndedTheCallWhenItWasNotTheUser() {
+        val s = live()
+        control.deliver(READY); pump()
+        s.hangUp(CallEnd.FAILED); pump()
+        assertEquals("failed", ended().getJSONObject("data").getString("cause"))
+        s.hangUp(); pump()
+        assertEquals("once", 1, names().count { it == "ended" })
+    }
+
+    @Test fun aWebSocketCallSaysHowItEndedBeforeItsStop() {
+        plan(webrtc = false, requested = "ws")
+        val heard = mutableListOf<Pair<String, Map<String, Any?>>>()
+        sched.advance(300)
+        val s = CallTransportSession(config.copy(tapAt = 0), wsDeps, object : CallSessionEvents {
+            override fun onAnalytics(name: String, data: Map<String, Any?>) { heard += name to data }
+        })
+        s.start(); pump()
+        val voice = voiceSockets.single()
+        open(voice)
+        sched.advance(2_000)
+        s.hangUp(); pump()
+        val types = voice.sent.map { runCatching { JSONObject(it).optString("type") }.getOrDefault("") }
+        val endedAt = voice.sent.indexOfFirst { it.startsWith(APP_EVENT) && JSONObject(it).getJSONObject("event").getString("name") == "ended" }
+        assertTrue("sent", endedAt >= 0)
+        assertEquals("then the stop", "stop", types[endedAt + 1])
+        val data = JSONObject(voice.sent[endedAt]).getJSONObject("event").getJSONObject("data")
+        assertEquals("local_end", data.getString("cause"))
+        assertEquals("ws", data.getString("transport"))
+        assertEquals(2_000, data.getInt("after_ms"))
+        assertEquals("ended", heard.last().first)
+    }
+
+    @Test fun aWebSocketTheFarSideClosedSaysRemoteByeToTheCallsReport() {
+        plan(webrtc = false, requested = "ws")
+        val causes = mutableListOf<String>()
+        sched.advance(300)
+        val s = CallTransportSession(config.copy(tapAt = 0), wsDeps, object : CallSessionEvents {
+            override fun onAnalytics(name: String, data: Map<String, Any?>) { if (name == "ended") causes += data["cause"] as String }
+        })
+        s.start(); pump()
+        val voice = voiceSockets.single()
+        open(voice)
+        voice.listener!!.onClosed(1000, ""); pump()
+        assertEquals(listOf("remote_bye"), causes)
+    }
+
     private companion object {
         const val SESSION = "0123456789abcdef0123456789abcdef"
         const val READY = "{\"type\":\"control_ready\"}"
         const val APP_EVENT = "{\"type\":\"app_event\",\"event\":"
+    }
+
+    // ── the connection report (GraineCalls.connection) ──────────────────────
+
+    @Test fun everyRowIsToldToTheConnectionReportAsItIsMadeWithoutWaitingForTheChannel() {
+        val s = live()
+        assertEquals("at media, the channel not joined yet", listOf("transport", "connect"), reported.map { it.first })
+        control.deliver(READY); pump()
+        // Five readings: the agent heard at the first, the audio so far at the fifth.
+        peer.stats = stats(received = 997, lost = 3, jitter = 0.012, rtt = 0.048)
+        sched.advance(1_000); pump()
+        assertEquals(listOf("transport", "connect", "voice", "quality"), reported.map { it.first })
+        val live = CallConnectionReport().apply { reported.forEach { (n, d) -> fold(n, d) } }.value!!
+        assertEquals("webrtc", live.transport)
+        assertEquals(true, live.prepared)
+        assertEquals(5L, live.preparedAgeSeconds)
+        assertEquals(300L, live.setupMs)
+        assertNull("prepared: its login was before the tap", live.loginMs)
+        assertEquals(0L, live.answerMs)
+        assertEquals(540L, live.tapToVoiceMs)
+        assertEquals(240L, live.firstWordsMs)
+        assertEquals(GraineCallConnection.Audio(0.3, 12, 12, 48, GraineCallConnection.GOOD), live.audio)
+        assertEquals("a reading is never a row", 0, names().count { it == "quality" })
+        s.hangUp(); pump()
+        assertEquals("and the call's own at its end, then how it ended", listOf("quality", "ended"), reported.takeLast(2).map { it.first })
+        assertEquals(1, names().count { it == "quality" })
+    }
+
+    @Test fun aWebSocketCallTellsItsConnectionReportToo() {
+        plan(webrtc = false, requested = "ws")
+        val heard = mutableListOf<String>()
+        val report = CallConnectionReport()
+        sched.advance(300)
+        val s = CallTransportSession(config.copy(tapAt = 0), wsDeps, object : CallSessionEvents {
+            override fun onAnalytics(name: String, data: Map<String, Any?>) { heard += name; report.fold(name, data) }
+        })
+        s.start(); pump()
+        open(voiceSockets.single())
+        assertEquals(listOf("transport", "connect"), heard)
+        val c = report.value!!
+        assertEquals("websocket", c.transport)
+        assertEquals(false, c.prepared)
+        assertEquals("tapped at 0, the socket asked for at 300", 300L, c.setupMs)
+        assertEquals("open 200 ms later", 200L, c.answerMs)
+        assertNull("no audio figures on the WebSocket", c.audio)
     }
 }

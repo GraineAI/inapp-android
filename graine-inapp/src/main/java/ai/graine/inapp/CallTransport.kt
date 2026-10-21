@@ -432,6 +432,7 @@ internal class CallTransportSession(
             override fun onAgentSpeaking(speaking: Boolean) = events.onAgentSpeaking(speaking)
             override fun onAudioStats(stats: GraineRtcStats) = events.onAgentAudio(stats.audioLevel, stats.totalAudioEnergy, stats.totalSamplesDuration)
             override fun onReconnecting(reconnecting: Boolean) = events.onReconnecting(reconnecting)
+            override fun onRow(name: String, data: Map<String, Any?>) = events.onAnalytics(name, data)
         })
     }
 
@@ -445,11 +446,11 @@ internal class CallTransportSession(
         if (hungUp) s.hangUp()
     }
 
-    /** Hang up whichever is carrying the call. The WebSocket's audio is let go on this thread, at once. */
-    fun hangUp() {
+    /** Hang up whichever is carrying the call, saying why ([cause]). The WebSocket's audio is let go on this thread, at once. */
+    fun hangUp(cause: String = CallEnd.LOCAL_END) {
         hungUp = true
-        socket?.hangUp()
-        rtc?.hangUp()
+        socket?.hangUp(cause)
+        rtc?.hangUp(cause)
     }
 
     fun setMuted(value: Boolean) {

@@ -37,6 +37,14 @@ data class GraineChatTurn @JvmOverloads constructor(
     val restored: Boolean = false,
     /** Where it was said. A chat window draws a run of [Channel.VOICE] turns as one "Voice call" row, never their words. */
     val channel: Channel = Channel.CHAT,
+    /**
+     * The id of the session it was said in — a chat connection's run, or a
+     * call's id for a voice turn, the id Execution Logs shows: a restored
+     * turn's as Graine kept it, a turn said now the chat's
+     * [GraineChat.sessionId] when it was said. Null for turns kept before
+     * sessions were recorded, and with a server that sends none. New in 0.14.0.
+     */
+    val session: String? = null,
 ) {
     enum class Delivery {
         /** Waiting for the connection: typed while the chat was not connected, sent when it is. */
@@ -139,7 +147,7 @@ internal object ChatFrames {
 /** Everything a text socket can deliver, typed. */
 internal sealed class ChatInbound {
     data class Text(val data: Any?) : ChatInbound()
-    /** The earlier conversation, restored (contract §2.6): the turns, oldest first — possibly none. */
+    /** The earlier conversation, restored (contract §2.6): the turns, oldest first — none when the frame's could not be read. */
     data class History(val turns: List<GraineChatTurn>) : ChatInbound()
     data class Widget(val widget: JSONObject) : ChatInbound()
     data class WidgetPending(val hint: JSONObject) : ChatInbound()
@@ -148,6 +156,8 @@ internal sealed class ChatInbound {
     data class QuickReplies(val replies: List<GraineQuickReply>) : ChatInbound()
     /** The agent ended the conversation: the window may ask for a rating. */
     object ConversationEnd : ChatInbound()
+    /** `{"type":"session","id","at"}`: this connection's session — [id] null for one that is not a non-empty string. */
+    data class Session(val id: String?) : ChatInbound()
     object TurnStart : ChatInbound()
     object TurnEnd : ChatInbound()
     object Ignored : ChatInbound()
@@ -164,11 +174,14 @@ internal sealed class ChatInbound {
                 } ?: Ignored
                 "beginning_of_stream" -> TurnStart
                 "end_of_stream" -> TurnEnd
-                // A history whose turns are not a list is not one: ignored, never an error.
-                "history" -> ChatHistory.read(o)?.let { History(it) } ?: Ignored
+                // A history whose turns are not a list restores nothing, never an error — but it is still the
+                // server continuing the conversation, in place of a welcome.
+                "history" -> History(ChatHistory.read(o) ?: emptyList())
                 // Chat window v2 (contract/DESIGN.md "Wire"): replies whose `replies` is not a list are no news.
                 "quick_replies" -> ChatRules.readQuickReplies(o)?.let { QuickReplies(it) } ?: Ignored
                 "conversation_end" -> ConversationEnd
+                // Sent once when a chat connection starts (history.json `sessionFrame`).
+                "session" -> Session((o.opt("id") as? String)?.takeIf { it.isNotEmpty() })
                 else -> Ignored
             }
         }
@@ -218,6 +231,8 @@ internal object ChatHistory {
             out.add(GraineChatTurn(
                 id = id, role = role, text = text, at = java.util.Date(at), delivery = GraineChatTurn.Delivery.SENT,
                 restored = true, channel = if (o.opt("channel") == "voice") GraineChatTurn.Channel.VOICE else GraineChatTurn.Channel.CHAT,
+                // The session it was said in, as Graine kept it: a string that is not empty, else none.
+                session = (o.opt("session") as? String)?.takeIf { it.isNotEmpty() },
             ))
         }
         return out
@@ -259,12 +274,14 @@ internal interface ChatSessionEvents {
     fun onAgentTurnEnd() {}
     fun onWidget(widget: JSONObject) {}
     fun onWidgetPending(hint: JSONObject) {}
-    /** The earlier conversation, restored, before any agent message: never the agent speaking now. */
+    /** The earlier conversation, restored, before any agent message: never the agent speaking now. Every history frame, even one that restores nothing. */
     fun onHistory(turns: List<GraineChatTurn>) {}
     /** The agent suggested replies for its turn; an empty list takes them away. */
     fun onQuickReplies(replies: List<GraineQuickReply>) {}
     /** The agent ended the conversation (after closing whatever turn was open). */
     fun onConversationEnd() {}
+    /** This connection's session, once, as it starts: its id, or null for one that is not a non-empty string. */
+    fun onSession(id: String?) {}
 }
 
 internal class ChatSessionDeps(
@@ -508,6 +525,7 @@ internal class TextChatSession(
                 if (inTurn) { inTurn = false; events.onAgentTurnEnd() }
                 events.onConversationEnd()
             }
+            is ChatInbound.Session -> events.onSession(f.id)
             ChatInbound.Ignored -> Unit
         }
     }
@@ -535,6 +553,10 @@ internal class TextChatSession(
         const val CALL_TYPE = "text_chat"
         /** Lines held while offline; a customer does not type more than this into a chat that cannot answer. */
         const val OUTBOX_MAX = 20
+        /** Graine ended the conversation itself, idle (`idle_timeout`): no reconnect follows (contract/DESIGN.md "How long a conversation lasts"). */
+        const val CLOSE_IDLE = 4408
+        /** Graine ended the conversation itself, at the session's time limit: no reconnect follows. */
+        const val CLOSE_TIME_LIMIT = 4410
     }
 }
 
@@ -555,6 +577,12 @@ internal object ChatUrls {
  * until the customer spoke. While the customer waits for a reply (they sent a
  * line, no word has come back yet, for at most [Widgets.AWAITING_REPLY_MS])
  * the window draws its typing indicator. Pure; the owner passes the time.
+ *
+ * A connection whose agent speaks first with no history before it is a NEW
+ * conversation (contract/DESIGN.md "A new conversation under earlier lines",
+ * vectors sdk/contract/history.json → `fresh`): an opening nobody answered is
+ * replaced by the new one, anything more gets a marker row before what the new
+ * conversation said — never a second welcome stacked under the first.
  */
 internal class ChatTranscript(private val cap: Int = MAX_LINES) {
     private val list = ArrayList<GraineChatTurn>()
@@ -562,9 +590,34 @@ internal class ChatTranscript(private val cap: Int = MAX_LINES) {
     private var nextId = 1
     /** The ids that were settled when the connection last opened — what a history replaces. Null before any open. */
     private var settledAtOpen: Set<String>? = null
+    /** The connection opened and the agent has not begun a turn on it, with no history frame since: its first turn tells. */
+    private var firstTurnDue = false
+    /** The turns a marker row is drawn before. */
+    private val marked = LinkedHashSet<String>()
+    /** A marker row whose turn has not come yet: the next turn added takes it. */
+    private var markNext = false
+
+    /**
+     * The chat's current session: this connection's, from the server's
+     * session frame ([sessionStarted]); null from a connection's open until
+     * the frame arrives, and with a server that sends none.
+     */
+    var session: String? = null
+        private set
+    /** Between a connection's open and its session frame: the turns it carries meanwhile are stamped when the frame comes. */
+    private var stamping = false
+    /** Those turns, by id: the lines waiting at the open, and every turn said before the frame. */
+    private val unstamped = LinkedHashSet<String>()
 
     /** The conversation as drawn: a turn that has begun with neither words nor a component yet is not a turn, it is [typing]. */
     val lines: List<GraineChatTurn> get() = list.filter { it.text.isNotEmpty() || it.component != null }
+
+    /**
+     * The ids of the turns a "Disconnected · new conversation" row is drawn
+     * before: where the server began a new conversation under earlier lines.
+     * The window's own rows — never turns, never in [lines].
+     */
+    val marks: Set<String> get() = marked.toSet()
 
     /** The customer is waiting on the agent's reply. */
     val awaitingReply: Boolean get() = awaitingUntil != null
@@ -579,7 +632,9 @@ internal class ChatTranscript(private val cap: Int = MAX_LINES) {
     /** The customer's line. Whatever the agent was writing is finished: they have moved on. Returns the turn's id. */
     fun customer(text: String, now: Long, wallMs: Long = now, delivery: GraineChatTurn.Delivery = GraineChatTurn.Delivery.SENT): String {
         closeLive()
-        val turn = GraineChatTurn(take(), Role.CUSTOMER, text, java.util.Date(wallMs), delivery)
+        // Said on the connection: its session. Waiting for one: the session of the connection that sends it.
+        val turn = GraineChatTurn(take(), Role.CUSTOMER, text, java.util.Date(wallMs), delivery,
+            session = if (delivery == GraineChatTurn.Delivery.SENT) session else null)
         add(turn)
         awaitingUntil = now + Widgets.AWAITING_REPLY_MS
         return turn.id
@@ -588,8 +643,9 @@ internal class ChatTranscript(private val cap: Int = MAX_LINES) {
     /** A turn began. True when the agent spoke first — not in answer to the customer's last line. */
     fun agentTurnStart(wallMs: Long): Boolean {
         closeLive()
+        firstTurn()
         val volunteered = list.lastOrNull()?.role != Role.CUSTOMER
-        add(GraineChatTurn(take(), Role.AGENT, "", java.util.Date(wallMs), proactive = volunteered, live = true))
+        add(GraineChatTurn(take(), Role.AGENT, "", java.util.Date(wallMs), proactive = volunteered, live = true, session = session))
         return volunteered
     }
 
@@ -609,16 +665,18 @@ internal class ChatTranscript(private val cap: Int = MAX_LINES) {
     /**
      * A component the agent drew: it belongs to the agent's turn in answer to
      * the customer's last line — or, when the agent has not said anything
-     * since, to a turn of its own.
+     * since, to a turn of its own. The first thing the agent sends in a new
+     * conversation is a turn of its own: the turns above it are another's.
      */
     fun component(c: GraineComponent, wallMs: Long) {
+        val fresh = firstTurn()
         val i = list.indexOfLast { it.role == Role.AGENT }
         val lastCustomer = list.indexOfLast { it.role == Role.CUSTOMER }
-        if (i >= 0 && i > lastCustomer) {
+        if (!fresh && i >= 0 && i > lastCustomer) {
             list[i] = list[i].copy(component = c)
         } else {
             val proactive = list.lastOrNull()?.role != Role.CUSTOMER
-            add(GraineChatTurn(take(), Role.AGENT, "", java.util.Date(wallMs), proactive = proactive, component = c))
+            add(GraineChatTurn(take(), Role.AGENT, "", java.util.Date(wallMs), proactive = proactive, component = c, session = session))
         }
         awaitingUntil = null
     }
@@ -630,21 +688,64 @@ internal class ChatTranscript(private val cap: Int = MAX_LINES) {
         return changed
     }
 
+    /**
+     * WHO A CHAT BELONGS TO (contract/DESIGN.md): the identity changed, so the
+     * turns this transcript carried are another identity's. Every one goes,
+     * with what a history or a new conversation had settled and the marker
+     * rows, except the customer's lines that have not gone out — waiting or
+     * failed — which stay, in order, still waiting. Returns their words, in
+     * order, for the next connection to send.
+     */
+    fun forgetAllButUnsent(): List<String> {
+        list.retainAll { it.role == Role.CUSTOMER && (it.delivery == GraineChatTurn.Delivery.SENDING || it.delivery == GraineChatTurn.Delivery.FAILED) }
+        // The lines kept are said in the session of the connection that sends them, not the identity before's.
+        for (i in list.indices) if (list[i].session != null) list[i] = list[i].copy(session = null)
+        awaitingUntil = null; settledAtOpen = null
+        firstTurnDue = false; marked.clear(); markNext = false
+        session = null; stamping = false; unstamped.clear()
+        return list.map { it.text }
+    }
+
     /** The conversation dropped: no line is still being written. */
     fun disconnected() {
         closeLive()
         awaitingUntil = null
     }
 
-    fun clear() { list.clear(); awaitingUntil = null; settledAtOpen = null }
+    /** Every line goes, and the marker rows between them. */
+    fun clear() {
+        list.clear(); awaitingUntil = null; settledAtOpen = null
+        firstTurnDue = false; marked.clear(); markNext = false
+        unstamped.clear()
+    }
 
     /**
      * The connection opened, before what was waiting goes out: what is settled
      * now is what the next history replaces. A message still waiting goes out
-     * right after this, and stays.
+     * right after this, and stays. The agent's first turn on it, with no
+     * history before, tells that the server began a new conversation.
      */
     fun opened() {
         settledAtOpen = list.filter { it.delivery == GraineChatTurn.Delivery.SENT && !it.live }.map { it.id }.toSet()
+        firstTurnDue = true
+        // A new connection: its session is its own, unknown until its frame comes. What waited goes on it.
+        session = null
+        stamping = true
+        unstamped.clear()
+        for (turn in list) if (turn.role == Role.CUSTOMER && turn.delivery != GraineChatTurn.Delivery.SENT && turn.session == null) unstamped.add(turn.id)
+    }
+
+    /**
+     * THE SESSION FRAME (history.json `sessionFrame`): this connection's
+     * session — [id] null for one that is not a non-empty string. Every turn
+     * the connection carried before it — the lines waiting at its open, and
+     * whatever was said meanwhile — takes it.
+     */
+    fun sessionStarted(id: String?) {
+        session = id
+        stamping = false
+        if (id != null) for (i in list.indices) if (list[i].id in unstamped && list[i].session == null) list[i] = list[i].copy(session = id)
+        unstamped.clear()
     }
 
     /**
@@ -652,10 +753,13 @@ internal class ChatTranscript(private val cap: Int = MAX_LINES) {
      * cannot hold yet — still sending or failed, or said since the connection
      * opened — in order. A reconnect's history holds what the last one did and
      * what was said since, so it replaces both, and nothing shows twice. With
-     * no open yet, only the turns still to go are kept. False when there was
-     * nothing to restore.
+     * no open yet, only the turns still to go are kept. A marker row before a
+     * turn it replaced goes with it. False when there was nothing to restore.
+     * Any history — one that restores nothing too — is the server continuing
+     * the conversation: the agent's next turn is not a new one's.
      */
     fun restore(restored: List<GraineChatTurn>): Boolean {
+        firstTurnDue = false
         if (restored.isEmpty()) return false
         val settled = settledAtOpen
         val kept = list.filter { turn ->
@@ -668,7 +772,9 @@ internal class ChatTranscript(private val cap: Int = MAX_LINES) {
         list.clear()
         list.addAll(restored)
         list.addAll(kept)
-        while (list.size > cap) list.removeAt(0)
+        marked.retainAll(kept.mapTo(HashSet()) { it.id })
+        markNext = false
+        while (list.size > cap) marked.remove(list.removeAt(0).id)
         return true
     }
 
@@ -684,15 +790,55 @@ internal class ChatTranscript(private val cap: Int = MAX_LINES) {
 
     private fun take(): String = "t" + nextId++
 
+    /**
+     * The agent's first turn on a connection that brought no history frame:
+     * the server began a new conversation. The current one — what was settled at
+     * that open, from the last marker row on — decides: none → nothing; no
+     * line of the customer's from the last marker row on, settled or still to
+     * go (an opening nobody answered) → it goes, the new opening in its place
+     * (a marker row before it now goes before what follows); else a marker row before
+     * the first turn not settled at that open — what went out once it opened
+     * is the new conversation's. True when this turn begins a conversation of
+     * its own.
+     */
+    private fun firstTurn(): Boolean {
+        if (!firstTurnDue) return false
+        firstTurnDue = false
+        val settled = settledAtOpen ?: return true
+        val from = maxOf(0, list.indexOfLast { it.id in marked })
+        val current = (from until list.size).filter { list[it].id in settled }
+        when {
+            current.isEmpty() -> Unit
+            (from until list.size).none { list[it].role == Role.CUSTOMER } -> {
+                var moved = false
+                for (i in current.asReversed()) if (marked.remove(list.removeAt(i).id)) moved = true
+                if (moved) markAt(from)
+            }
+            else -> markAt((from until list.size).firstOrNull { list[it].id !in settled } ?: list.size)
+        }
+        return true
+    }
+
+    /** A marker row before the turn at [index] — before the next turn added when there is none there yet. */
+    private fun markAt(index: Int) {
+        if (index < list.size) marked.add(list[index].id) else markNext = true
+    }
+
     private fun closeLive() {
         val i = list.indexOfLast { it.live }
         if (i < 0) return
-        if (list[i].text.isBlank() && list[i].component == null) list.removeAt(i) else list[i] = list[i].copy(live = false)
+        if (list[i].text.isBlank() && list[i].component == null) {
+            // A turn that said nothing is dropped: a marker row before it goes before whatever comes next.
+            if (marked.remove(list.removeAt(i).id)) markAt(i)
+        } else list[i] = list[i].copy(live = false)
     }
 
     private fun add(turn: GraineChatTurn) {
         list.add(turn)
-        while (list.size > cap) list.removeAt(0)
+        if (markNext) { marked.add(turn.id); markNext = false }
+        // Said on this connection before its session frame: stamped when the frame comes.
+        if (stamping && turn.session == null && !turn.restored) unstamped.add(turn.id)
+        while (list.size > cap) list.removeAt(0).id.let { marked.remove(it); unstamped.remove(it) }
     }
 
     companion object {

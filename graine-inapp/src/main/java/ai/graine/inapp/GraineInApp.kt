@@ -356,9 +356,49 @@ class GraineInApp private constructor(
         private set
 
     /** Forget the retained component — answered, dismissed, or from a call that is over. */
-    fun clearPendingWidget() { pendingWidget = null }
+    fun clearPendingWidget() {
+        pendingWidget = null
+        loading = null
+    }
 
-    internal fun retainWidget(widget: JSONObject) { pendingWidget = widget }
+    /**
+     * A component the agent asked for whose content is still loading — its
+     * hint as the agent sent it (`widget_id`, `kind`) — from
+     * [GraineListener.onWidgetPending] until it arrives ([pendingWidget]), it
+     * is answered or closed, or 12 seconds pass with nothing, as the SDK's
+     * component view gives up. Null otherwise. Draw your loader while it is set.
+     */
+    val loadingWidget: JSONObject?
+        get() = loading?.takeIf { widgetClock() - it.second < Widgets.PENDING_WIDGET_MS }?.first
+
+    /** The hint of the component on its way, and when it came. */
+    @Volatile private var loading: Pair<JSONObject, Long>? = null
+
+    internal fun widgetOnItsWay(hint: JSONObject) { loading = hint to widgetClock() }
+
+    /** The clock a loading component is timed on: the agent's scheduler's, else the uptime. */
+    private fun widgetClock(): Long = env.scheduler?.now() ?: android.os.SystemClock.uptimeMillis()
+
+    /**
+     * CLOSE A COMPONENT the agent drew without answering it, from a UI of
+     * your own — what the close of the SDK's component view does: the agent
+     * is told quietly (`component_dismissed`, on whichever conversation is
+     * live), so it does not go on about options nobody can see, and
+     * [pendingWidget] is forgotten. [widgetId] is the component's
+     * ([GraineWidget.id]). Main thread.
+     */
+    fun dismissWidget(widgetId: String) {
+        if (widgetId.isBlank()) return
+        val w = GraineWidget.adopt(pendingWidget, config.baseUrl)?.takeIf { it.id == widgetId }
+        clearPendingWidget()
+        val report = WidgetFlow.Dismissal(widgetId.split(":")[0], w?.kind.orEmpty(), w?.let { Js.strOrEmpty(it.data.opt("title")) }.orEmpty())
+        reportEvent("component_dismissed", Widgets.DISMISSED_DETAIL, mapOf("quiet" to true, "data" to report.eventData()))
+    }
+
+    internal fun retainWidget(widget: JSONObject) {
+        pendingWidget = widget
+        loading = null
+    }
 
     fun addListener(l: GraineListener) { listeners.add(l) }
     fun removeListener(l: GraineListener) { listeners.remove(l) }
@@ -379,9 +419,18 @@ class GraineInApp private constructor(
      *
      * Null signs out: the identity is forgotten, this device is released for
      * that user (it stops being rung for them, and stops counting toward their
-     * devices), the chat they were having is cleared, and later conversations
-     * are anonymous. Who the user is is read when a conversation starts; a
-     * change applies to the next one.
+     * devices), and later conversations are anonymous.
+     *
+     * A chat belongs to whoever was identified when it connected. When the
+     * identity changes while the chat is connected or connecting — signing in
+     * after it opened, another user, or signing out — that conversation is
+     * closed quietly, its messages are cleared (a message typed and not yet
+     * sent stays, and is sent next), and the chat connects again at once as
+     * the new identity: a user's conversation continues, or the agent greets
+     * them. The same identity with other traits, or another memory choice,
+     * changes nothing on the open chat. Identify before showing the chat where
+     * you can: the reconnect costs the customer a moment. A voice call reads
+     * who the user is when it starts.
      *
      * One user for the whole app: identifying on any agent identifies them for
      * every agent, and null signs them out of every one.
@@ -402,10 +451,13 @@ class GraineInApp private constructor(
         variables.setIdentity(traits)
         identity.set(traits, memory)
         val after = identity.value()
-        if (before != null && before != after) {
-            // Someone else, or nobody: the last user's device binding and conversation are theirs, not the next user's.
-            signOut(before)
-            if (chatLazy.isInitialized()) chat.forgetUser()
+        if (before != after) {
+            // Someone else, or nobody: the last user's device binding is theirs, not the next user's.
+            if (before != null) signOut(before)
+            // A chat belongs to whoever was identified when its ticket was made (contract/DESIGN.md) — nobody to a
+            // user included: the conversation open now is closed, its turns go, a line not yet sent stays, and a
+            // chat that is wanted connects again at once as the new identity.
+            if (chatLazy.isInitialized()) chat.identityChanged()
         }
         announceVariables()
         announceIdentity()
@@ -948,6 +1000,30 @@ class GraineInApp private constructor(
 
     /** Why the booking sheet cannot book now, as its line; null when it can. */
     internal val bookingBlocked: String? get() = Booking.blocked(schedulingRules, identity.value() != null)
+
+    /**
+     * Why this agent cannot be booked from the app now — the first part of
+     * [bookingAvailable]'s rule that fails, as a word: `not_loaded` (its
+     * settings have not loaded yet), `rings_not_set_up` (Graine does not ring
+     * this phone: the workspace's In-app calling, for Android), `scheduling_off`
+     * (the agent does not let users book), `not_identified` (nobody is
+     * identified with the trait the agent's Identity setting names). Null
+     * when it can be booked. For a button of your own that says why.
+     */
+    val bookingUnavailableReason: String?
+        get() = Booking.unavailableReason(schedulingRules, identity.value() != null, session != null || cachedSession != null)
+
+    /**
+     * The times the SDK's booking sheet would offer on the day [day] falls on,
+     * in the phone's time zone — every 5 minutes from the soonest the agent's
+     * rules allow ([GraineSchedulingRules.earliest], rounded up) to the
+     * latest ([GraineSchedulingRules.latest]), oldest first — for a picker of
+     * your own. Empty for a day outside the rules. Graine still checks what
+     * only it knows (the calling hours, the calls already booked) when the
+     * time is booked.
+     */
+    fun bookingSlots(day: java.util.Date): List<java.util.Date> =
+        Booking.slots(schedulingRules, System.currentTimeMillis(), java.util.TimeZone.getDefault(), day.time).map { java.util.Date(it) }
 
     /**
      * The tokens to draw in `context` right now: the brand's fixed light or

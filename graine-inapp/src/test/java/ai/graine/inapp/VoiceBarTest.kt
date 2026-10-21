@@ -342,6 +342,23 @@ class VoiceBarTest {
         assertEquals(VoiceBar.Status("Connecting…", "connecting"), VoiceBar.status(base.copy(chat = true, online = false)))
     }
 
+    @Test fun inTheChatOnlineThenGaveUpThenDisconnectedThenConnecting() {
+        var s = base.copy(chat = true, chatOnline = true, chatFailed = true, chatDisconnected = true)
+        val seen = mutableListOf<VoiceBar.Status>()
+        seen += VoiceBar.status(s); s = s.copy(chatOnline = false)
+        seen += VoiceBar.status(s); s = s.copy(chatFailed = false)
+        seen += VoiceBar.status(s); s = s.copy(chatDisconnected = false)
+        seen += VoiceBar.status(s)
+        assertEquals(listOf(
+            VoiceBar.Status("Online"),
+            VoiceBar.Status(ChatWindowView.FAILED_TEXT),
+            // Graine ended the chat's conversation: said, never the loader, until the customer opens it or writes.
+            VoiceBar.Status("Disconnected"),
+            VoiceBar.Status("Connecting…", "connecting"),
+        ), seen)
+        assertEquals("only the chat's words", VoiceBar.Status("Tap to talk"), VoiceBar.status(base.copy(chatDisconnected = true)))
+    }
+
     @Test fun thinkingIsTheLoaderAndOnlyOnACall() {
         val thinking = VoiceBar.status(base.copy(connected = true, thinking = true))
         assertEquals("Thinking…", thinking.text)

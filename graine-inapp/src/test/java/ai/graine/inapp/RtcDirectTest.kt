@@ -49,6 +49,8 @@ class RtcDirectTest {
     private inner class Hosts : RtcDirectHttp {
         val grantAsks: MutableList<JSONObject> = Collections.synchronizedList(ArrayList())
         val directMints: MutableList<JSONObject> = Collections.synchronizedList(ArrayList())
+        /** How long each direct mint was given. */
+        val mintTimeouts: MutableList<Int> = Collections.synchronizedList(ArrayList())
         @Volatile var probes = 0
         var grantReply: (JSONObject) -> HttpReply = { HttpReply(200, JSONObject().put("direct", offer()).toString()) }
         var probeReply: () -> HttpReply = { HttpReply(200, "{\"direct\":true}") }
@@ -64,7 +66,7 @@ class RtcDirectTest {
             val body = JSONObject(json)
             return when (url) {
                 "$web/api/embed/rtc-session" -> { grantAsks += body; grantReply(body) }
-                gateway -> { directMints += body; directReply(body) }
+                gateway -> { directMints += body; mintTimeouts += timeoutMs; directReply(body) }
                 else -> throw AssertionError("no such host: $url")
             }
         }
@@ -547,6 +549,51 @@ class RtcDirectTest {
         minting.join(5_000)
         assertEquals(200, got?.code)
         assertEquals(1, hosts.directMints.size)
+    }
+
+    /** The emulator burned 10.2 s here: a dialling call never waits for the gateway's probe — the web route mints at once. */
+    @Test fun aDiallingCallNeverWaitsForAProbe() {
+        val asked = CountDownLatch(1)
+        val answer = CountDownLatch(1)
+        hosts.probeReply = { asked.countDown(); answer.await(5, TimeUnit.SECONDS); HttpReply(200, "{\"direct\":true}") }
+        direct = fresh(background = { work -> Thread(work).apply { isDaemon = true }.start() })
+        direct.warm(web, key, user)
+        assertTrue(asked.await(5, TimeUnit.SECONDS))
+        val id = direct.takeCallId(key, user)
+        assertNotNull(id)
+        val began = System.nanoTime()
+        assertNull("the web route mints", direct.mint(request(id), "fedcba9876543210fedcba9876543210") { true })
+        assertTrue("at once", (System.nanoTime() - began) / 1_000_000 < 1_000)
+        assertTrue(hosts.directMints.isEmpty())
+        answer.countDown()
+    }
+
+    @Test fun aDialThatComesDuringTheWaitEndsIt() {
+        val asked = CountDownLatch(1)
+        val answer = CountDownLatch(1)
+        hosts.probeReply = { asked.countDown(); answer.await(5, TimeUnit.SECONDS); HttpReply(200, "{\"direct\":true}") }
+        direct = fresh(background = { work -> Thread(work).apply { isDaemon = true }.start() })
+        direct.warm(web, key, user)
+        assertTrue(asked.await(5, TimeUnit.SECONDS))
+        val id = direct.takeCallId(key, user)
+        val dialling = java.util.concurrent.atomic.AtomicBoolean(false)
+        var got: HttpReply? = HttpReply(0, "")
+        val minting = Thread { got = direct.mint(request(id), "fedcba9876543210fedcba9876543210") { dialling.get() } }.apply { start() }
+        Thread.sleep(100)
+        assertTrue("prepared ahead of the tap, it waits", minting.isAlive)
+        dialling.set(true)
+        minting.join(1_000)
+        assertFalse("the dial ended the wait", minting.isAlive)
+        assertNull(got)
+        answer.countDown()
+    }
+
+    @Test fun aDirectMintIsGivenASecondAndAHalf() {
+        direct.warm(web, key, user)
+        val id = direct.takeCallId(key, user)
+        assertEquals(200, direct.mint(request(id), "fedcba9876543210fedcba9876543210")?.code)
+        assertEquals(listOf(1_500), hosts.mintTimeouts)
+        assertEquals(1_500, RtcDirectMint.MINT_TIMEOUT_MS)
     }
 
     // ── a warm-up is never load ─────────────────────────────────────────────

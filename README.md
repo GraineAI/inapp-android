@@ -17,7 +17,7 @@ Integration guide: https://www.graine.ai/docs/in-app/android
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    implementation("ai.graine:inapp-android:0.13.1")
+    implementation("ai.graine:inapp-android:0.14.0")
 }
 ```
 
@@ -279,8 +279,8 @@ ring, the call screen or the outcomes.
 
 ```kotlin
 dependencies {
-    implementation("ai.graine:inapp-android:0.13.1")
-    implementation("ai.graine:inapp-android-rtc:0.13.1")   // same version as the SDK
+    implementation("ai.graine:inapp-android:0.14.0")
+    implementation("ai.graine:inapp-android-rtc:0.14.0")   // same version as the SDK
 }
 ```
 
@@ -343,6 +343,15 @@ and shows the user's booked calls on an Upcoming calls card they can cancel from
 `send`, `connect`, `close`, and `connected`, `connecting`, `reconnecting` while a dropped chat is made
 again, `failed` once it gave up), and a `ChatSource` of your own can stand in its place.
 
+Closing the chat screen does not end the conversation: with no chat window
+showing it, it stays connected until it has been idle for 5 minutes (no
+message either way, `GraineChat.CLOSE_UNSEEN_MS`), so opening the chat again
+within that time goes on where it was, with no new welcome. When Graine ends a
+conversation itself — idle, or at its time limit — the chat does not reconnect
+by itself: the lines stay, the header says "Disconnected", and opening the chat
+or sending a message connects again. `close()` and the app going to the
+background end it as before.
+
 ### Conversations continue
 
 A user you `identify()` who comes back — later today, tomorrow, on their other
@@ -356,8 +365,36 @@ conversation and `turn.channel` (`CHAT`, `VOICE`) where it was said;
 `chat.newConversation { _, error -> }` starts a fresh thread (the chat window's
 header offers it while an earlier conversation is on screen); what the agent
 remembers about the user stays. `forgetMemory` clears the chat on screen too.
+When the chat connects again and the conversation cannot be continued, the new
+one starts under the earlier lines after a "Disconnected · new conversation"
+line — never a second welcome stacked under the first.
 Anonymous users, and those with memory off, start fresh every time; each agent
 in your app keeps its own conversation.
+
+**A chat belongs to whoever was identified when it connected.** Identify before
+showing the chat where you can: if the identity changes while the chat is
+connected — signing in after it opened, another user, signing out — the
+conversation closes quietly, its messages clear (a message typed and not yet
+sent stays, and goes next), and the chat connects again as the new identity.
+
+### Sessions
+
+Each chat connection is a session, and so is each call: `turn.session` is the
+id of the one a message was said in (the id Execution Logs shows), and
+`chat.sessionId` the current one. `chat.sessions` lists them, oldest first —
+for a "Past conversations" list of your own:
+
+```kotlin
+val chat = GraineInApp.get().chat
+for (s in chat.sessions.reversed()) {                  // newest first
+    val kind = if (s.channel == GraineChatTurn.Channel.VOICE) "Call" else "Chat"
+    addRow("$kind · ${s.turns} messages", dateFormat.format(s.startedAt), current = s.current)
+}
+```
+
+Messages kept before sessions were recorded make one session with no id; with
+a server that does not name sessions yet, the whole conversation is one session
+with no id and `sessionId` is null.
 
 ### Chat window v2: styles, quick replies, ratings
 

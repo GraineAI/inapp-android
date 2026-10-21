@@ -3,13 +3,14 @@ package ai.graine.inapp
 /**
  * THE CHAT WINDOW v2'S RULES, AS NUMBERS AND WORDS — contract/DESIGN.md "Chat
  * window v2", element by element: which corners of a bubble are tight and
- * where its tail goes, whose time is drawn, what the header's status line
- * says, when the reconnect banner shows, which composer is drawn and which
- * buttons it carries, where the chips go, which welcome stands at the top,
- * when the rating is asked, what the scroll-to-latest pill says, how the
- * typing dots move. Pure, as [VoiceBar] is: no view, no context — every
- * decision is proven on the JVM (ChatLookTest), and [ChatWindowView] only
- * draws what these say. Lengths are dp, text sizes sp.
+ * where its tail goes, whose time is drawn, where a new conversation's marker
+ * row goes, what the header's status line says, when the reconnect banner
+ * shows, which composer is drawn and which buttons it carries, where the
+ * chips go, which welcome stands at the top, when the rating is asked, what
+ * the scroll-to-latest pill says, how the typing dots move. Pure, as
+ * [VoiceBar] is: no view, no context — every decision is proven on the JVM
+ * (ChatLookTest), and [ChatWindowView] only draws what these say. Lengths are
+ * dp, text sizes sp.
  */
 internal object ChatLook {
     // ── sizes ──────────────────────────────────────────────────────────────
@@ -93,6 +94,11 @@ internal object ChatLook {
     const val NOT_SENT = "Not sent · Tap to retry"
     const val RECONNECTING = "Reconnecting…"
     const val OFFLINE = "Offline · messages send when you're back"
+    /** Graine ended the conversation itself (idle, or its time limit): the header's status line until it connects again. */
+    const val DISCONNECTED = "Disconnected"
+    /** The row where a new conversation began under earlier lines, and what a screen reader says for it. */
+    const val FRESH = "Disconnected · new conversation"
+    const val FRESH_SPOKEN = "Disconnected. A new conversation started."
     const val SCROLL_TO_LATEST = "Scroll to the latest message"
     const val COPIED = "Copied"
     const val COPY = "Copy"
@@ -175,14 +181,45 @@ internal object ChatLook {
 
     /**
      * Each row's place in its group, as [ChatRules.groups] reckons it: a day
-     * line or a call row breaks a group; a message is its speaker and its time.
+     * line, a call row or a marker row before a row ([fresh], [freshAt]) breaks
+     * a group; a message is its speaker and its time.
      */
-    fun positions(rows: List<ChatRows.Row>): List<String> = ChatRules.groups(rows.map { row ->
-        when (row) {
-            is ChatRows.Row.Turn -> ChatRules.GroupItem(if (row.turn.role == Role.AGENT) "agent" else "customer", row.turn.at.time)
-            else -> ChatRules.GroupItem(breaks = true)
+    fun positions(rows: List<ChatRows.Row>, fresh: Set<Int> = emptySet()): List<String> {
+        val items = ArrayList<ChatRules.GroupItem>()
+        val at = IntArray(rows.size)
+        rows.forEachIndexed { i, row ->
+            if (i in fresh) items.add(ChatRules.GroupItem(breaks = true))
+            at[i] = items.size
+            items.add(when (row) {
+                is ChatRows.Row.Turn -> ChatRules.GroupItem(if (row.turn.role == Role.AGENT) "agent" else "customer", row.turn.at.time)
+                else -> ChatRules.GroupItem(breaks = true)
+            })
         }
-    })
+        val groups = ChatRules.groups(items)
+        return rows.indices.map { groups[at[it]] }
+    }
+
+    /**
+     * Where "Disconnected · new conversation" rows go among [rows] (built from
+     * the [turns] that draw a bubble) — contract/DESIGN.md → A new
+     * conversation under earlier lines: before the bubble of each [marked]
+     * turn, so after any day line of its own; for a marked turn that draws no
+     * bubble (a component alone), before the next turn that does. Indices into
+     * [rows]; [rows].size for one still waiting for a bubble, at the end.
+     */
+    fun freshAt(rows: List<ChatRows.Row>, turns: List<GraineChatTurn>, marked: Set<String>): Set<Int> {
+        if (marked.isEmpty()) return emptySet()
+        val before = HashSet<String>()
+        var due = false
+        for (turn in turns) {
+            if (turn.id in marked) due = true
+            if (due && turn.text.isNotEmpty()) { before.add(turn.id); due = false }
+        }
+        val out = HashSet<Int>()
+        rows.forEachIndexed { i, row -> if (row is ChatRows.Row.Turn && row.turn.id in before) out.add(i) }
+        if (due) out.add(rows.size)
+        return out
+    }
 
     /** The space above a row: [ChatStyleDensity.groupGap] inside a group, [ChatStyleDensity.gap] between anything else. */
     fun gapAbove(d: ChatStyleDensity, position: String, grouping: Boolean): Double =
@@ -221,27 +258,30 @@ internal object ChatLook {
 
     // ── the header ─────────────────────────────────────────────────────────
 
-    enum class StatusKind { CONNECTING, RECONNECTING, FAILED, TYPING, ONLINE, TEXT, NONE }
+    enum class StatusKind { CONNECTING, RECONNECTING, FAILED, DISCONNECTED, TYPING, ONLINE, TEXT, NONE }
 
     /** The status line: what it says, and whether the dot leads it. */
     data class Status(val kind: StatusKind, val words: String?, val dot: Boolean)
 
     /**
      * Under the title, first match wins: nothing could connect (tap to retry);
-     * reconnecting; connecting (the loader's connecting words); the agent
-     * typing, where the design says so; `none` — no line; `online` — the dot,
-     * then the subtitle or "Online"; `text` — the words alone. An ended
-     * conversation the server has let go of says its words without the dot:
-     * the next message opens a new one.
+     * reconnecting; Graine ended the conversation itself and nothing is
+     * connecting ([disconnected]) — "Disconnected", until opening the chat or
+     * a message connects again; connecting (the loader's connecting words);
+     * the agent typing, where the design says so; `none` — no line; `online` —
+     * the dot, then the subtitle or "Online"; `text` — the words alone. An
+     * ended conversation the server has let go of says its words without the
+     * dot: the next message opens a new one.
      */
     fun status(
         h: ChatStyleHeader, subtitle: String, typingWords: String, online: Boolean, connecting: Boolean, reconnecting: Boolean,
-        failed: Boolean, typing: Boolean, ended: Boolean, connectingWords: String,
+        failed: Boolean, typing: Boolean, ended: Boolean, connectingWords: String, disconnected: Boolean = false,
     ): Status {
         val words = subtitle.ifEmpty { "Online" }
         return when {
             !online && failed -> Status(StatusKind.FAILED, ChatWindowView.FAILED_TEXT, false)
             reconnecting -> Status(StatusKind.RECONNECTING, RECONNECTING, false)
+            !online && !connecting && disconnected -> Status(StatusKind.DISCONNECTED, DISCONNECTED, false)
             !online && (connecting || !ended) -> Status(StatusKind.CONNECTING, connectingWords, false)
             typing && h.typingStatus -> Status(StatusKind.TYPING, typingWords, false)
             h.status == "none" -> Status(StatusKind.NONE, null, false)

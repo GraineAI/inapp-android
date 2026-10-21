@@ -96,6 +96,7 @@ class ChatPiecesTest {
                     is ChatRows.Row.Day -> "day:${row.key}"
                     is ChatRows.Row.Voice -> "voice:${row.first}-${row.last}"
                     is ChatRows.Row.Turn -> "turn:${p.turns.indexOfFirst { it.id == row.turn.id }}"
+                    is ChatRows.Row.NewConversation -> "fresh:${row.before}"
                 }
             }
             val wantRows = c.getJSONArray("rows")

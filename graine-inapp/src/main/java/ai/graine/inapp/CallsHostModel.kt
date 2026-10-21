@@ -51,6 +51,8 @@ internal enum class CallsHostCallScreen(val wire: String) { SDK("sdk"), APP("app
  *   appVersion       string or null
  *   callScreen       "sdk" (the default) or "app"
  *   callTransport    "auto" (the default), "websocket" or "webrtc": the calls' audio (GraineCallsConfig.callTransport)
+ *   speakerByDefault bool; true by default: calls start on the loudspeaker unless a headset is
+ *                    connected; false starts them on the earpiece (GraineCalls.speakerByDefault)
  *   debug            bool; false by default: the SDK's debug log (GraineConfig.debug)
  *   android          { smallIcon: string or null }
  *   ios              { iconTemplate: string or null, includesCallsInRecents: bool }
@@ -76,6 +78,8 @@ internal data class CallsHostOptions(
     val appVersion: String? = null,
     val callScreen: CallsHostCallScreen = CallsHostCallScreen.SDK,
     val callTransport: GraineCallTransport = GraineCallTransport.AUTO,
+    /** Calls start on the loudspeaker unless a headset is connected (GraineCalls.speakerByDefault). */
+    val speakerByDefault: Boolean = true,
     /** Read when the SDK instance is made, like the key and the base URL. */
     val debug: Boolean = false,
     val androidSmallIcon: String? = null,
@@ -94,6 +98,7 @@ internal data class CallsHostOptions(
             out["ringTimeoutMs"] = ringTimeoutMs
             out["callScreen"] = callScreen.wire
             if (callTransport != GraineCallTransport.AUTO) out["callTransport"] = callTransport.name.lowercase()
+            out["speakerByDefault"] = speakerByDefault
             out["debug"] = debug
             ringtoneSound?.let { out["ringtoneSound"] = it }
             appVersion?.let { out["appVersion"] = it }
@@ -164,6 +169,7 @@ internal data class CallsHostOptions(
                 appVersion = string(map, "appVersion")?.let(::nonBlank),
                 callScreen = callScreen,
                 callTransport = callTransport,
+                speakerByDefault = bool(map, "speakerByDefault", "speakerByDefault") ?: true,
                 debug = bool(map, "debug", "debug") ?: false,
                 androidSmallIcon = android?.let { string(it, "smallIcon", "android.smallIcon") }?.let(::nonBlank),
                 iosIconTemplate = ios?.let { string(it, "iconTemplate", "ios.iconTemplate") }?.let(::nonBlank),
@@ -438,6 +444,14 @@ internal data class CallsHostSnapshot(
     val transport: String? = null,
     /** Why a call that tried WebRTC runs on the WebSocket (`no_answer`, `ice_timeout`, …). */
     val transportFallbackReason: String? = null,
+    /** How the call connected so far (GraineCalls.connection): `connection` in the event, [connectionJson]'s keys. */
+    val connection: GraineCallConnection? = null,
+    /**
+     * The agent's voice level as it is heard, 0–1 (GraineCalls.agentLevel) —
+     * what a call screen's visualiser follows — to two decimals ([level]), so
+     * a change nobody could see is no `state` event. 0 at idle.
+     */
+    val agentLevel: Double = 0.0,
 ) {
     data class Caption(val role: Role, val text: String, val live: Boolean)
 
@@ -466,11 +480,41 @@ internal data class CallsHostSnapshot(
                 "agent" to s.agent,
                 "transport" to s.transport,
                 "transportFallbackReason" to s.transportFallbackReason,
+                "connection" to s.connection?.let { connectionJson(it) },
+                "agentLevel" to s.agentLevel,
             )
         }
 
     companion object {
         fun word(state: GraineCallState): String = state.name.lowercase()
+
+        /** A level as the snapshot keeps it: within 0–1, to two decimals; anything not a number is 0. */
+        fun level(v: Float): Double = if (v.isNaN()) 0.0 else Math.round(v.coerceIn(0f, 1f) * 100.0) / 100.0
+
+        /**
+         * A connection report as the bridges read it — the same keys on iOS:
+         * `{transport, prepared, preparedAgeSeconds, credential, setupMs,
+         * loginMs, answerMs, firstWordsMs, tapToVoiceMs, audio: {lossPct,
+         * jitterAvgMs, jitterPeakMs, rttMs, quality} | null, recoveries}`,
+         * every key there, null until known.
+         */
+        fun connectionJson(c: GraineCallConnection): Map<String, Any?> = linkedMapOf(
+            "transport" to c.transport,
+            "prepared" to c.prepared,
+            "preparedAgeSeconds" to c.preparedAgeSeconds,
+            "credential" to c.credential,
+            "setupMs" to c.setupMs,
+            "loginMs" to c.loginMs,
+            "answerMs" to c.answerMs,
+            "firstWordsMs" to c.firstWordsMs,
+            "tapToVoiceMs" to c.tapToVoiceMs,
+            "audio" to c.audio?.let { a ->
+                linkedMapOf<String, Any?>(
+                    "lossPct" to a.lossPct, "jitterAvgMs" to a.jitterAvgMs, "jitterPeakMs" to a.jitterPeakMs, "rttMs" to a.rttMs, "quality" to a.quality,
+                )
+            },
+            "recoveries" to c.recoveries,
+        )
 
         private fun present(text: String?): String? = text?.ifEmpty { null }
     }
@@ -549,11 +593,13 @@ internal object CallsHostEvent {
     const val ACTION = "action"
 
     /**
-     * `{callId, outcome, reason?, error?, durationSeconds?, hosted?, agent?}`: `reason` (local, remote, failed)
-     * only with `ended`, `error` only with `failed`, `durationSeconds` with an `ended` call whose length the
-     * engine measured, `hosted: true` for a call Graine rang (its outcomes reach Graine too), and `agent` — the
-     * name of the agent the call was with — when it is known. The keys React Native's and Flutter's
-     * GraineCallOutcome read.
+     * `{callId, outcome, reason?, error?, durationSeconds?, hosted?, agent?, connection?, cause?}`: `reason`
+     * (local, remote, failed) only with `ended`, `error` only with `failed`, `durationSeconds` with an `ended` call
+     * whose length the engine measured, `hosted: true` for a call Graine rang (its outcomes reach Graine too),
+     * `agent` — the name of the agent the call was with — when it is known, `connection` — how an `ended` or
+     * `failed` call connected ([CallsHostSnapshot.connectionJson]) — when it has one, and `cause` — who or what
+     * ended it (`local_end`, `remote_bye`, `media_drop`, `audio_watch`, `failed`; iOS's key too). The keys React
+     * Native's and Flutter's GraineCallOutcome read.
      */
     fun outcomePayload(outcome: GraineCallOutcome, callId: String, agent: String? = null): Map<String, Any?> {
         val out = linkedMapOf<String, Any?>("callId" to callId, "outcome" to outcome.wire)
@@ -562,6 +608,8 @@ internal object CallsHostEvent {
         if (outcome.kind == GraineCallOutcome.Kind.ENDED) outcome.durationSeconds?.let { out["durationSeconds"] = it.coerceAtLeast(0) }
         if (outcome.hosted) out["hosted"] = true
         agent?.let { out["agent"] = it }
+        outcome.connection?.let { out["connection"] = CallsHostSnapshot.connectionJson(it) }
+        outcome.endCause?.let { out["cause"] = it }
         return out
     }
 
@@ -789,6 +837,8 @@ internal interface CallsHostPlatform {
     fun end()
     fun setMuted(muted: Boolean)
     fun setSpeaker(on: Boolean)
+    /** Calls start on the loudspeaker unless a headset is connected (GraineCalls.speakerByDefault). */
+    fun setSpeakerByDefault(on: Boolean) {}
     fun identify(traits: Map<String, Any?>?)
     fun setVariables(values: Map<String, Any?>)
     fun setScreen(screen: GraineScreen?)
@@ -842,6 +892,8 @@ internal class CallsHostCore(private val platform: CallsHostPlatform, private va
     private var heldIdentity: Held<Map<String, Any?>?>? = null
     private var heldVariables: Held<Map<String, Any?>?>? = null
     private var heldScreen: Held<GraineScreen?>? = null
+    /** [setSpeakerByDefault] before anything was configured: applied, and kept, by the first configure or restore. */
+    private var heldSpeakerByDefault: Boolean? = null
 
     /** The app draws the call itself (`callScreen: "app"`). */
     val appDrawsTheCall: Boolean get() = options?.callScreen == CallsHostCallScreen.APP
@@ -869,7 +921,13 @@ internal class CallsHostCore(private val platform: CallsHostPlatform, private va
         return true
     }
 
-    private fun apply(next: CallsHostOptions) {
+    private fun apply(parsed: CallsHostOptions) {
+        // A speaker default set before there were options goes into them, and is kept with them.
+        val next = heldSpeakerByDefault?.let { parsed.copy(speakerByDefault = it) } ?: parsed
+        if (heldSpeakerByDefault != null) {
+            heldSpeakerByDefault = null
+            store.saveOptions(next.json)
+        }
         if (instance == null) {
             val made = platform.makeInstance(next)
             instance = made.copy(baseUrl = made.baseUrl.trimEnd('/'))
@@ -932,6 +990,24 @@ internal class CallsHostCore(private val platform: CallsHostPlatform, private va
     fun setMuted(muted: Boolean) = platform.setMuted(muted)
 
     fun setSpeaker(on: Boolean) = platform.setSpeaker(on)
+
+    /**
+     * Calls start on the loudspeaker (true) unless a headset is connected, or
+     * on the earpiece (false): applied now and kept with the options for the
+     * next cold start, as `configure`'s `speakerByDefault` is. Before anything
+     * is configured, held until it is.
+     */
+    fun setSpeakerByDefault(on: Boolean) {
+        val current = options
+        if (current == null) {
+            heldSpeakerByDefault = on
+            return
+        }
+        val next = current.copy(speakerByDefault = on)
+        options = next
+        store.saveOptions(next.json)
+        platform.setSpeakerByDefault(on)
+    }
 
     /**
      * The customer would not give the microphone to a call the app's own

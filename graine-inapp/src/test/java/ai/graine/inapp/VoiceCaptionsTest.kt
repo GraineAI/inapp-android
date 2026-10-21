@@ -70,12 +70,12 @@ class VoiceCaptionsTest {
         dir.deleteRecursively()
     }
 
-    private fun graine(): GraineInApp {
+    private fun graine(session: String = """{"agentId":"agent-1","webcallAgentId":"web-1"}"""): GraineInApp {
         val env = AgentEnv(
             main = TestMain(clock),
             io = Executor { it.run() },
             http = HttpPost { _, _ -> HttpReply(200, """{"ok":true}""") },
-            fetchSession = { _, _ -> JSONObject("""{"agentId":"agent-1","webcallAgentId":"web-1"}""") },
+            fetchSession = { _, _ -> JSONObject(session) },
             openSocket = { _, _, _ -> error("no sockets here") },
             scheduler = clock,
             ticketIo = { it() },
@@ -132,5 +132,71 @@ class VoiceCaptionsTest {
         v.clearCaptions()
         assertEquals("nothing to forget: nobody is told", 1, heard)
         stop()
+    }
+
+    // ── the call in one word, and what it runs on (0.14.0) ───────────────────
+
+    @Test fun theCallInOneWordAndWhatItRunsOnAreTheVoicesOwn() {
+        val v = graine().voice
+        assertEquals(GraineVoiceStatus.IDLE, v.status)
+        assertEquals(null, v.transport)
+        v.handle(PageMessage.Ready)
+        v.handle(PageMessage.Call(connected = false, connecting = true))
+        assertEquals(GraineVoiceStatus.CONNECTING, v.status)
+        v.handle(PageMessage.TransportChanged(Transport.WEBSOCKET, Transport.WEBRTC, "no_answer", null))
+        assertEquals(Transport.WEBSOCKET, v.transport)
+        assertEquals("why it fell back", "no_answer", v.transportFallbackReason)
+        v.handle(PageMessage.Call(connected = true, connecting = false))
+        assertEquals(GraineVoiceStatus.LISTENING, v.status)
+        v.handle(PageMessage.Caption(Role.AGENT, "It costs", live = true))
+        assertEquals(GraineVoiceStatus.SPEAKING, v.status)
+        v.handle(PageMessage.Caption(Role.CUSTOMER, "And the Seltos?", live = false))
+        assertEquals(GraineVoiceStatus.THINKING, v.status)
+        v.handle(PageMessage.Muted(true))
+        assertEquals("muted outranks what the agent is doing", GraineVoiceStatus.MUTED, v.status)
+        v.handle(PageMessage.Muted(false))
+        v.handle(PageMessage.Reconnecting(true))
+        assertEquals(GraineVoiceStatus.RECONNECTING, v.status)
+        v.handle(PageMessage.Reconnecting(false))
+        v.handle(PageMessage.Ended)
+        assertEquals(GraineVoiceStatus.ENDED, v.status)
+        assertEquals("kept after the call, until the next one", Transport.WEBSOCKET, v.transport)
+        v.handle(PageMessage.TransportChanged(Transport.WEBRTC, Transport.WEBRTC, null, null))
+        assertEquals("what it asked for: no fallback", null, v.transportFallbackReason)
+        // Neither transport could carry the next call.
+        v.handle(PageMessage.Progress("failed"))
+        assertEquals(GraineVoiceStatus.FAILED, v.status)
+        assertEquals(listOf("idle", "connecting", "listening", "thinking", "speaking", "reconnecting", "muted", "failed", "ended"),
+            GraineVoiceStatus.entries.map { it.wire })
+    }
+
+    /** A Talk call runs on what the voice engine was loaded with — the dashboard's call audio here — from the moment it is placed. */
+    @Test fun aTalkCallsTransportIsKnownFromTheMomentItIsPlacedAndAFallbackSticks() {
+        val v = graine("""{"agentId":"agent-1","webcallAgentId":"web-1","appearance":{"audioTransport":"rtc"}}""").voice
+        v.handle(PageMessage.Ready)
+        v.handle(PageMessage.Call(connected = false, connecting = false))
+        assertEquals("the engine loading is no call", null, v.transport)
+        v.handle(PageMessage.Call(connected = false, connecting = true))
+        assertEquals("placed: what the engine runs calls on", Transport.WEBRTC, v.transport)
+        assertEquals(null, v.transportFallbackReason)
+        v.handle(PageMessage.Call(connected = true, connecting = false))
+        assertEquals(Transport.WEBRTC, v.transport)
+        // WebRTC could not carry it: the WebSocket does, and says why.
+        v.handle(PageMessage.TransportChanged(Transport.WEBSOCKET, Transport.WEBRTC, "unreachable", null))
+        assertEquals(Transport.WEBSOCKET, v.transport)
+        assertEquals("unreachable", v.transportFallbackReason)
+        v.handle(PageMessage.Ended)
+        // The next call on the same engine: it stays on the WebSocket, with the same reason.
+        v.handle(PageMessage.Call(connected = false, connecting = true))
+        assertEquals(Transport.WEBSOCKET, v.transport)
+        assertEquals("unreachable", v.transportFallbackReason)
+    }
+
+    @Test fun anAgentOnTheWebSocketTalksOverItWithNoFallbackReason() {
+        val v = graine().voice
+        v.handle(PageMessage.Ready)
+        v.handle(PageMessage.Call(connected = true, connecting = false))
+        assertEquals(Transport.WEBSOCKET, v.transport)
+        assertEquals(null, v.transportFallbackReason)
     }
 }

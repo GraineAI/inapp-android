@@ -166,7 +166,9 @@ the app passes nothing about how it looks.
   5. **End** — 38 round. On a call: `danger`, icon `end` in white. Otherwise:
      `accentSoft`, icon `close` in `textMuted`.
 - **Status words**, first match wins: error → "Unavailable"; in the chat →
-  "Online" / "Connecting…"; offline → "No connection"; reconnecting →
+  "Online" / "Connecting…", or "Disconnected" once Graine ended the chat's
+  conversation (idle 4408, time limit 4410 — **How long a conversation lasts**,
+  0.14.0) until the customer opens it or writes again; offline → "No connection"; reconnecting →
   "Reconnecting…"; microphone refused → "Needs microphone"; load failed →
   "Couldn’t load · tap to retry" (a curly apostrophe); the call could not be
   connected on either transport (`graine:progress` `failed`) → "Couldn’t
@@ -332,6 +334,28 @@ colour in it is already checked against what it sits on.
   6 apart, "Voice call · {time}" (the call's first turn, in the device's short
   time format) at caption size, the body family at `weights.body`, `textMuted`.
   Never the call's transcript.
+- **A new conversation under earlier lines** (0.14.0) — a connection opens and
+  the agent's first message arrives with no `history` frame before it (any
+  `history` frame means it continued, even one that restores nothing): the
+  server began a NEW conversation instead of continuing (a customer Graine
+  cannot recognise, memory off, or earlier messages that could not be read in
+  time). The window says so instead of stacking a second welcome. It looks at
+  the CURRENT conversation — the turns settled when that connection opened that
+  come after the last marker (all of them when there is none): none → nothing;
+  no line of the customer's after the last marker — settled, still waiting at
+  that open, or sent since (an opening the customer never answered) → they
+  are removed, so the new opening replaces the old one, and a marker that
+  preceded them now precedes what comes next; otherwise → a marker before the
+  first turn after the last marker that was not settled at that open (what went
+  out once the connection opened belongs to the new conversation). A history that restores
+  at least one turn takes away every marker before a turn it replaced. The
+  marker: a centred row, "Disconnected · new conversation", drawn like a day
+  separator (caption size, the body family at `weights.strong`, `textMuted`, no
+  background, spaced like it), after any day separator of the
+  turn it precedes; screen readers read "Disconnected. A new conversation
+  started." It is the window's own row: not a turn, never sent, and New
+  conversation or clear takes it away with the lines. Pinned by
+  sdk/contract/history.json → `fresh`.
 - **Empty chat** — before any message (a conversation that continues opens on
   its history instead), centred in the thread: the avatar at 48
   (the same rule as the header's; nothing for `none`), 12 below it the title
@@ -574,7 +598,9 @@ otherwise below.
   clear of the controls (truncated before it would touch them).
 - Title as v1, in `header.fill.text`. The status line, at caption size in
   `fill.textMuted`, first match wins: connecting → "Connecting…" (the
-  loader's connecting words); reconnecting → "Reconnecting…"; the agent
+  loader's connecting words); reconnecting → "Reconnecting…"; ended by Graine
+  (idle 4408, time limit 4410 — **How long a conversation lasts**, 0.14.0) →
+  "Disconnected", no dot, until the customer opens or writes again; the agent
   typing and `typingStatus` → `typing.text` or "Typing…"; `status: "none"`
   → no line at all (the title centres vertically); `online` → a 6-point dot
   in `header.dot`, 6 apart, then `chat.subtitle` or "Online"; `text` → the
@@ -611,6 +637,46 @@ with the screen context, as always).
   44 thumbnail (corners `radius.md`), the title in the heading family at
   `weights.title`, `min(scale.title, 16)`, the subtitle and badge as in `bar`.
 - Screen reader: "Pinned: {title}, {subtitle}, {badge}".
+
+**How long a conversation lasts** (0.14.0) — one rule for every SDK's chat
+and the website's. Closing the chat window does not end the conversation:
+with no window showing it, it stays connected until it has been idle for 5
+minutes — no message either way, the same window Graine's server applies — and
+only then closes. Opening the chat again within that time continues the same
+conversation: nothing on screen changes and there is no new welcome. A message
+that arrives while no window shows it starts the 5 minutes again. The app going
+to the background still ends it where the SDK did so before (`endOnBackground`),
+and so does `close()`. When Graine ends the conversation itself — idle
+(WebSocket close 4408, `idle_timeout`) or at the session's time limit (4410) —
+the chat does NOT reconnect by itself: the lines stay, the header's status line
+reads "Disconnected", and the next thing the customer does — opening the chat,
+sending a message — connects again (continued when Graine can continue it,
+else **A new conversation under earlier lines**). Any other unexpected close
+is a dropped connection and reconnects as before, behind the reconnect banner.
+
+**Who a chat belongs to** (0.14.0) — one rule for every SDK's chat and the
+website's. A chat connection belongs to whoever was identified when its ticket
+was made; before any `identify()`, that is nobody (an anonymous chat, which
+Graine never continues). When the identity changes while the chat is connected
+or connecting — nobody → a user (the app identified after the chat opened), a
+user → another user, or a user → nobody (`identify(null)`) — the SDK:
+1. closes that connection normally (no "Disconnected", no reconnect banner);
+2. forgets the turns it carried — they belong to the identity before, never to
+   the one after — any history it holds for it, its new-conversation markers,
+   and the booked calls it showed (fetched again for the new identity);
+3. keeps the customer's lines that have not gone out — still sending, or
+   failed — and sends them on the next connection;
+4. connects again at once with a ticket for the new identity if the chat is
+   wanted (a window shows it, or the app called `open()`/`connect()` or sent a
+   message); otherwise the next open connects. For a user, Graine then continues
+   their conversation (a `history` frame) or greets them.
+A chat that is neither connected nor connecting when the identity changes
+forgets the same way (unsent lines kept), leaves a "Disconnected" state, and
+connects at the next open or message.
+`identify()` with the same identity value (other traits, memory on or off)
+changes nothing on an open chat; it applies from the next connection. Apps
+should still identify before showing the chat: the reconnect costs the
+customer a moment and an unanswered anonymous opening.
 
 **Reconnect banner** — while the chat reconnects after it was connected, or
 is offline with a message waiting: a strip pinned under the header (and the

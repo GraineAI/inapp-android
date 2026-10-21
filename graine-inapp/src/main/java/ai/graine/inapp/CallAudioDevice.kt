@@ -1,8 +1,10 @@
 package ai.graine.inapp
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.KeyguardManager
 import android.content.Context
+import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
@@ -17,6 +19,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
+import android.telephony.TelephonyManager
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
@@ -365,12 +368,16 @@ internal object CallRouting {
     /**
      * The AudioDeviceInfo type the call should be heard on, out of
      * [available] (Android 12+: the phone's communication devices; before
-     * that, its outputs), with the loudspeaker [speaker] chosen or not. Null
-     * when none of them is there: the phone's own default.
+     * that, its outputs), with the loudspeaker [speaker] chosen or not. With
+     * [byDefault] the loudspeaker is the SDK's default, not the customer's
+     * choice: a headset — Bluetooth or plugged in — takes the call instead.
+     * Null when none of them is there: the phone's own default.
      */
-    fun choose(available: Collection<Int>, speaker: Boolean): Int? =
-        if (speaker) AudioDeviceInfo.TYPE_BUILTIN_SPEAKER.takeIf { it in available }
-        else FOR_THE_EAR.firstOrNull { it in available }
+    fun choose(available: Collection<Int>, speaker: Boolean, byDefault: Boolean = false): Int? = when {
+        speaker && byDefault -> (BLUETOOTH + WIRED).firstOrNull { it in available } ?: AudioDeviceInfo.TYPE_BUILTIN_SPEAKER.takeIf { it in available }
+        speaker -> AudioDeviceInfo.TYPE_BUILTIN_SPEAKER.takeIf { it in available }
+        else -> FOR_THE_EAR.firstOrNull { it in available }
+    }
 }
 
 /** What the phone did to a call's audio, for the call to act on. */
@@ -392,8 +399,9 @@ internal enum class CallInterruption {
  *   gained                      resume
  *
  * An agent cannot be put on hold the way a person on a phone call can, so a
- * phone call answered during the hold ends the agent's call:
- * [phoneCallActive] is the phone's own call in progress.
+ * cellular call answered during the hold ends the agent's call
+ * ([phoneCallEnds]) — and nothing else does: never this call's own audio
+ * mode, never focus it holds.
  */
 internal object CallFocus {
     enum class Act { HOLD, RESUME, NONE }
@@ -405,8 +413,45 @@ internal object CallFocus {
         else -> Act.NONE
     }
 
-    /** The audio mode a phone call in progress puts the phone in. */
-    fun phoneCallActive(mode: Int): Boolean = mode == AudioManager.MODE_IN_CALL
+    /**
+     * A REAL CELLULAR CALL IS ANSWERED. The phone's own call puts its audio in
+     * MODE_IN_CALL; this call holds MODE_IN_COMMUNICATION and is not on
+     * Telecom (the SDK has no ConnectionService), so nothing of its own reads
+     * as one. [cellular] is what the phone's telephony says of its SIM call
+     * when the app may ask (READ_PHONE_STATE): false overrules a mode another
+     * app's call set; null when it may not ask. A phone that is ringing
+     * (MODE_RINGTONE) has not been answered: the call is held, never ended.
+     */
+    fun phoneCallActive(mode: Int, cellular: Boolean? = null): Boolean = mode == AudioManager.MODE_IN_CALL && cellular != false
+
+    /**
+     * The once-a-second check during a hold: end the agent's call only for a
+     * cellular call answered while this call does not hold the focus
+     * ([onHold]: another call or app took it). While the call holds its focus,
+     * nobody else's call can be in progress, and the check never runs.
+     */
+    fun phoneCallEnds(onHold: Boolean, mode: Int, cellular: Boolean?): Boolean = onHold && phoneCallActive(mode, cellular)
+}
+
+/**
+ * WHAT THE PHONE'S TELEPHONY SAYS OF ITS SIM CALL: answered (true), not
+ * (false), or unknown (null) — the app does not hold READ_PHONE_STATE, which
+ * the SDK never asks for, or the phone would not say.
+ */
+internal object CellularCall {
+    @SuppressLint("MissingPermission")
+    fun active(context: Context): Boolean? {
+        if (context.checkSelfPermission(Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) return null
+        val tm = context.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager ?: return null
+        return try {
+            // From Android 12 the SIM's own calls only; before, the phone's (this call is never on Telecom either way).
+            @Suppress("DEPRECATION")
+            val state = if (Build.VERSION.SDK_INT >= 31) tm.callStateForSubscription else tm.callState
+            state == TelephonyManager.CALL_STATE_OFFHOOK
+        } catch (e: Exception) {
+            null
+        }
+    }
 }
 
 /**
@@ -417,23 +462,45 @@ internal object CallFocus {
 internal interface CallPhone {
     /** The lock screen is up — a call answered over it waits for its foreground service (CallStart). */
     fun locked(): Boolean
-    /** The call's place in the phone's audio, for one call: acquired when its conversation opens, released at its end. */
-    fun route(onInterruption: (CallInterruption) -> Unit): CallRoute
+    /**
+     * The call's place in the phone's audio, for one call: acquired before its
+     * conversation opens — before any of the agent's audio can play — and
+     * released at its end. [onSpeaker] hears whether the call is on the
+     * loudspeaker each time the route is chosen.
+     */
+    fun route(onInterruption: (CallInterruption) -> Unit, onSpeaker: (Boolean) -> Unit): CallRoute
     /** The microphone and the speaker, for one call. */
     fun audio(): CallAudioIO
 }
 
 /** The call's place in the phone's audio, as GraineCalls holds it: [AudioRoute]. */
 internal interface CallRoute {
-    fun acquire(speaker: Boolean)
+    /**
+     * In this order: the phone's audio in communication mode, voice-communication
+     * focus asked for, the device chosen — [speaker]: the loudspeaker, [byDefault]
+     * as the SDK's default rather than the customer's choice, so a headset takes
+     * the call. True when the focus was granted. Denied, the call plays anyway:
+     * nothing waits on the focus.
+     */
+    fun acquire(speaker: Boolean, byDefault: Boolean = false): Boolean
+    /** The customer's choice: the loudspeaker, or off it — a headset if one is connected, else the earpiece. */
     fun setSpeaker(on: Boolean)
+    /** The route chosen again — the call's audio has started, and a phone may have moved it as it did. */
+    fun refresh() {}
+    /**
+     * The mode, the focus and the device applied again — once, when none of the
+     * agent's audio was heard a while after the answer. A focus granted now ends
+     * a hold some other app's focus left behind. True when the focus was granted.
+     */
+    fun reapply(): Boolean = true
     fun release()
 }
 
 internal class AndroidCallPhone(private val context: Context) : CallPhone {
     /** Unknown counts as locked: the call then waits for its service, as every call did before. */
     override fun locked(): Boolean = (context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager)?.isKeyguardLocked ?: true
-    override fun route(onInterruption: (CallInterruption) -> Unit): CallRoute = AudioRoute(context, onInterruption)
+    override fun route(onInterruption: (CallInterruption) -> Unit, onSpeaker: (Boolean) -> Unit): CallRoute =
+        AudioRoute(context, onInterruption, onSpeaker)
     override fun audio(): CallAudioIO = AndroidCallAudio()
 }
 
@@ -449,7 +516,12 @@ internal class AndroidCallPhone(private val context: Context) : CallPhone {
  * both off, the platform itself prefers a wired headset or a hearing aid to
  * the earpiece. Main thread only, the device callback included.
  */
-internal class AudioRoute(context: Context, private val onInterruption: (CallInterruption) -> Unit = {}) : CallRoute {
+internal class AudioRoute(
+    private val context: Context,
+    private val onInterruption: (CallInterruption) -> Unit = {},
+    /** Whether the call is on the loudspeaker, told each time the route is chosen: what the call's state says. */
+    private val onSpeaker: (Boolean) -> Unit = {},
+) : CallRoute {
     private val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val main = Handler(Looper.getMainLooper())
     private var focusRequest: AudioFocusRequest? = null
@@ -459,11 +531,15 @@ internal class AudioRoute(context: Context, private val onInterruption: (CallInt
     }
     /** The phone took the call's audio and has not given it back. */
     private var onHold = false
+    /** The focus was granted, at the start or since. */
+    private var focusGranted = false
     /** The phone call that ends this call was reported: once. */
     private var phoneCallReported = false
     private var held = false
-    /** The customer chose the loudspeaker. */
+    /** The loudspeaker is wanted — the customer's choice, or the SDK's default ([byDefault]). */
     private var speaker = false
+    /** The loudspeaker is the SDK's default, not the customer's choice: a headset takes the call instead. */
+    private var byDefault = false
     /** Below Android 12: this call opened the Bluetooth voice link, so it closes it. */
     private var scoStarted = false
     /** A device came or went — a headset switched on or off, plugged or pulled: the choice is made again. */
@@ -472,36 +548,73 @@ internal class AudioRoute(context: Context, private val onInterruption: (CallInt
         override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>?) = reroute()
     }
 
-    override fun acquire(speaker: Boolean) {
-        if (held) return
+    override fun acquire(speaker: Boolean, byDefault: Boolean): Boolean {
+        if (held) return focusGranted
         held = true
         this.speaker = speaker
-        am.mode = AudioManager.MODE_IN_COMMUNICATION
-        if (Build.VERSION.SDK_INT >= 26) {
-            val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+        this.byDefault = byDefault
+        // Before the agent's audio can play: the mode, then the focus, then the device. Each on its own, so one
+        // that throws never keeps the others from being set.
+        runCatching { am.mode = AudioManager.MODE_IN_COMMUNICATION }.onFailure { CallLog.error("the call's audio mode could not be set", it) }
+        focusGranted = requestFocus()
+        reroute()
+        // For the call's length. A null handler is the main thread, where every other call into this class is made.
+        runCatching { am.registerAudioDeviceCallback(devices, null) }
+        return focusGranted
+    }
+
+    /**
+     * Voice-communication focus, for the call's length: always with the same
+     * listener — the same request — so asking again is never a loss of this
+     * call's own. True when granted; a phone call ringing or in progress denies it.
+     */
+    private fun requestFocus(): Boolean = try {
+        val result = if (Build.VERSION.SDK_INT >= 26) {
+            val req = focusRequest ?: AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
                 .setAudioAttributes(AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build())
                 .setOnAudioFocusChangeListener(focusListener)
                 .build()
-            focusRequest = req
+                .also { focusRequest = it }
             am.requestAudioFocus(req)
         } else {
             @Suppress("DEPRECATION")
             am.requestAudioFocus(focusListener, AudioManager.STREAM_VOICE_CALL, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
         }
+        result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+    } catch (e: Exception) {
+        CallLog.error("audio focus could not be asked for", e)
+        false
+    }
+
+    override fun reapply(): Boolean {
+        if (!held) return false
+        runCatching { if (am.mode != AudioManager.MODE_IN_COMMUNICATION) am.mode = AudioManager.MODE_IN_COMMUNICATION }
+        val granted = requestFocus()
+        if (granted) {
+            focusGranted = true
+            // The focus is this call's again: whatever took it is gone, so the hold it left ends.
+            if (onHold) {
+                onHold = false
+                main.removeCallbacks(watchForPhoneCall)
+                onInterruption(CallInterruption.RESUMED)
+            }
+        }
         reroute()
-        // For the call's length. A null handler is the main thread, where every other call into this class is made.
-        runCatching { am.registerAudioDeviceCallback(devices, null) }
+        return granted
     }
 
     /** The loudspeaker on, or off: back to the device the call prefers — a headset if one is connected, else the earpiece. */
     override fun setSpeaker(on: Boolean) {
         if (!held) return
         speaker = on
+        byDefault = false
         reroute()
     }
+
+    override fun refresh() = reroute()
 
     /**
      * [CallRouting]'s choice, applied — again on every device that comes or
@@ -511,15 +624,20 @@ internal class AudioRoute(context: Context, private val onInterruption: (CallInt
     private fun reroute() {
         if (!held) return
         try {
-            if (Build.VERSION.SDK_INT >= 31) {
+            val onSpeakerNow = if (Build.VERSION.SDK_INT >= 31) {
                 val available = am.availableCommunicationDevices
-                val type = CallRouting.choose(available.map { it.type }, speaker)
+                val type = CallRouting.choose(available.map { it.type }, speaker, byDefault)
                 val device = type?.let { t -> available.firstOrNull { it.type == t } }
                 if (device == null) am.clearCommunicationDevice()
                 else if (am.communicationDevice?.id != device.id) am.setCommunicationDevice(device)
+                // What the phone routed to, not what was asked: a device it refused leaves the route where it was.
+                am.communicationDevice?.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
             } else {
                 setSwitches()
+                @Suppress("DEPRECATION")
+                am.isSpeakerphoneOn
             }
+            onSpeaker(onSpeakerNow)
         } catch (e: Exception) {
             CallLog.error("the call's audio route could not be set", e)
         }
@@ -528,7 +646,7 @@ internal class AudioRoute(context: Context, private val onInterruption: (CallInt
     /** Below Android 12: the loudspeaker switch and the Bluetooth voice link, set to [CallRouting]'s choice. */
     @Suppress("DEPRECATION")
     private fun setSwitches() {
-        val type = CallRouting.choose(am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).map { it.type }, speaker)
+        val type = CallRouting.choose(am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).map { it.type }, speaker, byDefault)
         val sco = type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO && am.isBluetoothScoAvailableOffCall
         // One switch off before the other goes on: both claim the call's route, and the last one set wins.
         if (!sco) stopSco()
@@ -574,11 +692,11 @@ internal class AudioRoute(context: Context, private val onInterruption: (CallInt
         }
     }
 
-    /** During a hold, and only then: has the customer answered a phone call? Looked at once a second. */
+    /** During a hold, and only then: has the customer answered a cellular call? Looked at once a second ([CallFocus.phoneCallEnds]). */
     private val watchForPhoneCall = object : Runnable {
         override fun run() {
             if (!held || !onHold || phoneCallReported) return
-            if (CallFocus.phoneCallActive(am.mode)) {
+            if (CallFocus.phoneCallEnds(onHold, am.mode, CellularCall.active(context))) {
                 phoneCallReported = true
                 onInterruption(CallInterruption.PHONE_CALL)
             } else {

@@ -29,6 +29,10 @@ object GraineChatPreview {
     const val RECONNECTING = "reconnecting"
     /** Offline: a message waiting to be sent, one that could not be, and the banner that says so. */
     const val OFFLINE = "offline"
+    /** Yesterday's conversation, then today's welcome after "Disconnected · new conversation": the server could not continue it. */
+    const val NEW_CONVERSATION = "fresh"
+    /** Graine ended the conversation itself: the lines stay and the header says "Disconnected". */
+    const val DISCONNECTED = "disconnected"
 
     private const val AGENT = "graine-chat-preview"
 
@@ -101,13 +105,15 @@ object GraineChatPreview {
         val done = GraineChatTurn("p5", Role.AGENT, "All done — your new email is saved. Is there anything else I can help with?", at(1))
         val notSent = GraineChatTurn("p6", Role.CUSTOMER, "Can I change my phone number too?", at(1), delivery = GraineChatTurn.Delivery.FAILED)
         val waiting = GraineChatTurn("p7", Role.CUSTOMER, "Thanks!", at(0), delivery = GraineChatTurn.Delivery.SENDING)
+        val again = greeting.copy(id = "p8", at = at(0))
         val messages = when (moment) {
             TYPING -> listOf(greeting, question, reply, follow)
             RATING -> listOf(greeting, question, reply, follow, done)
             OFFLINE -> listOf(greeting, question, reply, follow, done, notSent, waiting)
+            NEW_CONVERSATION -> listOf(greeting.copy(at = at(26 * 60)), question.copy(at = at(26 * 60 - 1)), reply.copy(at = at(26 * 60 - 1)), again)
             else -> listOf(greeting, question, reply)
         }
-        val online = moment != RECONNECTING && moment != OFFLINE
+        val online = moment != RECONNECTING && moment != OFFLINE && moment != DISCONNECTED
         val replies = if (moment == CONVERSATION) listOf(GraineQuickReply("Email", "Email"), GraineQuickReply("Phone number", "Phone number"),
             GraineQuickReply("Talk to a person", "I'd like to talk to a person")) else emptyList()
         val pin = GraineChatPin("Account settings", "Profile, email and phone", badge = "Active")
@@ -118,6 +124,7 @@ object GraineChatPreview {
             extras = ChatExtras(
                 quickReplies = replies, ended = moment == RATING, pin = pin, everConnected = true, canCall = true, canAttach = true,
                 connecting = moment == RECONNECTING, reconnecting = moment == RECONNECTING,
+                disconnected = moment == DISCONNECTED, marks = if (moment == NEW_CONVERSATION) setOf(again.id) else emptySet(),
             ),
         )
         if (moment == CONVERSATION) widgets.present(JSONObject("""

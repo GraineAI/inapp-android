@@ -158,11 +158,7 @@ class GraineWidgetView @JvmOverloads constructor(
         val report = flow.dismiss()
         if (report != null) {
             // On whichever conversation is live — the call or the chat.
-            graine?.reportEvent(
-                "component_dismissed",
-                "The customer closed the component without choosing. Do not refer to options they cannot see; offer to show it again if they want it.",
-                mapOf("quiet" to true, "data" to report.eventData()),
-            )
+            graine?.reportEvent("component_dismissed", Widgets.DISMISSED_DETAIL, mapOf("quiet" to true, "data" to report.eventData()))
         }
         graine?.clearPendingWidget()
         render()

@@ -1,5 +1,5 @@
 {
-  "comment": "Conversations continue — inapp-platform-contract.md section 2.6, CONTINUITY.md section D. A chat that passes the memory gate opens with ONE server frame, {\"type\":\"history\",\"turns\":[{id, role: \"user\"|\"assistant\", text, at: ISO-8601 UTC, channel: \"chat\"|\"voice\"}],\"continued\":true}, before any agent message. Three sections, every SDK runs all three. `frames`: the frame as it arrives → the turns it restores (role in the SDKs' words: customer | agent), or null when the frame is ignored (turns not a list). A turn that cannot be read (not an object, a role other than user/assistant, text not a string or blank, `at` missing or not an ISO-8601 time) is skipped; a channel other than \"voice\" is chat; a missing or repeated id becomes \"h<index in the list>\". `restore`: steps on a chat's transcript — {agent} a finished agent turn; {customer, delivery?} the customer's message (sent unless delivery says sending or failed); {opened} the connection opened, so what was waiting went out (sending → sent); {history} the frame arrived — then the turns. The rule: a history that restores at least one turn REPLACES every turn that was settled when the connection opened, and every turn an earlier history restored; it keeps, after the restored turns and in order, the turns still sending or failed and everything said since the connection opened (with no {opened} yet: only the turns still sending or failed). Restored turns are delivered, not live, not volunteered, restored = true, with their own time and channel. An empty or unreadable history changes nothing. In `turns`: a field absent from an expected turn means restored false, channel chat, and (customer turns) delivery sent; `at` and `id`, when given, are compared; live and proactive are false for every restored turn. React Native has no failed delivery: there a failed step is a waiting (pending) message. `rows`: what a chat window draws for the turns, at `now`, on a device whose zone is `timeZone` (a fixed offset of `utcOffsetMinutes`) — {turn: i} a bubble; {voice: [first, last]} ONE \"Voice call · {time of first}\" row for a run of consecutive voice-channel turns on one local day; {day} a separator: \"today\", \"yesterday\", or the local date YYYY-MM-DD (each SDK writes it in its own words: Today, Yesterday, a date). A separator goes before the first row when its day is not today, and wherever the local day changes between rows. Written by hand from CONTINUITY.md section D; the React Native SDK (protocol.ts readHistoryFrame / foldChat / chatRows) and every native SDK are tested against it. `display`: what the window draws of the pieces the design can leave out (DESIGN.md \"Chat window\" → Booked calls, Earlier messages, New conversation), one rule for every SDK (the React Native SDK's chatPieces): `chat` is the session's chat tokens as they arrive (absent, or a value that is not a boolean — `upcomingTitle` not a string — is the default: on, and the SDK's words); `turns` the chat's transcript (restored true for an earlier conversation); `upcoming` how many booked calls there are. Expected: `shown` the ids of the turns drawn, in order (chat.showHistory false leaves out every restored turn — the agent still has them); `rows` what those turns draw, in the `rows` notation, indices into `shown`; `starters` whether the brand's starters may show (nothing restored on screen and nothing said by the customer — so a hidden history opens like a new chat); `newConversation` whether the header's compose control shows (chat.newConversation not false, and a restored turn on screen); `card` whether the booked-calls card shows (chat.showUpcomingCalls not false, and at least one call); `cardTitle` its title (chat.upcomingTitle trimmed, else \"Upcoming call\" for one call and \"Upcoming calls\" otherwise).",
+  "comment": "Conversations continue — inapp-platform-contract.md section 2.6, CONTINUITY.md section D. A chat that passes the memory gate opens with ONE server frame, {\"type\":\"history\",\"turns\":[{id, role: \"user\"|\"assistant\", text, at: ISO-8601 UTC, channel: \"chat\"|\"voice\"}],\"continued\":true}, before any agent message. Three sections, every SDK runs all three. `frames`: the frame as it arrives → the turns it restores (role in the SDKs' words: customer | agent), or null when the frame is ignored (turns not a list). A turn that cannot be read (not an object, a role other than user/assistant, text not a string or blank, `at` missing or not an ISO-8601 time) is skipped; a channel other than \"voice\" is chat; a missing or repeated id becomes \"h<index in the list>\". `restore`: steps on a chat's transcript — {agent} a finished agent turn; {customer, delivery?} the customer's message (sent unless delivery says sending or failed); {opened} the connection opened, so what was waiting went out (sending → sent); {history} the frame arrived — then the turns. The rule: a history that restores at least one turn REPLACES every turn that was settled when the connection opened, and every turn an earlier history restored; it keeps, after the restored turns and in order, the turns still sending or failed and everything said since the connection opened (with no {opened} yet: only the turns still sending or failed). Restored turns are delivered, not live, not volunteered, restored = true, with their own time and channel. An empty or unreadable history changes nothing. In `turns`: a field absent from an expected turn means restored false, channel chat, and (customer turns) delivery sent; `at` and `id`, when given, are compared; live and proactive are false for every restored turn. React Native has no failed delivery: there a failed step is a waiting (pending) message. `rows`: what a chat window draws for the turns, at `now`, on a device whose zone is `timeZone` (a fixed offset of `utcOffsetMinutes`) — {turn: i} a bubble; {voice: [first, last]} ONE \"Voice call · {time of first}\" row for a run of consecutive voice-channel turns on one local day; {day} a separator: \"today\", \"yesterday\", or the local date YYYY-MM-DD (each SDK writes it in its own words: Today, Yesterday, a date). A separator goes before the first row when its day is not today, and wherever the local day changes between rows. `fresh` (DESIGN.md \"Chat window\" → A new conversation under earlier lines, 0.14.0): steps as in `restore`. When the first agent turn after an {opened} arrives with no {history} between them, the server began a new conversation (any {history} frame means it continued, even one that restores nothing: there is then no check): take the CURRENT conversation — the turns settled at that open that come after the last marker (all of them when there is none). None → nothing. No line of the customer's after the last marker — settled, still waiting at that open, or sent since — → the settled ones are removed (an opening nobody answered: the new opening replaces it; an earlier marker stays). Otherwise → a marker before the first turn after the last marker that was not settled at that open. A {history} that restores at least one turn removes every marker before a turn it replaced. Expected: `turns` as in `restore`; `marks` the indices into `turns` of the turns a marker row (\"Disconnected · new conversation\") is drawn before. Written by hand from CONTINUITY.md section D; the React Native SDK (protocol.ts readHistoryFrame / foldChat / chatRows) and every native SDK are tested against it. `display`: what the window draws of the pieces the design can leave out (DESIGN.md \"Chat window\" → Booked calls, Earlier messages, New conversation), one rule for every SDK (the React Native SDK's chatPieces): `chat` is the session's chat tokens as they arrive (absent, or a value that is not a boolean — `upcomingTitle` not a string — is the default: on, and the SDK's words); `turns` the chat's transcript (restored true for an earlier conversation); `upcoming` how many booked calls there are. Expected: `shown` the ids of the turns drawn, in order (chat.showHistory false leaves out every restored turn — the agent still has them); `rows` what those turns draw, in the `rows` notation, indices into `shown`; `starters` whether the brand's starters may show (nothing restored on screen and nothing said by the customer — so a hidden history opens like a new chat); `newConversation` whether the header's compose control shows (chat.newConversation not false, and a restored turn on screen); `card` whether the booked-calls card shows (chat.showUpcomingCalls not false, and at least one call); `cardTitle` its title (chat.upcomingTitle trimmed, else \"Upcoming call\" for one call and \"Upcoming calls\" otherwise). 0.14.0 adds sessions: a history turn may carry \"session\" (the id of the session it was said in: a chat connection's session, or a call's id for voice turns); the SDK keeps it on the turn as `session` (null when absent, empty or not a string) and compares it wherever an expected turn names it. `sessionFrame`: the server's {\"type\":\"session\",\"id\",\"at\"} frame, sent once when a chat connection starts, gives the chat's sessionId (null for an id that is not a non-empty string); a live turn carries the sessionId of the connection that carries it: a line typed before the chat connected, or said before the session frame arrived, takes that connection's session once the frame arrives, never a stray session with no id; an identity change clears sessionId, and the unsent lines it keeps join the next session. `sessions`: the chat's sessions, derived from its turns oldest first — consecutive turns with the same session value (null included) make one entry {id, startedAt (first turn's at), endedAt (last turn's at), channel (\"voice\" when every turn is voice, else \"chat\"), turns (count), current (id is not null and equals sessionId)}.",
   "frames": [
     {
       "name": "a history's turns, oldest first, in the SDK's words",
@@ -105,6 +105,40 @@
       "name": "turns as a string: the frame is ignored",
       "frame": { "type": "history", "turns": "[]", "continued": true },
       "turns": null
+    },
+    {
+      "name": "each turn keeps the session it was said in; a turn without one has none",
+      "frame": {
+        "type": "history",
+        "continued": true,
+        "turns": [
+          { "id": "b1", "role": "user", "text": "Hi", "at": "2026-10-20T10:00:00Z", "channel": "chat", "session": "s-7a1c" },
+          { "id": "b2", "role": "assistant", "text": "Hello!", "at": "2026-10-20T10:00:03Z", "channel": "chat", "session": "s-7a1c" },
+          { "id": "b3", "role": "user", "text": "Call me", "at": "2026-10-21T08:00:00Z", "channel": "voice", "session": "c-31f0" },
+          { "id": "b4", "role": "assistant", "text": "Sure.", "at": "2026-10-21T08:00:02Z", "channel": "voice" }
+        ]
+      },
+      "turns": [
+        { "id": "b1", "role": "customer", "text": "Hi", "at": "2026-10-20T10:00:00Z", "channel": "chat", "session": "s-7a1c" },
+        { "id": "b2", "role": "agent", "text": "Hello!", "at": "2026-10-20T10:00:03Z", "channel": "chat", "session": "s-7a1c" },
+        { "id": "b3", "role": "customer", "text": "Call me", "at": "2026-10-21T08:00:00Z", "channel": "voice", "session": "c-31f0" },
+        { "id": "b4", "role": "agent", "text": "Sure.", "at": "2026-10-21T08:00:02Z", "channel": "voice", "session": null }
+      ]
+    },
+    {
+      "name": "a session that is not a non-empty string is none",
+      "frame": {
+        "type": "history",
+        "continued": true,
+        "turns": [
+          { "id": "b5", "role": "user", "text": "One", "at": "2026-10-20T10:00:00Z", "channel": "chat", "session": 42 },
+          { "id": "b6", "role": "assistant", "text": "Two", "at": "2026-10-20T10:00:01Z", "channel": "chat", "session": "" }
+        ]
+      },
+      "turns": [
+        { "id": "b5", "role": "customer", "text": "One", "at": "2026-10-20T10:00:00Z", "channel": "chat", "session": null },
+        { "id": "b6", "role": "agent", "text": "Two", "at": "2026-10-20T10:00:01Z", "channel": "chat", "session": null }
+      ]
     }
   ],
   "restore": [
@@ -288,6 +322,237 @@
         { "role": "customer", "text": "Hi Asha", "restored": true, "channel": "voice" },
         { "role": "agent", "text": "Anything else?", "restored": true, "channel": "chat" }
       ]
+    }
+  ],
+  "fresh": [
+    {
+      "name": "the first connection opens a conversation: nothing to mark",
+      "steps": [
+        { "opened": true },
+        { "agent": "Hi Meera, I'm Asha, your care coach." }
+      ],
+      "turns": [
+        { "role": "agent", "text": "Hi Meera, I'm Asha, your care coach." }
+      ],
+      "marks": []
+    },
+    {
+      "name": "a reconnect that starts over after the customer wrote: one marker before the new conversation",
+      "steps": [
+        { "opened": true },
+        { "agent": "Hi Meera, I'm Asha, your care coach." },
+        { "customer": "I take metformin twice a day." },
+        { "agent": "Thanks, I'll keep that in mind." },
+        { "opened": true },
+        { "agent": "Hi Meera, I'm Asha, your care coach." }
+      ],
+      "turns": [
+        { "role": "agent", "text": "Hi Meera, I'm Asha, your care coach." },
+        { "role": "customer", "text": "I take metformin twice a day." },
+        { "role": "agent", "text": "Thanks, I'll keep that in mind." },
+        { "role": "agent", "text": "Hi Meera, I'm Asha, your care coach." }
+      ],
+      "marks": [3]
+    },
+    {
+      "name": "an opening the customer never answered is replaced: one welcome, no marker",
+      "steps": [
+        { "opened": true },
+        { "agent": "Hi Meera, I'm Asha, your care coach." },
+        { "opened": true },
+        { "agent": "Hi Meera, I'm Asha, your care coach." }
+      ],
+      "turns": [
+        { "role": "agent", "text": "Hi Meera, I'm Asha, your care coach." }
+      ],
+      "marks": []
+    },
+    {
+      "name": "reconnects in a row with nothing new from the customer: still one marker and one welcome",
+      "steps": [
+        { "opened": true },
+        { "agent": "Hi Meera, I'm Asha, your care coach." },
+        { "customer": "Is my dose due?" },
+        { "agent": "Yes, at 8 pm." },
+        { "opened": true },
+        { "agent": "Hi Meera, I'm Asha, your care coach." },
+        { "opened": true },
+        { "agent": "Hi Meera, I'm Asha, your care coach." },
+        { "opened": true },
+        { "agent": "Hi Meera, I'm Asha, your care coach." }
+      ],
+      "turns": [
+        { "role": "agent", "text": "Hi Meera, I'm Asha, your care coach." },
+        { "role": "customer", "text": "Is my dose due?" },
+        { "role": "agent", "text": "Yes, at 8 pm." },
+        { "role": "agent", "text": "Hi Meera, I'm Asha, your care coach." }
+      ],
+      "marks": [3]
+    },
+    {
+      "name": "a history before the agent's first words: the conversation continued, no marker",
+      "steps": [
+        { "opened": true },
+        { "agent": "Hi Meera, I'm Asha, your care coach." },
+        { "customer": "Is my dose due?" },
+        { "agent": "Yes, at 8 pm." },
+        { "opened": true },
+        {
+          "history": {
+            "type": "history",
+            "turns": [
+              { "id": "ba0000000001", "role": "assistant", "text": "Hi Meera, I'm Asha, your care coach.", "at": "2026-10-21T07:28:00Z", "channel": "chat" },
+              { "id": "ba0000000002", "role": "user", "text": "Is my dose due?", "at": "2026-10-21T07:28:10Z", "channel": "chat" },
+              { "id": "ba0000000003", "role": "assistant", "text": "Yes, at 8 pm.", "at": "2026-10-21T07:28:12Z", "channel": "chat" }
+            ],
+            "continued": true
+          }
+        },
+        { "customer": "And tomorrow?" },
+        { "agent": "8 pm again." }
+      ],
+      "turns": [
+        { "role": "agent", "text": "Hi Meera, I'm Asha, your care coach.", "restored": true, "id": "ba0000000001" },
+        { "role": "customer", "text": "Is my dose due?", "restored": true },
+        { "role": "agent", "text": "Yes, at 8 pm.", "restored": true },
+        { "role": "customer", "text": "And tomorrow?" },
+        { "role": "agent", "text": "8 pm again." }
+      ],
+      "marks": []
+    },
+    {
+      "name": "a message waiting when the connection opened belongs to the new conversation: the marker goes before it",
+      "steps": [
+        { "opened": true },
+        { "agent": "Hi Meera, I'm Asha, your care coach." },
+        { "customer": "Is my dose due?" },
+        { "agent": "Yes, at 8 pm." },
+        { "customer": "Typed in the tunnel", "delivery": "sending" },
+        { "opened": true },
+        { "agent": "Hi Meera, I'm Asha, your care coach." }
+      ],
+      "turns": [
+        { "role": "agent", "text": "Hi Meera, I'm Asha, your care coach." },
+        { "role": "customer", "text": "Is my dose due?" },
+        { "role": "agent", "text": "Yes, at 8 pm." },
+        { "role": "customer", "text": "Typed in the tunnel" },
+        { "role": "agent", "text": "Hi Meera, I'm Asha, your care coach." }
+      ],
+      "marks": [3]
+    },
+    {
+      "name": "the customer's first words after a reconnect: the marker goes before them",
+      "steps": [
+        { "opened": true },
+        { "agent": "Hi Meera, I'm Asha, your care coach." },
+        { "customer": "Is my dose due?" },
+        { "agent": "Yes, at 8 pm." },
+        { "opened": true },
+        { "customer": "Hello again" },
+        { "agent": "Hello! How can I help?" }
+      ],
+      "turns": [
+        { "role": "agent", "text": "Hi Meera, I'm Asha, your care coach." },
+        { "role": "customer", "text": "Is my dose due?" },
+        { "role": "agent", "text": "Yes, at 8 pm." },
+        { "role": "customer", "text": "Hello again" },
+        { "role": "agent", "text": "Hello! How can I help?" }
+      ],
+      "marks": [3]
+    },
+    {
+      "name": "an earlier conversation restored, then a later connection that starts over: the marker before the new one",
+      "steps": [
+        { "opened": true },
+        {
+          "history": {
+            "type": "history",
+            "turns": [
+              { "id": "bb0000000001", "role": "user", "text": "Can I take it with food?", "at": "2026-10-20T09:00:00Z", "channel": "chat" },
+              { "id": "bb0000000002", "role": "assistant", "text": "Yes, with a meal is best.", "at": "2026-10-20T09:00:04Z", "channel": "chat" }
+            ],
+            "continued": true
+          }
+        },
+        { "opened": true },
+        { "agent": "Hi Meera, I'm Asha, your care coach." }
+      ],
+      "turns": [
+        { "role": "customer", "text": "Can I take it with food?", "restored": true },
+        { "role": "agent", "text": "Yes, with a meal is best.", "restored": true },
+        { "role": "agent", "text": "Hi Meera, I'm Asha, your care coach." }
+      ],
+      "marks": [2]
+    },
+    {
+      "name": "a later history replaces everything it holds, the marker with it",
+      "steps": [
+        { "opened": true },
+        { "agent": "Hi Meera, I'm Asha, your care coach." },
+        { "customer": "Is my dose due?" },
+        { "agent": "Yes, at 8 pm." },
+        { "opened": true },
+        { "agent": "Hi Meera, I'm Asha, your care coach." },
+        { "customer": "And tomorrow?" },
+        { "agent": "8 pm again." },
+        { "opened": true },
+        {
+          "history": {
+            "type": "history",
+            "turns": [
+              { "id": "bc0000000001", "role": "user", "text": "Is my dose due?", "at": "2026-10-21T07:28:10Z", "channel": "chat" },
+              { "id": "bc0000000002", "role": "assistant", "text": "Yes, at 8 pm.", "at": "2026-10-21T07:28:12Z", "channel": "chat" },
+              { "id": "bc0000000003", "role": "user", "text": "And tomorrow?", "at": "2026-10-21T07:31:00Z", "channel": "chat" },
+              { "id": "bc0000000004", "role": "assistant", "text": "8 pm again.", "at": "2026-10-21T07:31:03Z", "channel": "chat" }
+            ],
+            "continued": true
+          }
+        }
+      ],
+      "turns": [
+        { "role": "customer", "text": "Is my dose due?", "restored": true },
+        { "role": "agent", "text": "Yes, at 8 pm.", "restored": true },
+        { "role": "customer", "text": "And tomorrow?", "restored": true },
+        { "role": "agent", "text": "8 pm again.", "restored": true }
+      ],
+      "marks": []
+    },
+    {
+      "name": "a history frame that restores nothing still means the conversation continued: no marker",
+      "steps": [
+        { "opened": true },
+        { "agent": "Hi Meera, I'm Asha, your care coach." },
+        { "customer": "Is my dose due?" },
+        { "agent": "Yes, at 8 pm." },
+        { "opened": true },
+        { "history": { "type": "history", "turns": "none", "continued": true } },
+        { "customer": "And tomorrow?" },
+        { "agent": "8 pm again." }
+      ],
+      "turns": [
+        { "role": "agent", "text": "Hi Meera, I'm Asha, your care coach." },
+        { "role": "customer", "text": "Is my dose due?" },
+        { "role": "agent", "text": "Yes, at 8 pm." },
+        { "role": "customer", "text": "And tomorrow?" },
+        { "role": "agent", "text": "8 pm again." }
+      ],
+      "marks": []
+    },
+    {
+      "name": "a message waiting when an unanswered opening reconnects: the opening stays, the marker goes before the message",
+      "steps": [
+        { "opened": true },
+        { "agent": "Hi Meera, I'm Asha, your care coach." },
+        { "customer": "Are you there?", "delivery": "sending" },
+        { "opened": true },
+        { "agent": "Yes, I'm here. How can I help?" }
+      ],
+      "turns": [
+        { "role": "agent", "text": "Hi Meera, I'm Asha, your care coach." },
+        { "role": "customer", "text": "Are you there?" },
+        { "role": "agent", "text": "Yes, I'm here. How can I help?" }
+      ],
+      "marks": [1]
     }
   ],
   "rows": [
@@ -586,6 +851,72 @@
       "newConversation": true,
       "card": false,
       "cardTitle": "Upcoming calls"
+    }
+  ],
+  "sessionFrame": [
+    {
+      "name": "the session frame names the chat's session",
+      "frame": { "type": "session", "id": "s-9f2c", "at": "2026-10-21T12:00:00Z" },
+      "sessionId": "s-9f2c"
+    },
+    {
+      "name": "an empty id is no session",
+      "frame": { "type": "session", "id": "", "at": "2026-10-21T12:00:00Z" },
+      "sessionId": null
+    },
+    {
+      "name": "a frame with no id is no session",
+      "frame": { "type": "session" },
+      "sessionId": null
+    }
+  ],
+  "sessions": [
+    {
+      "name": "two earlier sessions, a call, then this session",
+      "sessionId": "s-9f2c",
+      "turns": [
+        { "role": "customer", "text": "Hi", "at": "2026-10-20T10:00:00Z", "channel": "chat", "session": "s-7a1c" },
+        { "role": "agent", "text": "Hello!", "at": "2026-10-20T10:00:03Z", "channel": "chat", "session": "s-7a1c" },
+        { "role": "customer", "text": "Call me", "at": "2026-10-21T08:00:00Z", "channel": "voice", "session": "c-31f0" },
+        { "role": "agent", "text": "Sure.", "at": "2026-10-21T08:00:02Z", "channel": "voice", "session": "c-31f0" },
+        { "role": "customer", "text": "Back again", "at": "2026-10-21T12:00:05Z", "channel": "chat", "session": "s-9f2c" },
+        { "role": "agent", "text": "Welcome back.", "at": "2026-10-21T12:00:07Z", "channel": "chat", "session": "s-9f2c" }
+      ],
+      "sessions": [
+        { "id": "s-7a1c", "startedAt": "2026-10-20T10:00:00Z", "endedAt": "2026-10-20T10:00:03Z", "channel": "chat", "turns": 2, "current": false },
+        { "id": "c-31f0", "startedAt": "2026-10-21T08:00:00Z", "endedAt": "2026-10-21T08:00:02Z", "channel": "voice", "turns": 2, "current": false },
+        { "id": "s-9f2c", "startedAt": "2026-10-21T12:00:05Z", "endedAt": "2026-10-21T12:00:07Z", "channel": "chat", "turns": 2, "current": true }
+      ]
+    },
+    {
+      "name": "turns kept before sessions were recorded make one session with no id",
+      "sessionId": "s-9f2c",
+      "turns": [
+        { "role": "customer", "text": "Old one", "at": "2026-10-19T09:00:00Z", "channel": "chat", "session": null },
+        { "role": "agent", "text": "Old reply", "at": "2026-10-19T09:00:02Z", "channel": "chat", "session": null },
+        { "role": "customer", "text": "New one", "at": "2026-10-21T12:00:05Z", "channel": "chat", "session": "s-9f2c" }
+      ],
+      "sessions": [
+        { "id": null, "startedAt": "2026-10-19T09:00:00Z", "endedAt": "2026-10-19T09:00:02Z", "channel": "chat", "turns": 2, "current": false },
+        { "id": "s-9f2c", "startedAt": "2026-10-21T12:00:05Z", "endedAt": "2026-10-21T12:00:05Z", "channel": "chat", "turns": 1, "current": true }
+      ]
+    },
+    {
+      "name": "a server that sends no sessions: one session with no id, never current",
+      "sessionId": null,
+      "turns": [
+        { "role": "agent", "text": "Hello!", "at": "2026-10-21T12:00:00Z", "channel": "chat", "session": null },
+        { "role": "customer", "text": "Hi", "at": "2026-10-21T12:00:04Z", "channel": "chat", "session": null }
+      ],
+      "sessions": [
+        { "id": null, "startedAt": "2026-10-21T12:00:00Z", "endedAt": "2026-10-21T12:00:04Z", "channel": "chat", "turns": 2, "current": false }
+      ]
+    },
+    {
+      "name": "no turns, no sessions",
+      "sessionId": "s-9f2c",
+      "turns": [],
+      "sessions": []
     }
   ]
 }

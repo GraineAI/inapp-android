@@ -112,9 +112,47 @@ class GraineCalls internal constructor(
     @Volatile var muted = false
         private set
 
-    /** The customer chose the loudspeaker (else the call is on a headset, if one is connected, or the earpiece). */
+    /**
+     * The call is heard on the loudspeaker — the route as the phone has it,
+     * whoever chose it (else a headset, if one is connected, or the earpiece).
+     * Before a call's audio starts, what it will start on.
+     */
     @Volatile var speaker = false
         private set
+
+    /**
+     * Calls start on the loudspeaker — an agent's voice is heard with the phone
+     * in the hand, not at the ear — unless a headset is connected (Bluetooth or
+     * plugged in), which takes the call; one connected during the call takes it
+     * too. Calls the user places and calls Graine rings alike. [setSpeaker]
+     * still moves it: false is the headset or the earpiece. Set it to false
+     * for the earpiece first, as before 0.14.0. Read when a call's audio
+     * starts: set it before the call.
+     */
+    @Volatile var speakerByDefault: Boolean = true
+
+    /** What the customer chose with [setSpeaker] for this call; null: [speakerByDefault] decides. Main thread. */
+    private var speakerChoice: Boolean? = null
+
+    /** Why the call in progress is ending, by its id, once something has said ([GraineCallOutcome.endCause]). Main thread. */
+    private var endCause: Pair<String, String>? = null
+
+    /** The agent's audio has reached the phone on this call, by its id. Main thread. */
+    private var voiceHeard: String? = null
+
+    /**
+     * AUDIO_CHECK_MS after the call is up with none of the agent's audio heard:
+     * the route and the focus applied again, once, and said in the log. It
+     * never ends the call — a call that waits a moment for its first words is
+     * not a broken one. Main thread.
+     */
+    private val audioCheck = Runnable {
+        val c = machine.call ?: return@Runnable
+        if (machine.state != GraineCallState.ACTIVE || voiceHeard == c.callId) return@Runnable
+        val granted = route?.reapply()
+        CallLog.debug("no audio from the agent ${AUDIO_CHECK_MS / 1000} s after the call was answered: " +
+            "the audio route and focus applied again (focus ${if (granted == true) "granted" else "not granted"})")
+    }
 
     /** The agent's voice is being heard. */
     @Volatile var agentSpeaking = false
@@ -158,6 +196,19 @@ class GraineCalls internal constructor(
     /** The agent the call in progress is with — for an app's own call screen to draw in its design. Null with no call. */
     val callAgent: GraineInApp? get() = call?.let { agentFor(it.callId) }
 
+    /**
+     * How the call in progress connected ([GraineCallConnection]) — the same
+     * facts as its Connection in Execution Logs, growing as the call goes:
+     * the transport and the tap's wait once it connects, the agent's first
+     * words, each recovery, the audio. Null with no call, and before its
+     * first fact. Changes reach [GraineCallListener.onCallConnection]; the
+     * call's outcome carries the last of it ([GraineCallOutcome.connection]).
+     */
+    @Volatile var connection: GraineCallConnection? = null
+        private set
+    /** The report of the call in progress, by its id: rows arrive on the main thread. */
+    private var connectionReport: Pair<String, CallConnectionReport>? = null
+
     private val scheduler by lazy { home.env.scheduler ?: ExecutorScheduler("graine-call") }
     /** The phone under the call: its lock screen, the call's place in its audio, its microphone and speaker. */
     private val phone: CallPhone by lazy { home.env.callPhone ?: AndroidCallPhone(app) }
@@ -185,7 +236,7 @@ class GraineCalls internal constructor(
     private var micPending = false
     private var micAsked = false
     private val micGiveUp = Runnable {
-        if (micPending) { micPending = false; machine.fail("The microphone permission was not granted.") }
+        if (micPending) { micPending = false; ending(CallEnd.FAILED); machine.fail("The microphone permission was not granted.") }
     }
     /** When [configure] first ran (elapsedRealtime): the setup self-check's clock. 0 before. */
     @Volatile private var configuredAt = 0L
@@ -375,7 +426,18 @@ class GraineCalls internal constructor(
         val busy = o.kind == GraineCallOutcome.Kind.MISSED && machine.call?.callId != callId
         val seconds = if (o.kind == GraineCallOutcome.Kind.ENDED && connectedAt > 0)
             ((android.os.SystemClock.elapsedRealtime() - connectedAt + 500) / 1000).toInt().coerceAtLeast(0) else null
-        return o.copy(callId = callId, hosted = callId in hostedIds, durationSeconds = seconds, busy = busy)
+        // How it connected, as it stood: on the end of a call that was placed or answered.
+        val ends = o.kind == GraineCallOutcome.Kind.ENDED || o.kind == GraineCallOutcome.Kind.FAILED
+        val connected = if (ends) connectionReport?.takeIf { it.first == callId }?.second?.value else null
+        // Why it ended: as whoever ended it said, else as its reason has it.
+        val cause = if (!ends) null else endCause?.takeIf { it.first == callId }?.second ?: CallEnd.of(o)
+        return o.copy(callId = callId, hosted = callId in hostedIds, durationSeconds = seconds, busy = busy, connection = connected, endCause = cause)
+    }
+
+    /** [cause] is why the call in progress is ending — the first to say wins. Main thread. */
+    private fun ending(cause: String) {
+        val id = machine.call?.callId ?: return
+        if (endCause?.first != id) endCause = id to cause
     }
 
     /**
@@ -610,7 +672,7 @@ class GraineCalls internal constructor(
     fun end() = onMain {
         when (machine.state) {
             GraineCallState.RINGING -> machine.decline()
-            GraineCallState.CONNECTING, GraineCallState.ACTIVE -> machine.end(GraineCallOutcome.EndReason.LOCAL)
+            GraineCallState.CONNECTING, GraineCallState.ACTIVE -> { ending(CallEnd.LOCAL_END); machine.end(GraineCallOutcome.EndReason.LOCAL) }
             else -> Unit
         }
     }
@@ -623,11 +685,22 @@ class GraineCalls internal constructor(
         report { it.onCallControls(muted, speaker) }
     }
 
-    /** The loudspeaker on or off. Off, the call goes back to a headset if one is connected (Bluetooth first), else the earpiece. */
+    /**
+     * The loudspeaker on or off — the customer's choice for this call, over
+     * [speakerByDefault]. Off, the call goes back to a headset if one is
+     * connected (Bluetooth first), else the earpiece. [speaker] says where it went.
+     */
     fun setSpeaker(on: Boolean) = onMain {
-        if (speaker == on) return@onMain
+        speakerChoice = on
+        // With the call's audio held, the route says where it went; before, this is what the call will start on.
+        val r = route
+        if (r != null) r.setSpeaker(on) else routed(on)
+    }
+
+    /** The call is on the loudspeaker, or not — as its route says; the controls hear it when it moves. Main thread. */
+    private fun routed(on: Boolean) {
+        if (speaker == on) return
         speaker = on
-        route?.setSpeaker(on)
         report { it.onCallControls(muted, speaker) }
     }
 
@@ -646,7 +719,7 @@ class GraineCalls internal constructor(
             val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
             val screen = resumed.get()
             CallPermissions.record(app, Manifest.permission.RECORD_AUDIO, granted) { screen != null && !screen.shouldShowRequestPermissionRationale(it) }
-            if (!granted) machine.fail("The microphone permission was denied.")
+            if (!granted) { ending(CallEnd.FAILED); machine.fail("The microphone permission was denied.") }
             else if (machine.state == GraineCallState.CONNECTING) startCallAudio()
         }
         return true
@@ -697,6 +770,7 @@ class GraineCalls internal constructor(
             if (Build.VERSION.SDK_INT >= 26) app.startForegroundService(intent) else app.startService(intent)
         } catch (e: Exception) {
             // Android forbids a microphone service started from the background; the call screen starts it.
+            ending(CallEnd.FAILED)
             machine.fail("The call could not start: ${e.message ?: e.javaClass.simpleName}")
         }
     }
@@ -709,14 +783,37 @@ class GraineCalls internal constructor(
     }
 
     internal fun serviceFailed(e: Exception) = onMain {
-        machine.fail("The call's foreground service could not start: ${e.message ?: e.javaClass.simpleName}")
+        serviceLost("could not start (${e.message ?: e.javaClass.simpleName})")
     }
 
-    /** The system stopped the service under a live call: the call cannot go on. */
+    /** The system stopped the service under a live call. */
     internal fun serviceStopped(s: GraineCallService) = onMain {
         if (service.get() === s) service = WeakReference(null)
-        if (machine.state == GraineCallState.CONNECTING || machine.state == GraineCallState.ACTIVE) {
-            machine.fail("The call's foreground service was stopped.")
+        if (machine.state == GraineCallState.CONNECTING || machine.state == GraineCallState.ACTIVE) serviceLost("was stopped")
+    }
+
+    /**
+     * THE CALL'S FOREGROUND SERVICE IS GONE — it could not start, or the system
+     * stopped it ([CallServiceLoss]). A call already dialled goes on: its audio
+     * is never cut for the service's sake, only its ongoing notification is
+     * gone, and the phone may silence the microphone while the app is in the
+     * background. One still waiting for the service starts now if the app is in
+     * front (Android lets it record), else it cannot record at all and fails.
+     */
+    private fun serviceLost(what: String) {
+        when (CallServiceLoss.act(dialled = session != null, inFront = front.get() != null, locked = phone.locked())) {
+            CallServiceLoss.Act.CARRY_ON -> {
+                CallLog.error("the call's foreground service $what: the call goes on without its ongoing notification")
+                notifications()?.cancel(ONGOING_ID)
+            }
+            CallServiceLoss.Act.START_NOW -> {
+                CallLog.error("the call's foreground service $what: the app is in front, so the call starts without it")
+                connect()
+            }
+            CallServiceLoss.Act.FAIL -> {
+                ending(CallEnd.FAILED)
+                machine.fail("The call's foreground service $what.")
+            }
         }
     }
 
@@ -732,7 +829,7 @@ class GraineCalls internal constructor(
         }
         graine.loadSession { s ->
             if (machine.call?.callId != c.callId || machine.state != GraineCallState.CONNECTING || session != null) return@loadSession
-            if (s == null) { machine.fail("The agent could not be loaded."); return@loadSession }
+            if (s == null) { ending(CallEnd.FAILED); machine.fail("The agent could not be loaded."); return@loadSession }
             open(c, graine, CallAgentIds.of(s))
         }
     }
@@ -740,11 +837,26 @@ class GraineCalls internal constructor(
     /** Call [c]'s conversation with [graine]'s agent, at [ids]. Main thread. */
     private fun open(c: GraineCall, graine: GraineInApp, ids: CallAgentIds) {
         if (machine.call?.callId != c.callId || machine.state != GraineCallState.CONNECTING || session != null) return
-        route = phone.route { i -> onMain { interrupted(c.callId, i) } }.also { it.acquire(speaker) }
+        // The loudspeaker unless the customer chose otherwise or a headset is there ([speakerByDefault]); the route says where it went.
+        route = phone.route(
+            { i -> onMain { interrupted(c.callId, i) } },
+            { on -> onMain { if (machine.call?.callId == c.callId) routed(on) } },
+        ).also { r ->
+            // Mode, focus and device, before any of the agent's audio can play. A focus the phone denies is said, and
+            // the call plays anyway: nothing waits on it, and a call that stays silent is the one thing worse.
+            if (!r.acquire(speakerChoice ?: speakerByDefault, byDefault = speakerChoice == null)) {
+                CallLog.error("audio focus was not granted at the call's start: the call plays anyway")
+            }
+        }
         val events = object : CallSessionEvents {
             override fun onOpen() = onMain {
                 if (machine.call?.callId == c.callId && machine.connected()) {
                     connectedAt = android.os.SystemClock.elapsedRealtime()
+                    // The call's audio starts: its route chosen again, where a phone may have moved it as the audio began.
+                    route?.refresh()
+                    // And if none of the agent's audio is heard in a few seconds, the route and the focus once more.
+                    main.removeCallbacks(audioCheck)
+                    main.postDelayed(audioCheck, AUDIO_CHECK_MS)
                     updateOngoing()
                 }
             }
@@ -774,6 +886,25 @@ class GraineCalls internal constructor(
             override fun onReconnecting(reconnecting: Boolean) = onMain {
                 if (machine.call?.callId != c.callId) return@onMain
                 setReconnecting(reconnecting)
+            }
+            override fun onAnalytics(name: String, data: Map<String, Any?>) = onMain {
+                if (machine.call?.callId != c.callId) return@onMain
+                // The session ending the call itself says why first.
+                if (name == CallAnalytics.ENDED) (data["cause"] as? String)?.let { ending(it) }
+                // The agent's audio reached the phone: said once in the log, and the audio check has nothing to do.
+                if (name == CallAnalytics.VOICE && voiceHeard != c.callId) {
+                    voiceHeard = c.callId
+                    main.removeCallbacks(audioCheck)
+                    CallLog.debug("the agent's audio was first heard ${data["answer_to_voice_ms"] ?: "?"} ms after the answer " +
+                        "(${data["tap_to_voice_ms"] ?: "?"} ms after the tap)")
+                }
+                val r = connectionReport?.takeIf { it.first == c.callId }?.second ?: CallConnectionReport().also { connectionReport = c.callId to it }
+                val before = r.value
+                r.fold(name, data)
+                val now = r.value ?: return@onMain
+                if (now == before) return@onMain
+                connection = now
+                report { it.onCallConnection(now) }
             }
         }
         val sess = CallTransportSession(
@@ -824,17 +955,20 @@ class GraineCalls internal constructor(
             GraineCallState.CONNECTING -> cancelRing()
             GraineCallState.ACTIVE -> Unit
             GraineCallState.ENDED -> teardown()
-            GraineCallState.IDLE -> Unit
+            // The outcome has carried the report and the cause; the next call starts its own.
+            GraineCallState.IDLE -> { connection = null; connectionReport = null; endCause = null }
         }
         report { it.onCallState(s, c) }
     }
 
-    /** Everything the call held, released; the hang-up frames go out if the line was up. */
+    /** Everything the call held, released; the hang-up frames go out if the line was up, with why it ended. */
     private fun teardown() {
         cancelRing()
         main.removeCallbacks(micGiveUp)
+        main.removeCallbacks(audioCheck)
+        voiceHeard = null
         micPending = false
-        session?.hangUp()
+        session?.hangUp(endCause?.takeIf { it.first == call?.callId }?.second ?: CallEnd.LOCAL_END)
         session = null
         unwatchContext?.invoke(); unwatchContext = null
         route?.release(); route = null
@@ -846,6 +980,7 @@ class GraineCalls internal constructor(
         notifications()?.cancel(ONGOING_ID)
         muted = false
         speaker = false
+        speakerChoice = null
         agentSpeaking = false
         agentLevel = 0f
         // A call that ends while recovering is no longer recovering: said once, so no screen stays on the moment.
@@ -1157,6 +1292,8 @@ class GraineCalls internal constructor(
         private const val REQUEST_MISSED = 0x6E75
         private const val REQUEST_CALL_BACK = 0x6E76
         private const val MIC_WAIT_MS = 60_000L
+        /** How long after the call is up the route and focus are applied again if none of the agent's audio was heard. */
+        internal const val AUDIO_CHECK_MS = 3_000L
         /** How many calls' agents are remembered: the one in progress, and the few before it whose outcomes may still be reported. */
         private const val RECENT_CALLS = 16
         private val VIBRATION = longArrayOf(0, 900, 700)

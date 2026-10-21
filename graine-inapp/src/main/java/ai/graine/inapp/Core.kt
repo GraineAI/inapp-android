@@ -656,6 +656,10 @@ internal object Widgets {
     /** How long the answered line says "thinking" while the agent has not started. */
     const val AWAITING_REPLY_MS = 12_000L
 
+    /** What the agent is told, quietly, when a component is closed without a choice (`component_dismissed`). */
+    const val DISMISSED_DETAIL =
+        "The customer closed the component without choosing. Do not refer to options they cannot see; offer to show it again if they want it."
+
     private val SURFACE = mapOf(
         "product_list" to "screen", "products" to "screen",
         "plan_comparison" to "sheet", "choices" to "sheet", "quick_actions" to "sheet", "calendar_slots" to "sheet",

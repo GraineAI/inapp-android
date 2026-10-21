@@ -75,6 +75,26 @@ internal object Booking {
         else -> null
     }
 
+    // Why booking is not available, as a word ([GraineInApp.bookingUnavailableReason]).
+    const val NOT_LOADED = "not_loaded"
+    const val RINGS_NOT_SET_UP = "rings_not_set_up"
+    const val SCHEDULING_OFF = "scheduling_off"
+    const val NOT_IDENTIFIED = "not_identified"
+
+    /**
+     * The same rule as [available], as the first thing that fails: the
+     * agent's settings not loaded yet ([loaded]: this launch's session or the
+     * one kept on the device), Graine not ringing this phone, users not
+     * allowed to book, the user not identified. Null when booking is available.
+     */
+    fun unavailableReason(rules: GraineSchedulingRules, identified: Boolean, loaded: Boolean): String? = when {
+        !loaded -> NOT_LOADED
+        !rules.ringsAndroid -> RINGS_NOT_SET_UP
+        !rules.usersCanBook -> SCHEDULING_OFF
+        !identified -> NOT_IDENTIFIED
+        else -> null
+    }
+
     // ── what the sheet offers ─────────────────────────────────────────────
 
     /** The first time offered: `earliest(now)` rounded up to the next 5 minutes. */
@@ -118,6 +138,20 @@ internal object Booking {
             if (dayFirst <= dayLast) out += Day(start, dayFirst, dayLast, dayLabel(start, nowMs, zone, date))
             start = next
         }
+        return out
+    }
+
+    /**
+     * Every time the sheet would offer on the day [dayMs] falls on in [zone]:
+     * each 5-minute step from that day's first time to its last ([days]),
+     * oldest first; empty for a day the sheet does not offer.
+     */
+    fun slots(rules: GraineSchedulingRules, nowMs: Long, zone: TimeZone, dayMs: Long): List<Long> {
+        val start = startOfDay(dayMs, zone)
+        val day = days(rules, nowMs, zone) { "" }.firstOrNull { it.startMs == start } ?: return emptyList()
+        val out = ArrayList<Long>()
+        var at = day.firstMs
+        while (at <= day.lastMs) { out += at; at += STEP_MS }
         return out
     }
 

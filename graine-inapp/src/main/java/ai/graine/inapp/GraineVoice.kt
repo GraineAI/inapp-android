@@ -157,9 +157,51 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
     private var appViews = 0
     private val appViewsToken = Any()
 
+    /**
+     * What the call runs on — [Transport.WEBRTC] or [Transport.WEBSOCKET] —
+     * from the moment the call is placed: what the voice engine was loaded
+     * to use, or the WebSocket once it reports a fallback
+     * ([GraineListener.onTransport] hears that). Null before any call; kept
+     * after a call ends, until the next one starts.
+     */
+    var transport: Transport? = null
+        private set
+
+    /**
+     * What the voice engine carries its calls on: what it was loaded with
+     * ([load]), until it reports a fallback — after which it stays on the
+     * WebSocket, with that reason, until it is loaded again.
+     */
+    private var engineTransport: Transport? = null
+    private var engineFallbackReason: String? = null
+    /** The call in progress has been told what it runs on: a fallback during it is the only change after. */
+    private var callTransportTold = false
+
+    /**
+     * Why a call that asked for WebRTC runs on the WebSocket instead
+     * (`mint_failed`, `no_answer`, `ice_timeout`, …, as the engine said it).
+     * Null when it did not fall back.
+     */
+    var transportFallbackReason: String? = null
+        private set
+
     /** What the call is doing, in one word — see [CallPhase]. A bar says "Thinking…" from this. */
     val phase: CallPhase
         get() = CallPhase.of(reconnecting, connectivity, connecting, ready, connected, agentSpeaking, awaitingAgent)
+
+    /**
+     * Where the call is, in one word — what the SDK's bar says
+     * ([GraineVoiceStatus]): connecting, listening, thinking, speaking,
+     * muted, reconnecting, failed ([error] says why, unless nothing could
+     * carry the call: [callFailed]) — and, with no call, ended (a call ended
+     * and none has started since) or idle. For a voice UI of your own; the
+     * listener's callbacks say when to read it again.
+     */
+    val status: GraineVoiceStatus
+        get() = GraineVoiceStatus.of(phase, connected, connecting, muted, error != null || callFailed, ended)
+
+    /** A call ended and no other has started since. */
+    private var ended = false
 
     /** The last caption is the agent's, still arriving. */
     private var agentSpeaking = false
@@ -330,8 +372,12 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
         // One conversation at a time, across every agent: a call starting ends the chat (its lines stay on
         // screen), and another agent's call.
         graine.voiceStarting()
-        // A new attempt: the last call's fault, its failure to connect and its last words are not news.
+        // A new attempt: the last call's fault, its failure to connect, its road and its last words are not news.
         error = null
+        ended = false
+        transport = null
+        transportFallbackReason = null
+        callTransportTold = false
         progress.clear()
         agentSpeaking = false
         awaitingAgent = false
@@ -411,10 +457,14 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
             if (session == null) { setConnectivity(Connectivity.FAILED, "session"); return@loadSession }
             mountedIdle = idle
             session.pageVersion?.let { cacheKey = it }
+            // What the engine carries calls on from now: what it is loaded with, until it reports a fallback.
+            val chosen = graine.config.transport ?: session.preferredTransport
+            engineTransport = chosen
+            engineFallbackReason = null
             val url = Protocol.engineUrl(
                 baseUrl = graine.config.baseUrl,
                 voiceAgentId = session.webcallAgentId,
-                transport = graine.config.transport ?: session.preferredTransport,
+                transport = chosen,
                 cacheKey = cacheKey,
                 idle = idle,
                 publishableKey = graine.config.publishableKey,
@@ -502,6 +552,12 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
             }
             is PageMessage.Call -> {
                 if (msg.connected) { endNotified = false; reconnecting = false; graine.main.removeCallbacks(endWatchdog); progress.clear() }
+                // A call is being placed or is live: what it runs on is what the engine carries calls on now.
+                if ((msg.connected || msg.connecting) && !callTransportTold) {
+                    callTransportTold = true
+                    transport = engineTransport ?: graine.config.transport ?: graine.session?.preferredTransport
+                    transportFallbackReason = engineFallbackReason
+                }
                 // The page announces "not connected" as it loads. With a start
                 // queued behind it, that is not idle — the customer pressed
                 // the button, and the bar must keep saying "connecting".
@@ -524,7 +580,10 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
                 graine.retainWidget(msg.widget)
                 report { it.onWidget(msg.widget) }
             }
-            is PageMessage.WidgetPending -> report { it.onWidgetPending(msg.widget) }
+            is PageMessage.WidgetPending -> {
+                graine.widgetOnItsWay(msg.widget)
+                report { it.onWidgetPending(msg.widget) }
+            }
             is PageMessage.AppAction -> graine.executeAction(msg.name, msg.arguments) { r ->
                 post(Protocol.out(Protocol.Out.APP_ACTION_RESULT,
                     "actionId" to msg.actionId, "status" to r.status.wire, "message" to r.message, "data" to r.data))
@@ -534,6 +593,9 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
                 reconnecting = false
                 agentSpeaking = false
                 awaitingAgent = false
+                ended = true
+                // Kept until the next call, which is told its own.
+                callTransportTold = false
                 setCall(connected = false, connecting = false)
                 startedCall = false
                 setQuality(ConnectionQuality.UNKNOWN)
@@ -545,6 +607,12 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
                 report { it.onMicDenied(msg.reason) }
             }
             is PageMessage.TransportChanged -> {
+                transport = msg.transport
+                transportFallbackReason = msg.reason?.takeIf { msg.transport != msg.requested && it.isNotBlank() }
+                callTransportTold = true
+                // The engine stays on what it fell back to, with that reason, until it is loaded again.
+                engineTransport = msg.transport
+                engineFallbackReason = transportFallbackReason
                 report { it.onTransport(msg.transport, msg.requested, msg.reason, msg.message) }
                 // A misconfiguration is an error even though the call survived it on the other
                 // transport: nothing recovers from it on its own, as the React Native launcher says too.

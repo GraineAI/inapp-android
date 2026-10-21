@@ -141,6 +141,12 @@ internal interface CallSessionEvents {
      * whole call and never reconnects inside it.
      */
     fun onReconnecting(reconnecting: Boolean) {}
+    /**
+     * An analytics row (CallAnalytics) was made, with the input it was made
+     * from — for the call's connection report — or, as a [CallAnalytics.QUALITY],
+     * a reading of the audio so far while a WebRTC call is live.
+     */
+    fun onAnalytics(name: String, data: Map<String, Any?>) {}
 }
 
 /** Everything outside the session, injected. */
@@ -248,6 +254,8 @@ internal class VoiceCallSession(
     private var openedAt = 0L
     private var firstAudioAt: Long? = null
     private var voiceTold = false
+    /** How the call ended has been told ([endedRow]). */
+    private var endedTold = false
 
     /** The agent's voice is being heard (playout-based). Read on the scheduler thread. */
     val agentSpeaking: Boolean get() = speaking
@@ -266,14 +274,16 @@ internal class VoiceCallSession(
      * Hang up: the microphone and the speaker are released NOW, on the
      * caller's thread — a hang-up never waits behind whatever the session's
      * thread is doing — then the stop frame, and the close ~200 ms later (the
-     * socket forces it if the line cannot carry it within a second). No event
-     * follows.
+     * socket forces it if the line cannot carry it within a second). How it
+     * ended goes before the stop frame ([cause]: the app or the user ended it,
+     * unless the app says why else). No event follows.
      */
-    fun hangUp() {
+    fun hangUp(cause: String = CallEnd.LOCAL_END) {
         releaseAudio()
         scheduler.post {
             if (phase == Phase.CLOSED) return@post
             val wasOpen = phase == Phase.OPEN
+            if (wasOpen) endedRow(cause)
             phase = Phase.CLOSED
             teardown()
             val s = socket ?: return@post
@@ -378,7 +388,7 @@ internal class VoiceCallSession(
         override fun onClosed(code: Int, reason: String) = scheduler.post {
             when (phase) {
                 Phase.CONNECTING -> failBeforeOpen("The call was refused (close $code${if (reason.isNotEmpty()) ": $reason" else ""}).")
-                Phase.OPEN -> endRemotely(GraineCallOutcome.EndReason.REMOTE, if (code == 1000 || code == 1005) null else "close $code $reason".trim())
+                Phase.OPEN -> endRemotely(GraineCallOutcome.EndReason.REMOTE, if (code == 1000 || code == 1005) null else "close $code $reason".trim(), CallEnd.REMOTE_BYE)
                 else -> Unit
             }
         }
@@ -386,7 +396,7 @@ internal class VoiceCallSession(
             val message = error.message ?: error.javaClass.simpleName
             when (phase) {
                 Phase.CONNECTING -> failBeforeOpen("The call could not connect: $message")
-                Phase.OPEN -> endRemotely(GraineCallOutcome.EndReason.FAILED, message)
+                Phase.OPEN -> endRemotely(GraineCallOutcome.EndReason.FAILED, message, CallEnd.FAILED)
                 else -> Unit
             }
         }
@@ -433,8 +443,8 @@ internal class VoiceCallSession(
      */
     private fun openRows() {
         val r = rows ?: return
-        CallAnalytics.frame(CallAnalytics.TRANSPORT, mapOf("transport" to "ws", "requested" to r.requested, "fallback_reason" to r.fallbackReason))?.let { send(it) }
-        CallAnalytics.frame(CallAnalytics.CONNECT, mapOf(
+        row(CallAnalytics.TRANSPORT, mapOf("transport" to "ws", "requested" to r.requested, "fallback_reason" to r.fallbackReason))
+        row(CallAnalytics.CONNECT, mapOf(
             "mode" to "cold",
             "warm" to false,
             "total_ms" to openedAt - tapAt,
@@ -442,8 +452,29 @@ internal class VoiceCallSession(
             "dial_ms" to openedAt - socketAt,
             "mint_ms" to ticketMs,
             "mint_route" to ticketMs?.let { "web" },
-        ))?.let { send(it) }
+        ))
         for (f in r.carried) send(f)
+    }
+
+    /**
+     * HOW THE CALL ENDED ([CallAnalytics.ENDED]), once, while the conversation
+     * is open: before the stop frame when this side ends it.
+     */
+    private fun endedRow(cause: String) {
+        if (rows == null || endedTold) return
+        endedTold = true
+        row(CallAnalytics.ENDED, mapOf(
+            "cause" to cause,
+            "transport" to "ws",
+            "after_ms" to scheduler.now() - openedAt,
+            "voice_heard" to voiceTold,
+        ))
+    }
+
+    /** One analytics row on the socket, and its input to the call's connection report. */
+    private fun row(name: String, data: Map<String, Any?>) {
+        CallAnalytics.frame(name, data)?.let { send(it) }
+        events.onAnalytics(name, data)
     }
 
     /** The agent's first audio, voice or not; then its voice — the first audio that is not digital silence — said once. */
@@ -453,12 +484,12 @@ internal class VoiceCallSession(
         val first = firstAudioAt ?: now.also { firstAudioAt = it }
         if (silence) return
         voiceTold = true
-        CallAnalytics.frame(CallAnalytics.VOICE, mapOf(
+        row(CallAnalytics.VOICE, mapOf(
             "tap_to_voice_ms" to now - tapAt,
             "answer_to_voice_ms" to now - openedAt,
             "first_audio_ms" to first - openedAt,
             "codec" to "${if (kind == AgentAudioFormat.Kind.MULAW) "PCMU" else "L16"}/$sampleRate",
-        ))?.let { send(it) }
+        ))
     }
 
     /**
@@ -478,7 +509,7 @@ internal class VoiceCallSession(
                 return@schedule
             }
             val s = socket
-            endRemotely(GraineCallOutcome.EndReason.FAILED, "Nothing arrived for ${CallFrames.LIVENESS_MS / 1000} seconds: the connection was lost.")
+            endRemotely(GraineCallOutcome.EndReason.FAILED, "Nothing arrived for ${CallFrames.LIVENESS_MS / 1000} seconds: the connection was lost.", CallEnd.AUDIO_WATCH)
             // Closed for good: the socket forces it if the dead line cannot carry the close.
             s?.close(1000, "")
         }
@@ -491,6 +522,7 @@ internal class VoiceCallSession(
      */
     private fun microphoneStopped() {
         if (phase != Phase.OPEN) return
+        endedRow(CallEnd.FAILED)
         hangUpFromHere()
         events.onEnded(GraineCallOutcome.EndReason.FAILED, "The microphone stopped working.")
     }
@@ -520,8 +552,10 @@ internal class VoiceCallSession(
         events.onFailed(error)
     }
 
-    private fun endRemotely(reason: GraineCallOutcome.EndReason, error: String?) {
+    private fun endRemotely(reason: GraineCallOutcome.EndReason, error: String?, cause: String) {
         if (phase != Phase.OPEN) return
+        // Told on a line that may be gone: the call's report hears it either way.
+        endedRow(cause)
         phase = Phase.CLOSED
         teardown()
         events.onEnded(reason, error)

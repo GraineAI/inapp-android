@@ -72,6 +72,21 @@ class CallAudioDeviceTest {
         }
     }
 
+    /** The default (GraineCalls.speakerByDefault): the loudspeaker for a phone in the hand, a headset whenever one is there. */
+    @Test fun theLoudspeakerByDefaultGivesWayToAnyHeadsetAsItComesAndGoes() {
+        fun byDefault(devices: List<Int>) = CallRouting.choose(devices, speaker = true, byDefault = true)
+        assertEquals(TYPE_BUILTIN_SPEAKER, byDefault(phone))
+        for (headset in bluetooth + wired) assertEquals("$headset keeps the call", headset, byDefault(phone + headset))
+        assertEquals("Bluetooth first, as at the ear", TYPE_BLE_HEADSET, byDefault(phone + wired + bluetooth))
+        val devices = phone.toMutableList()
+        devices += TYPE_WIRED_HEADSET      // plugged in mid-call: it takes the call
+        assertEquals(TYPE_WIRED_HEADSET, byDefault(devices))
+        devices -= TYPE_WIRED_HEADSET      // unplugged: back to the default, the loudspeaker
+        assertEquals(TYPE_BUILTIN_SPEAKER, byDefault(devices))
+        assertEquals("the customer's own choice still wins over a headset", TYPE_BUILTIN_SPEAKER, CallRouting.choose(phone + TYPE_WIRED_HEADSET, speaker = true))
+        assertEquals("off by default is the ear", TYPE_BUILTIN_EARPIECE, CallRouting.choose(phone, speaker = false, byDefault = true))
+    }
+
     @Test fun theLoudspeakerWhenChosenWinsOverEveryHeadset() {
         assertEquals(TYPE_BUILTIN_SPEAKER, loud(*(bluetooth + wired).toIntArray()))
         for (d in bluetooth + wired) assertEquals(TYPE_BUILTIN_SPEAKER, loud(d))
@@ -157,5 +172,40 @@ class CallAudioDeviceTest {
         assertFalse(CallFocus.phoneCallActive(AudioManager.MODE_RINGTONE))          // still ringing: the hold goes on
         assertFalse(CallFocus.phoneCallActive(AudioManager.MODE_IN_COMMUNICATION))  // our own call, or another app's
         assertFalse(CallFocus.phoneCallActive(AudioManager.MODE_NORMAL))
+    }
+
+    /** Every mode the phone can be in, and what its telephony says: only a cellular call answered counts. */
+    @Test fun onlyARealCellularCallCountsNeverThisCallsOwnModeOrAnotherAppsCall() {
+        val modes = listOf(
+            AudioManager.MODE_NORMAL, AudioManager.MODE_RINGTONE, AudioManager.MODE_IN_CALL, AudioManager.MODE_IN_COMMUNICATION,
+            AudioManager.MODE_CALL_SCREENING, AudioManager.MODE_CALL_REDIRECT, AudioManager.MODE_COMMUNICATION_REDIRECT,
+        )
+        for (mode in modes) for (cellular in listOf(null, true, false)) {
+            val expected = mode == AudioManager.MODE_IN_CALL && cellular != false
+            assertEquals("mode $mode, cellular $cellular", expected, CallFocus.phoneCallActive(mode, cellular))
+        }
+        assertFalse("telephony says no SIM call: another app's call set the mode", CallFocus.phoneCallActive(AudioManager.MODE_IN_CALL, cellular = false))
+    }
+
+    @Test fun theOnceASecondCheckNeverFiresWhileThisCallHoldsItsFocus() {
+        for (mode in listOf(AudioManager.MODE_IN_CALL, AudioManager.MODE_IN_COMMUNICATION, AudioManager.MODE_RINGTONE)) {
+            for (cellular in listOf(null, true, false)) {
+                assertFalse("holding its focus, mode $mode, cellular $cellular", CallFocus.phoneCallEnds(onHold = false, mode = mode, cellular = cellular))
+            }
+        }
+        assertFalse("on hold, this call's own mode", CallFocus.phoneCallEnds(onHold = true, mode = AudioManager.MODE_IN_COMMUNICATION, cellular = null))
+        assertFalse("on hold while the phone rings", CallFocus.phoneCallEnds(onHold = true, mode = AudioManager.MODE_RINGTONE, cellular = null))
+        assertTrue("on hold, a cellular call answered", CallFocus.phoneCallEnds(onHold = true, mode = AudioManager.MODE_IN_CALL, cellular = null))
+        assertTrue(CallFocus.phoneCallEnds(onHold = true, mode = AudioManager.MODE_IN_CALL, cellular = true))
+    }
+
+    @Test fun aLostForegroundServiceNeverEndsACallThatWasDialled() {
+        for (inFront in listOf(true, false)) for (locked in listOf(true, false)) {
+            assertEquals(CallServiceLoss.Act.CARRY_ON, CallServiceLoss.act(dialled = true, inFront = inFront, locked = locked))
+        }
+        assertEquals("waiting, the app in front: it may record, so the call starts", CallServiceLoss.Act.START_NOW,
+            CallServiceLoss.act(dialled = false, inFront = true, locked = false))
+        assertEquals("waiting over the lock screen: it cannot record", CallServiceLoss.Act.FAIL, CallServiceLoss.act(dialled = false, inFront = true, locked = true))
+        assertEquals(CallServiceLoss.Act.FAIL, CallServiceLoss.act(dialled = false, inFront = false, locked = false))
     }
 }

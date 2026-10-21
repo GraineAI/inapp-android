@@ -366,9 +366,10 @@ internal class RtcDirectMint(
      * everything else, and the web route mints: resting, no grant for this call,
      * one about to lapse, a route the gateway has not said yes on, a grant
      * refused or spent, no answer. Blocks for one short request at most (and a
-     * probe already on its way).
+     * probe already on its way — never once [dialling] says the call is being
+     * dialled: the user is waiting then, and the web route does not keep them).
      */
-    fun mint(request: RtcCallRequest, sessionId: String): HttpReply? {
+    fun mint(request: RtcCallRequest, sessionId: String, dialling: () -> Boolean = { false }): HttpReply? {
         val key = GrantKey(request.publishableKey, request.identity, request.callId)
         val now = clock()
         val probeNow = ArrayList<Pair<String, Probe>>()
@@ -380,13 +381,13 @@ internal class RtcDirectMint(
         }
         // Then the next call's grant — fetched if none came, renewed when due — so no call waits on one.
         try {
-            return mintNow(request, sessionId, key, h, now)
+            return mintNow(request, sessionId, key, h, now, dialling)
         } finally {
             warmNext(request.baseUrl, request.publishableKey, request.identity, fromApp = false)
         }
     }
 
-    private fun mintNow(request: RtcCallRequest, sessionId: String, key: GrantKey, h: Held?, now: Long): HttpReply? {
+    private fun mintNow(request: RtcCallRequest, sessionId: String, key: GrantKey, h: Held?, now: Long, dialling: () -> Boolean): HttpReply? {
         if (h == null) {
             note("mint: no grant for this call; via the web route")
             return null
@@ -396,13 +397,13 @@ internal class RtcDirectMint(
             note("mint: the grant is about to lapse; via the web route")
             return null
         }
-        if (!probeReady(h.offer.url)) return null
+        if (!probeReady(h.offer.url, dialling)) return null
         val body = JSONObject().put("grant", h.offer.grant).put("session_id", sessionId)
         // The variables travel with the credential, as they do through the web route: the gateway cleans them by the same rule.
         if (request.variables.isNotEmpty()) body.put("variables", JSONObject(request.variables as Map<*, *>))
         val started = clock()
         val reply = try {
-            http.post(h.offer.url, body.toString(), DIRECT_TIMEOUT_MS)
+            http.post(h.offer.url, body.toString(), MINT_TIMEOUT_MS)
         } catch (e: Exception) {
             noAnswer("mint: the gateway did not answer (${e.javaClass.simpleName})")
             return null
@@ -501,10 +502,12 @@ internal class RtcDirectMint(
      * Is the gateway's direct route there? Asked before any grant is taken to it
      * — the web route and the gateway deploy separately, in either order — and
      * the request also opens the connection the first direct mint rides. A
-     * probe on its way is waited for; a route not asked yet (or whose answer
-     * never came) is asked for the next call, and this one mints through the web route.
+     * probe on its way is waited for — at most [PROBE_WAIT_MS], and not at all
+     * once the call is dialling ([dialling]): this one then mints through the
+     * web route. A route not asked yet (or whose answer never came) is asked
+     * for the next call, and this one mints through the web route.
      */
-    private fun probeReady(url: String): Boolean {
+    private fun probeReady(url: String, dialling: () -> Boolean): Boolean {
         val probeNow = ArrayList<Pair<String, Probe>>()
         val p = synchronized(lock) {
             probes[url] ?: run {
@@ -517,7 +520,12 @@ internal class RtcDirectMint(
             note("mint: the gateway has not said whether it takes grants; via the web route")
             return false
         }
-        if (!p.ready) p.done.await(PROBE_WAIT_MS, TimeUnit.MILLISECONDS)
+        var waited = 0L
+        while (!p.ready && waited < PROBE_WAIT_MS && !dialling()) {
+            if (p.done.await(PROBE_SLICE_MS, TimeUnit.MILLISECONDS)) break
+            waited += PROBE_SLICE_MS
+        }
+        if (!p.ready && dialling()) note("mint: dialling, and the gateway's answer is still on its way; via the web route")
         return p.ready
     }
 
@@ -664,12 +672,20 @@ internal class RtcDirectMint(
         /** The one of this process: the gateway's answers and the rests hold for every agent's calls. */
         val shared: RtcDirectMint by lazy { RtcDirectMint() }
 
-        /** A probe or a direct mint not answered in this got no answer — the gateway answers in about 0.2 s. */
+        /** A probe not answered in this got no answer — the gateway answers in about 0.2 s. */
         const val DIRECT_TIMEOUT_MS = 4_000
+        /**
+         * A direct mint not answered in this got no answer, and the web route
+         * mints: its user is waiting, and a gateway that answers at all answers
+         * in about 0.2 s — a dead route must cost the call a moment, not seconds.
+         */
+        const val MINT_TIMEOUT_MS = 1_500
         /** A grant request through the web route, in the background: at the web route's own pace, as a mint is. */
         const val WEB_TIMEOUT_MS = 8_000
-        /** How long a mint waits for a probe already on its way. */
+        /** How long a mint made ahead of the dial waits for a probe already on its way; a dialling call's waits for none. */
         const val PROBE_WAIT_MS = 5_000L
+        /** A dial that starts during that wait is looked for this often. */
+        const val PROBE_SLICE_MS = 50L
         /** A grant with less life left than this is not used, and is renewed: a mint in flight must not arrive with it lapsed. */
         const val MIN_LIFE_MS = 30_000L
         /** Direct requests in a row (the probe's or a mint's) with no answer that rest the direct mint. */

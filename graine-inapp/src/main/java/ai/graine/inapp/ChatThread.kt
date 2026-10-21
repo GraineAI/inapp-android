@@ -28,11 +28,12 @@ import java.util.TimeZone
 /*
  * THE THREAD — every row the chat window scrolls, in order (contract/DESIGN.md
  * "Chat window v2"): the pinned card (as a card), the upcoming calls, the
- * welcome, day lines and earlier calls, one bubble per message with its time
- * and status, the agent's quick replies under its turn, starters at the end of
- * the welcome, the typing indicator and the rating card. A lazy, recycled list
- * — the platform's ListView with stable ids: the SDK takes no dependencies, so
- * no RecyclerView — that builds only the rows on screen and rebinds a row only
+ * welcome, day lines and earlier calls, where a new conversation began under
+ * earlier lines, one bubble per message with its time and status, the agent's
+ * quick replies under its turn, starters at the end of the welcome, the
+ * typing indicator and the rating card. A lazy, recycled list — the
+ * platform's ListView with stable ids: the SDK takes no dependencies, so no
+ * RecyclerView — that builds only the rows on screen and rebinds a row only
  * when what it shows changed.
  */
 
@@ -73,6 +74,8 @@ internal sealed class ThreadItem {
     }
     data class Starters(val starters: List<String>, val list: Boolean, override val top: Int) : ThreadItem() { override val key get() = "starters" }
     data class Day(val row: ChatRows.Row.Day, override val top: Int) : ThreadItem() { override val key get() = "day-" + row.date }
+    /** "Disconnected · new conversation", before the turn [before] (its id, or "end" when no bubble follows yet). */
+    data class Fresh(val before: String, override val top: Int) : ThreadItem() { override val key get() = "fresh-$before" }
     data class Voice(val row: ChatRows.Row.Voice, override val top: Int) : ThreadItem() { override val key get() = row.id }
     /** A message at its place in its group; [shown] the characters of a reply still being revealed, null for all of it. */
     data class Bubble(val turn: GraineChatTurn, val position: String, val shown: Int?, override val top: Int) : ThreadItem() {
@@ -146,6 +149,7 @@ internal class ThreadAdapter(private val host: ThreadHost) : BaseAdapter() {
         is ThreadItem.Replies -> 7
         is ThreadItem.Typing -> 8
         is ThreadItem.Rating -> 9
+        is ThreadItem.Fresh -> 10
     }
 
     /** What a row last drew: redrawn only when this changes. */
@@ -177,6 +181,7 @@ internal class ThreadAdapter(private val host: ThreadHost) : BaseAdapter() {
             is ThreadItem.Welcome -> rows.welcome(item)
             is ThreadItem.Starters -> rows.starters(item)
             is ThreadItem.Day -> rows.day(item)
+            is ThreadItem.Fresh -> rows.fresh(item)
             is ThreadItem.Voice -> rows.voice(item)
             is ThreadItem.Replies -> rows.replies(item)
             is ThreadItem.Rating -> rows.rating(item)
@@ -187,7 +192,7 @@ internal class ThreadAdapter(private val host: ThreadHost) : BaseAdapter() {
     }
 
     private companion object {
-        const val TYPES = 10
+        const val TYPES = 11
     }
 }
 
@@ -255,6 +260,16 @@ internal class ThreadRows(private val ctx: Context, private val host: ThreadHost
         addView(text(ChatRows.dayLabel(item.row), t.font.scale.caption, s.wallpaper.textMuted, t.font.body, t.font.weights.strong).apply {
             gravity = Gravity.CENTER
             isFocusable = true
+            if (Build.VERSION.SDK_INT >= 28) isAccessibilityHeading = true
+        }, Ui.matchWidth())
+    }
+
+    /** Where the server began a new conversation under earlier lines: drawn as a day line is, said as a sentence. */
+    fun fresh(item: ThreadItem.Fresh): View = row(item.top).apply {
+        addView(text(ChatLook.FRESH, t.font.scale.caption, s.wallpaper.textMuted, t.font.body, t.font.weights.strong).apply {
+            gravity = Gravity.CENTER
+            isFocusable = true
+            contentDescription = ChatLook.FRESH_SPOKEN
             if (Build.VERSION.SDK_INT >= 28) isAccessibilityHeading = true
         }, Ui.matchWidth())
     }

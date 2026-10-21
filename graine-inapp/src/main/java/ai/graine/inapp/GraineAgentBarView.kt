@@ -601,6 +601,7 @@ class GraineAgentBarView @JvmOverloads constructor(
             chat = inChat,
             chatOnline = source?.online == true,
             chatFailed = source?.failed == true,
+            chatDisconnected = (source as? GraineChat)?.disconnected == true,
             online = voice.online,
             reconnecting = voice.reconnecting,
             connectivity = voice.connectivity,

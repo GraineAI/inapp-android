@@ -25,6 +25,13 @@ import java.util.concurrent.CopyOnWriteArraySet
  * opening the chat ends a voice call (and another agent's chat), starting a
  * call ends the chat, and a native call holds the chat until it is over.
  *
+ * Closing the chat window does not end the conversation: with no window
+ * showing it, it stays connected until it has been idle for [CLOSE_UNSEEN_MS]
+ * (no message either way), so opening the chat again within that time goes on
+ * with the same one. When Graine ends the conversation itself — idle, or at
+ * its time limit — nothing reconnects by itself: the lines stay, the window
+ * says "Disconnected", and opening the chat or a [send] connects again.
+ *
  * The agent may suggest replies for its turn ([quickReplies], sent with
  * [sendQuickReply]) and end the conversation ([ended]), after which the
  * chat window asks how it went where the design does ([rating], [onRated],
@@ -64,7 +71,53 @@ class GraineChat internal constructor(
     internal var everConnected = false
         private set
 
+    /**
+     * Graine ended the conversation itself — idle, or at the session's time
+     * limit — and nothing reconnects by itself: the window says
+     * "Disconnected" until the customer opens the chat or sends again. A chat
+     * of your own says it too; [connect] or [send] connects again.
+     */
+    var disconnected = false
+        private set
+
     override val messages: List<GraineChatTurn> get() = transcript.lines
+
+    /**
+     * Where the server began a new conversation under earlier lines: the ids of
+     * the turns the chat window draws "Disconnected · new conversation" before.
+     * The window's own rows, never turns: [messages] does not change for them.
+     */
+    internal val marks: Set<String> get() = transcript.marks
+
+    /**
+     * The ids of the turns a "Disconnected · new conversation" row goes before
+     * — where the server began a new conversation under earlier lines — oldest
+     * first; empty when there are none. For a chat of your own:
+     * [ChatRows.build] places the rows from it. Never turns: [messages] does
+     * not change for them, and [newConversation] or [clear] takes them away
+     * with the lines.
+     */
+    val newConversationBefore: List<String> get() = transcript.marks.toList()
+
+    /**
+     * The id of the chat's current session — this connection's run, the id
+     * Execution Logs shows for it — from the server's session frame. Null
+     * until it arrives (each new connection starts without one), and with a
+     * server that sends none. A turn said now carries it ([GraineChatTurn.session]).
+     * Changes reach every change listener. New in 0.14.0.
+     */
+    val sessionId: String? get() = transcript.session
+
+    /**
+     * The sessions the conversation on screen holds, oldest first: each run of
+     * consecutive turns said in the same session ([GraineChatSession]) — a
+     * chat connection's, or a call's — with the current one marked. Turns kept
+     * before sessions were recorded make one with no id; with a server that
+     * sends none, the whole conversation is one session with no id. For a
+     * "past conversations" list, or session dividers of your own. Derived
+     * from [messages] and [sessionId], so it changes when they do. New in 0.14.0.
+     */
+    val sessions: List<GraineChatSession> get() = ChatSessions.of(messages, sessionId)
 
     /**
      * The replies the agent suggests for its latest turn — drawn as chips by
@@ -138,7 +191,11 @@ class GraineChat internal constructor(
     /** Chat windows on screen now. */
     private var surfaces = 0
     private var retry: Runnable? = null
-    private val closeUnseen = Runnable { if (surfaces == 0) close() }
+    /** Every window that showed the conversation has left it: it is kept until it has been idle for [CLOSE_UNSEEN_MS]. */
+    private var unseen = false
+    /** When the conversation last opened or carried a message either way, on the scheduler's clock: idle since then. */
+    private var lastActivity = 0L
+    private val closeUnseen = Runnable { if (unseen) closeWhenIdle() }
     private val tick = Runnable { if (transcript.tick(SystemClock.uptimeMillis())) changed(); scheduleTick() }
 
     init {
@@ -230,6 +287,7 @@ class GraineChat internal constructor(
     /** Ends the conversation as [close] does, keeping the open's size: the bar moving to the call comes back to it. */
     internal fun hangUp(): Unit = onMain {
         wanted = false
+        unseen = false
         main.removeCallbacks(closeUnseen)
         cancelRetry()
         shut()
@@ -291,6 +349,7 @@ class GraineChat internal constructor(
                 if (connected) GraineChatTurn.Delivery.SENT else GraineChatTurn.Delivery.SENDING)
             transcript.deliver(GraineChatTurn.Delivery.FAILED, GraineChatTurn.Delivery.SENDING)
             scheduleTick()
+            active()
             graine.noteInteraction()
             report { it.onChatMessage(Role.CUSTOMER, line, false) }
             val s = session
@@ -361,12 +420,13 @@ class GraineChat internal constructor(
     override fun shown(visible: Boolean): Unit = onMain {
         surfaces = (surfaces + if (visible) 1 else -1).coerceAtLeast(0)
         if (visible) {
+            unseen = false
             main.removeCallbacks(closeUnseen)
             if (!wanted || (session == null && !opening && retry == null)) connect()
         } else if (surfaces == 0 && wanted) {
-            // Gone from every screen: the conversation is kept a moment for the next screen to take, then closed.
-            main.removeCallbacks(closeUnseen)
-            main.postDelayed(closeUnseen, CLOSE_UNSEEN_MS)
+            // Gone from every screen: the conversation is kept for the next screen until it has been idle for CLOSE_UNSEEN_MS.
+            unseen = true
+            closeWhenIdle()
         }
     }
 
@@ -378,6 +438,7 @@ class GraineChat internal constructor(
     /** A component answered in the chat: the structured payload and the sentence that is the customer's turn. */
     internal fun submitWidget(widgetId: String, data: Map<String, Any?>, summary: String) {
         session?.submitWidget(widgetId, data, summary)
+        onMain { active() }
     }
 
     /** Something the agent may speak up about, on the chat's socket. */
@@ -396,21 +457,51 @@ class GraineChat internal constructor(
         if (live) {
             cancelRetry()
             if (session != null || opening) { shut(); setState(connected = false, connecting = false); changed() }
-        } else if (wanted && surfaces > 0 && session == null && !opening) {
+        } else if (wanted && surfaces > 0 && session == null && !opening && !disconnected) {
             openSession()
             changed()
         }
     }
 
-    /** Signed out, or another user: their conversation is not the next user's. */
-    internal fun forgetUser(): Unit = onMain {
-        val was = wanted
+    /**
+     * WHO A CHAT BELONGS TO (contract/DESIGN.md): the identity changed —
+     * nobody to a user (the app identified after the chat opened), a user to
+     * another, or a user to nobody. A connection is whoever was identified
+     * when its ticket was made, so:
+     *  1. the one connected or connecting is closed normally — no
+     *     "Disconnected", no reconnect banner;
+     *  2. the turns it carried go, its history and marker rows with them, and
+     *     the booked calls shown for the identity before;
+     *  3. a line the customer typed that has not gone out stays, and goes on
+     *     the next connection;
+     *  4. a chat that was connected or connecting and is wanted connects again
+     *     at once, with a ticket for the new identity; otherwise the next open
+     *     connects.
+     * Called only when the identity's value changed: other traits, or the
+     * memory choice, change nothing on an open chat.
+     */
+    internal fun identityChanged(): Unit = onMain {
+        val live = connected || connecting
         shut()
-        transcript.clear()
+        cancelRetry()
+        val unsent = transcript.forgetAllButUnsent()
         outbox.clear()
+        outbox.addAll(unsent)
         fresh()
+        upcomingCalls = emptyList()
+        cancelling.clear()
+        cancelFailed.clear()
+        lastUpcomingFetch = 0L
+        disconnected = false
+        remaking = false
         setState(connected = false, connecting = false)
-        if (was && surfaces > 0) openSession()
+        if (live && wanted) {
+            failed = false
+            reconnect.reset()
+            transcript.deliver(GraineChatTurn.Delivery.FAILED, GraineChatTurn.Delivery.SENDING)
+            openSession()
+            fetchUpcoming(force = true)
+        }
         changed()
     }
 
@@ -423,6 +514,9 @@ class GraineChat internal constructor(
         // Into the chat, the call ends — and another agent's chat: two conversations at once is two agents answering.
         graine.chatOpening()
         cancelRetry()
+        // Opening it again is what a conversation Graine ended waits for; one being opened is not idle.
+        disconnected = false
+        active()
         opening = true
         setState(connected = false, connecting = true)
         graine.loadSession { s ->
@@ -477,9 +571,10 @@ class GraineChat internal constructor(
         unwatchContext?.invoke(); unwatchContext = null
         session = null
         transcript.disconnected()
-        // The agent ended this conversation and the server let it go: nothing to come back to. The customer's
-        // next message opens a new one (send), as after any close.
-        if (!wanted || !graine.foreground || graine.nativeCallLive() || ended) {
+        // The agent ended this conversation and the server let it go, or Graine ended it itself (idle, or its time
+        // limit): nothing comes back by itself. The customer's next message, or opening the chat, connects again
+        // (send, shown), as after any close.
+        if (!wanted || !graine.foreground || graine.nativeCallLive() || ended || disconnected) {
             setState(connected = false, connecting = false)
             changed()
             return
@@ -515,10 +610,27 @@ class GraineChat internal constructor(
                 setState(connected = false, connecting = false)
                 changed()
             }
-        } else if (wanted && surfaces > 0 && session == null && !opening && retry == null && !failed) {
+        } else if (wanted && surfaces > 0 && session == null && !opening && retry == null && !failed && !disconnected) {
             openSession()
             changed()
         }
+    }
+
+    /**
+     * No window shows the conversation: it closes once it has been idle for
+     * [CLOSE_UNSEEN_MS] — now, when it already has, else when that time comes.
+     * A message before then starts the wait again ([active]).
+     */
+    private fun closeWhenIdle() {
+        main.removeCallbacks(closeUnseen)
+        val left = lastActivity + CLOSE_UNSEEN_MS - scheduler.now()
+        if (left > 0) main.postDelayed(closeUnseen, left) else close()
+    }
+
+    /** The conversation opened or carried a message, either way: it is not idle — and, with no window showing it, its wait starts again. */
+    private fun active() {
+        lastActivity = scheduler.now()
+        if (unseen) closeWhenIdle()
     }
 
     /** What the socket reports, on its thread: each hops to the main thread and is dropped if its session is gone. */
@@ -530,9 +642,13 @@ class GraineChat internal constructor(
             main.post { if (of != null && session === of) block() }
         }
 
+        /** As [mine], for a message from the agent: the conversation is not idle. */
+        private fun heard(block: () -> Unit) = mine { active(); block() }
+
         override fun onOpen() = mine {
             failed = false
             everConnected = true
+            active()
             // What a history on this connection replaces: what is settled now, before the waiting lines go.
             transcript.opened()
             // The session sends what was waiting right after it opens.
@@ -549,17 +665,19 @@ class GraineChat internal constructor(
         override fun onClosed(code: Int, error: String?, unsent: List<String>) = mine {
             outbox.addAll(0, unsent)
             CallLog.debug("chat closed ($code${error?.let { ": $it" } ?: ""})")
+            // Graine ended it itself — idle, or the session's time limit: it does not come back by itself.
+            if (code == TextChatSession.CLOSE_IDLE || code == TextChatSession.CLOSE_TIME_LIMIT) disconnected = true
             dropped()
         }
 
-        override fun onAgentTurnStart() = mine {
+        override fun onAgentTurnStart() = heard {
             transcript.agentTurnStart(System.currentTimeMillis())
             // A new turn: the replies suggested for the one before it are spent.
             quickReplies = emptyList()
             changed()
         }
 
-        override fun onAgentWords(text: String) = mine {
+        override fun onAgentWords(text: String) = heard {
             // Words with no open turn begin one, and that too spends the replies offered before it.
             if (!transcript.agentLive) quickReplies = emptyList()
             transcript.agentWords(text, System.currentTimeMillis())
@@ -570,7 +688,7 @@ class GraineChat internal constructor(
             changed()
         }
 
-        override fun onAgentTurnEnd() = mine {
+        override fun onAgentTurnEnd() = heard {
             val line = transcript.lines.lastOrNull { it.role == Role.AGENT && it.live }
             transcript.agentTurnEnd()
             if (line != null && line.text.isNotBlank()) report { it.onChatMessage(Role.AGENT, line.text, false) }
@@ -579,32 +697,41 @@ class GraineChat internal constructor(
             changed()
         }
 
-        override fun onWidget(widget: JSONObject) = mine {
+        override fun onWidget(widget: JSONObject) = heard {
             // Retained before it is dispatched, so a view mounted later still finds it — as on a call.
             graine.retainWidget(widget)
             GraineWidget.adopt(widget, graine.config.baseUrl)?.let { transcript.component(it, System.currentTimeMillis()); changed() }
             report { it.onWidget(widget) }
         }
 
-        override fun onWidgetPending(hint: JSONObject) = mine { report { it.onWidgetPending(hint) } }
+        override fun onWidgetPending(hint: JSONObject) = heard {
+            graine.widgetOnItsWay(hint)
+            report { it.onWidgetPending(hint) }
+        }
 
-        override fun onHistory(turns: List<GraineChatTurn>) = mine {
+        override fun onHistory(turns: List<GraineChatTurn>) = heard {
             // The conversation continues: the earlier lines, before any agent message. Never reported as new ones.
-            // Replies suggested before it belong to a moment that has been replaced.
+            // Replies suggested before it belong to a moment that has been replaced. A frame that restores nothing
+            // still says the conversation continued: the agent's next turn opens no new one.
             if (transcript.restore(turns)) { quickReplies = emptyList(); changed() }
         }
 
-        override fun onQuickReplies(replies: List<GraineQuickReply>) = mine {
+        override fun onQuickReplies(replies: List<GraineQuickReply>) = heard {
             when {
                 replies.isEmpty() -> quickReplies = emptyList()
                 // Offered after the conversation ended, they are nobody's to tap.
-                ended -> return@mine
+                ended -> return@heard
                 else -> quickReplies = replies.toList()
             }
             changed()
         }
 
-        override fun onConversationEnd() = mine {
+        override fun onSession(id: String?) = mine {
+            transcript.sessionStarted(id)
+            changed()
+        }
+
+        override fun onConversationEnd() = heard {
             // The open turn was closed by the session; typing stops, the replies go, and the rating may be asked.
             transcript.disconnected()
             quickReplies = emptyList()
@@ -655,8 +782,14 @@ class GraineChat internal constructor(
     }
 
     companion object {
-        /** How long a conversation no window shows is kept for the next screen to take. */
-        const val CLOSE_UNSEEN_MS = 15_000L
+        /**
+         * How long a conversation no window shows stays connected with no
+         * message either way — Graine's own idle window, 5 minutes — before it
+         * closes: counted from its last message, not from when the last window
+         * left. Opening the chat again within it goes on with the same
+         * conversation; a message in the meantime starts it again.
+         */
+        const val CLOSE_UNSEEN_MS = 300_000L
         /** The upcoming calls are fetched again at most this often, unless asked. */
         const val UPCOMING_EVERY_MS = 10_000L
         /** A pinned card's lines, in characters. */

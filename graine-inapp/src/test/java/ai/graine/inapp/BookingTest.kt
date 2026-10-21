@@ -160,6 +160,36 @@ class BookingTest {
         assertFalse("the support agent does not let users book", support.bookingAvailable)
     }
 
+    // ── why not, as a word (0.14.0) ──────────────────────────────────────────
+
+    @Test fun whyBookingIsNotAvailableIsTheFirstRuleThatFails() {
+        val offline = GraineInApp.make(app, GraineConfig("https://www.graine.ai", "pk_offline"), GraineInApp.DEFAULT) { env() }
+        settle()
+        assertEquals("the settings never loaded", "not_loaded", offline.bookingUnavailableReason)
+        val cases = listOf(
+            "rings_not_set_up" to """{"hosted":false,"scheduling":{"usersCanBook":true}}""",
+            "rings_not_set_up" to """{"hosted":true,"platforms":["ios"],"scheduling":{"usersCanBook":true}}""",
+            "rings_not_set_up" to null,
+            "scheduling_off" to """{"hosted":true,"scheduling":{"usersCanBook":false}}""",
+            "scheduling_off" to """{"hosted":true}""",
+        )
+        for ((want, calls) in cases) {
+            AppShared.reset()
+            val g = agent(session(calls))
+            g.identify(mapOf("user_id" to "P-1"))
+            settle()
+            assertEquals(calls ?: "an older server: no calls at all", want, g.bookingUnavailableReason)
+            assertFalse(g.bookingAvailable)
+        }
+        AppShared.reset()
+        val g = agent(session(bookable))
+        assertEquals("not_identified", g.bookingUnavailableReason)
+        g.identify(mapOf("user_id" to "P-1"))
+        settle()
+        assertNull(g.bookingUnavailableReason)
+        assertTrue("the same rule", g.bookingAvailable)
+    }
+
     // ── what the sheet offers ────────────────────────────────────────────────
 
     private val kolkata: TimeZone = TimeZone.getTimeZone("Asia/Kolkata")
@@ -204,6 +234,33 @@ class BookingTest {
             assertTrue(d.firstMs <= d.lastMs)
             assertEquals("on a 5-minute mark", 0L, d.firstMs % 300_000L)
         }
+    }
+
+    @Test fun aDaysSlotsAreTheSheetsTimesThatDayEveryFiveMinutes() {
+        val now = at(2026, 10, 14, 18, 3)
+        val days = Booking.days(rules, now, kolkata, ::date)
+        val today = Booking.slots(rules, now, kolkata, at(2026, 10, 14, 12, 0))
+        assertEquals(days[0].firstMs, today.first())
+        assertEquals(days[0].lastMs, today.last())
+        assertTrue("every five minutes", today.zipWithNext().all { (a, b) -> b - a == 300_000L })
+        assertEquals((days[0].lastMs - days[0].firstMs) / 300_000L + 1, today.size.toLong())
+        val furthest = Booking.slots(rules, now, kolkata, at(2026, 10, 28, 23, 59))
+        assertEquals(at(2026, 10, 28, 0, 0), furthest.first())
+        assertEquals(at(2026, 10, 28, 18, 0), furthest.last())
+        assertTrue("past the furthest day", Booking.slots(rules, now, kolkata, at(2026, 10, 29, 9, 0)).isEmpty())
+        assertTrue("before today", Booking.slots(rules, now, kolkata, at(2026, 10, 13, 9, 0)).isEmpty())
+        assertEquals("any time of the day asks for that day", Booking.slots(rules, now, kolkata, at(2026, 10, 15, 0, 0)),
+            Booking.slots(rules, now, kolkata, at(2026, 10, 15, 23, 59)))
+        assertTrue("no booking, no days: nothing", Booking.slots(GraineSchedulingRules(usersCanBook = true, minLeadMinutes = 2, maxDaysAhead = 0), now, kolkata, now).isEmpty())
+    }
+
+    @Test fun anAgentsSlotsAreForTheDayAskedInThePhonesZone() {
+        val g = agent(session(bookable))
+        val tomorrow = g.bookingSlots(Date(System.currentTimeMillis() + 86_400_000L))
+        assertTrue("a whole day of times", tomorrow.size > 200)
+        assertTrue("on five-minute marks", tomorrow.all { it.time % 300_000L == 0L })
+        assertTrue("never sooner than the lead", tomorrow.first().time >= g.schedulingRules.earliest().time)
+        assertTrue("past the furthest day: none", g.bookingSlots(Date(System.currentTimeMillis() + 20 * 86_400_000L)).isEmpty())
     }
 
     @Test fun aDayWithNoTimeLeftIsNotOffered() {

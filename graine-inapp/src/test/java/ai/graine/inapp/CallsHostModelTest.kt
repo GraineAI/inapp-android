@@ -126,6 +126,8 @@ private class FakeCallsHostPlatform : CallsHostPlatform {
     override fun end() { ends++ }
     override fun setMuted(muted: Boolean) { this.muted += muted }
     override fun setSpeaker(on: Boolean) { speaker += on }
+    val speakerDefaults = mutableListOf<Boolean>()
+    override fun setSpeakerByDefault(on: Boolean) { speakerDefaults += on }
     override fun identify(traits: Map<String, Any?>?) { identities += traits }
     override fun setVariables(values: Map<String, Any?>) { variableChanges += values }
     override fun setScreen(screen: GraineScreen?) { screens += screen }
@@ -203,6 +205,9 @@ class CallsHostOptionsTest {
             "ios" to mapOf("iconTemplate" to "CallIcon", "includesCallsInRecents" to true),
         ))
         assertEquals(GraineCallTransport.WEBRTC, o.callTransport)
+        assertTrue("the loudspeaker by default", o.speakerByDefault)
+        assertFalse(CallsHostOptions.parse(with("speakerByDefault" to false)).speakerByDefault)
+        assertEquals("speakerByDefault must be a boolean", refusal(with("speakerByDefault" to "no")))
         assertEquals("https://graine.example.com", o.baseUrl)
         assertEquals("ring", o.ringtoneSound)
         assertEquals(45_000L, o.ringTimeoutMs)
@@ -548,16 +553,30 @@ class CallsHostValuesTest {
 
 class CallsHostSnapshotTest {
     private val keys = setOf("state", "callId", "direction", "reason", "callerName", "muted", "speakerOn", "agentSpeaking",
-        "reconnecting", "caption", "connectedAt", "error", "agent", "transport", "transportFallbackReason")
+        "reconnecting", "caption", "connectedAt", "error", "agent", "transport", "transportFallbackReason", "connection", "agentLevel")
 
     @Test fun everyKeyIsAlwaysThereAndIdleIsNullsAndFalses() {
         val json = CallsHostSnapshot().json
         assertEquals(keys, json.keys)
         assertEquals("idle", json["state"])
-        for (key in listOf("callId", "direction", "reason", "callerName", "caption", "connectedAt", "error", "agent", "transport", "transportFallbackReason")) {
+        for (key in listOf("callId", "direction", "reason", "callerName", "caption", "connectedAt", "error", "agent", "transport", "transportFallbackReason", "connection")) {
             assertTrue(key, json.containsKey(key) && json[key] == null)
         }
         for (key in listOf("muted", "speakerOn", "agentSpeaking", "reconnecting")) assertEquals(key, false, json[key])
+        assertEquals("no call, no level", 0.0, json["agentLevel"])
+    }
+
+    @Test fun theAgentsLevelIsInTheStateToTwoDecimalsAndEachChangeIsAStateEvent() {
+        val live = CallsHostSnapshot(state = GraineCallState.ACTIVE, callId = "c1", agentLevel = CallsHostSnapshot.level(0.4271f))
+        assertEquals(0.43, live.json["agentLevel"])
+        assertEquals(1.0, CallsHostSnapshot.level(3f), 0.0)
+        assertEquals(0.0, CallsHostSnapshot.level(-1f), 0.0)
+        assertEquals(0.0, CallsHostSnapshot.level(Float.NaN), 0.0)
+        val gate = CallsHostStateGate()
+        gate.changed(); assertEquals(live, gate.flush(live))
+        gate.changed(); assertNull("a change nobody could see is no event", gate.flush(live.copy(agentLevel = CallsHostSnapshot.level(0.4302f))))
+        gate.changed(); assertEquals(0.61, gate.flush(live.copy(agentLevel = 0.61))!!.agentLevel, 0.0)
+        assertEquals("at idle the level is 0, whatever was last heard", 0.0, CallsHostSnapshot(agentLevel = 0.7).json["agentLevel"])
     }
 
     @Test fun aLiveCallShowsEverything() {
@@ -583,6 +602,27 @@ class CallsHostSnapshotTest {
         assertEquals("milliseconds since the epoch", 1_760_000_000_123L, json["connectedAt"])
         assertEquals(mapOf("role" to "agent", "text" to "Hi Asha", "live" to true), json["caption"])
         assertNull(json["error"])
+    }
+
+    @Test fun theConnectionReportHasEveryKeyNullUntilKnown() {
+        val json = CallsHostSnapshot(
+            state = GraineCallState.ACTIVE, callId = "c1",
+            connection = GraineCallConnection(transport = "webrtc", prepared = true, preparedAgeSeconds = 75, setupMs = 12, answerMs = 410,
+                audio = GraineCallConnection.Audio(lossPct = 0.28, quality = "good"), recoveries = 1),
+        ).json
+        assertEquals(keys, json.keys)
+        assertEquals(
+            mapOf(
+                "transport" to "webrtc", "prepared" to true, "preparedAgeSeconds" to 75L, "credential" to null, "setupMs" to 12L, "loginMs" to null,
+                "answerMs" to 410L, "firstWordsMs" to null, "tapToVoiceMs" to null,
+                "audio" to mapOf("lossPct" to 0.28, "jitterAvgMs" to null, "jitterPeakMs" to null, "rttMs" to null, "quality" to "good"),
+                "recoveries" to 1,
+            ),
+            json["connection"],
+        )
+        assertNull("no audio measured: null, not an empty map",
+            (CallsHostSnapshot(state = GraineCallState.ACTIVE, connection = GraineCallConnection(transport = "websocket")).json["connection"] as Map<*, *>)["audio"])
+        assertNull("no call, no report", CallsHostSnapshot(connection = GraineCallConnection(transport = "webrtc")).json["connection"])
     }
 
     @Test fun atIdleOnlyTheErrorSurvives() {
@@ -682,6 +722,15 @@ class CallsHostEventTest {
         assertEquals(mapOf("callId" to "h1", "outcome" to "ringing", "hosted" to true, "agent" to "sales"), CallsHostEvent.ringingPayload("h1", "sales"))
         assertEquals(mapOf("callId" to "h1", "reason" to null, "callerName" to "Acme", "hosted" to true),
             CallsHostEvent.incomingPayload(GraineCall("h1", GraineCall.Direction.INCOMING, "Acme", null, emptyMap(), hosted = true)))
+    }
+
+    @Test fun anEndedOrFailedCallsOutcomeCarriesHowItConnected() {
+        val report = GraineCallConnection(transport = "websocket", setupMs = 300, answerMs = 200)
+        val ended = CallsHostEvent.outcomePayload(GraineCallOutcome.ended(GraineCallOutcome.EndReason.LOCAL).copy(connection = report), "c1")
+        assertEquals(CallsHostSnapshot.connectionJson(report), ended["connection"])
+        assertFalse("no report: no key", CallsHostEvent.outcomePayload(GraineCallOutcome.failed("No network."), "c1").containsKey("connection"))
+        assertEquals("who ended it, under iOS's key", "media_drop",
+            CallsHostEvent.outcomePayload(GraineCallOutcome.ended(GraineCallOutcome.EndReason.FAILED).copy(endCause = "media_drop"), "c1")["cause"])
     }
 
     @Test fun anActionRequestCarriesJSONArguments() {
@@ -923,6 +972,26 @@ class CallsHostCoreTest {
         assertEquals("Acme Assistant", rig.platform.configured.last().displayName)
         assertTrue(rig.platform.logs.isEmpty())
         assertEquals("kept for the next cold start", "Acme Assistant", rig.store.load().first?.get("displayName"))
+    }
+
+    @Test fun theSpeakerDefaultReachesTheCallsIsKeptAndCanBeSetLater() {
+        val rig = HostRig()
+        rig.configure(mapOf("speakerByDefault" to false))
+        assertFalse(rig.platform.configured.last().speakerByDefault)
+        assertEquals("kept for a cold start", false, rig.store.load().first?.get("speakerByDefault"))
+        rig.core.setSpeakerByDefault(true)
+        assertEquals(listOf(true), rig.platform.speakerDefaults)
+        assertEquals("and kept", true, rig.store.load().first?.get("speakerByDefault"))
+        assertTrue(rig.core.options!!.speakerByDefault)
+        // Before anything is configured: held, then applied and kept by the first configure.
+        val early = HostRig()
+        early.core.setSpeakerByDefault(false)
+        assertTrue("nothing to set it on yet", early.platform.speakerDefaults.isEmpty())
+        early.configure()
+        assertFalse(early.platform.configured.last().speakerByDefault)
+        assertEquals(false, early.store.load().first?.get("speakerByDefault"))
+        early.configure()
+        assertTrue("held once: the app's next configure is the app's word", early.platform.configured.last().speakerByDefault)
     }
 
     @Test fun theTransportReachesTheCallsAndIsKeptForAColdStart() {

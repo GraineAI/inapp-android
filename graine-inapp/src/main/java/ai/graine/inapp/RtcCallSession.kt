@@ -140,6 +140,12 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
          * audio path — for the conversation that carries the call instead.
          */
         fun onRows(frames: List<String>) {}
+        /**
+         * An analytics row was made, with the input it was made from — for the
+         * call's connection report — whether it goes out now or waits; or, as a
+         * [CallAnalytics.QUALITY], the audio so far, once a second while LIVE.
+         */
+        fun onRow(name: String, data: Map<String, Any?>) {}
     }
 
     /**
@@ -166,7 +172,8 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
     private var phase = Phase.IDLE
     private var listener: Listener = object : Listener {}
     private var deps: RtcDialDeps? = null
-    private var dialWanted = false
+    /** The call is being dialled: read on the mint's thread too, so a mint under way stops waiting for the gateway's probe. */
+    @Volatile private var dialWanted = false
     private var dialAt = 0L
     private var preparedBeforeDial = false
 
@@ -219,6 +226,8 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
     private var answerClock: (() -> Unit)? = null
     private var iceTimer: (() -> Unit)? = null
     private var budgetTimer: (() -> Unit)? = null
+    /** The dial's budget has started: it runs once per dial, whatever is minted again inside it. */
+    private var budgetStarted = false
 
     // The call.
     private var control: RtcControl? = null
@@ -258,6 +267,10 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
     private val early = ArrayList<String>()
     private val quality = QualitySamples()
     private var qualitySent = false
+    /** How the call ended has been told ([endedRow]). */
+    private var endedTold = false
+    /** The readings taken since media: every [READINGS_PER_REPORT]th tells the connection report the audio so far. */
+    private var readings = 0
 
     /** The credential is still good for a while (rtc-warm.ts): one about to expire is minted again. */
     private fun credsUsable(c: RtcCredentials): Boolean = c.expiresAtMs == null || c.expiresAtMs - env.wallClock() >= RtcMint.MIN_REMAINING_MS
@@ -294,7 +307,7 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
              * fraction of the web route's time. Anything else is null, and the
              * web route mints below exactly as it always has.
              */
-            val direct = env.direct?.let { d -> runCatching { d.mint(request, sessionId) }.getOrNull() }
+            val direct = env.direct?.let { d -> runCatching { d.mint(request, sessionId) { dialWanted } }.getOrNull() }
             if (direct != null) {
                 scheduler.post { minted(direct, null, now() - started, DIRECT) }
                 return@io
@@ -323,6 +336,8 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
     private fun minted(reply: HttpReply?, error: String?, ms: Long, via: String? = null) {
         minting = false
         if (phase == Phase.DONE) return
+        // A dial that waited for this answer has its twelve seconds from now.
+        startBudget()
         val at = via?.let { " ($it)" }.orEmpty()
         if (reply != null && reply.code != 200) RtcMint.refusal(reply.code, reply.body)?.let { message ->
             refusal = message
@@ -545,20 +560,22 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
      * The phone may record — the tap was made in the app in front, or the
      * call's foreground service is up: dial — at once when prepared, else as
      * soon as the mint, the candidates and the registration are in. The
-     * 12-second budget starts now; the analytics rows count from the tap.
+     * 12-second budget starts now, or once the mint has answered when it is
+     * still on its way ([startBudget]); the analytics rows count from the tap.
      */
     fun dial(deps: RtcDialDeps, listener: Listener) = scheduler.post {
         this.listener = listener
         this.deps = deps
         if (phase == Phase.DONE) return@post
-        if (phase == Phase.IDLE) { phase = Phase.PREPARING; mint() }
+        // Wanted before a cold call's mint begins: dialling, it never waits for the gateway's probe.
         dialWanted = true
+        if (phase == Phase.IDLE) { phase = Phase.PREPARING; mint() }
         dialAt = now()
         tapAt = deps.tapAt?.takeIf { it <= dialAt } ?: dialAt
         preparedBeforeDial = registered && peer != null
         preparation = null
         if (aheadOfTap) step("dial", "prepared ${CallAnalytics.seconds(dialAt - preparedAt)} ago")
-        budgetTimer = scheduler.schedule(RtcDial.ATTEMPT_BUDGET_MS) { budgetSpent() }
+        startBudget()
         openControl()
         runCatching { deps.contextFrame() }.getOrNull()?.let { control?.send("app_context", CallFrames.appContext(it)) }
         offer()
@@ -732,7 +749,7 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
         override fun onRemoteBye() {
             if (!current) return
             step("bye", "from the far side")
-            if (phase == Phase.LIVE) end(GraineCallOutcome.EndReason.REMOTE, null)
+            if (phase == Phase.LIVE) end(GraineCallOutcome.EndReason.REMOTE, null, CallEnd.REMOTE_BYE)
             // Hung up before any audio flowed: nothing was said, so the WebSocket may still carry the call.
             else fallback(RtcFallback.ERROR, "the far side hung up before any audio")
         }
@@ -740,7 +757,7 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
         override fun onDialogEnded(failure: SipFailure) {
             if (!current) return
             step("dialog", "ended: $failure")
-            if (phase == Phase.LIVE) end(GraineCallOutcome.EndReason.FAILED, LOST) else fallback(RtcFallback.ERROR, failure.toString())
+            if (phase == Phase.LIVE) end(GraineCallOutcome.EndReason.FAILED, LOST, CallEnd.FAILED) else fallback(RtcFallback.ERROR, failure.toString())
         }
 
         override fun onOffer(sdp: String, answer: (String?) -> Unit) {
@@ -813,6 +830,18 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
         iceTimer?.invoke(); iceTimer = null
     }
 
+    /**
+     * THE 12-SECOND BUDGET, once per dial, from when it can be spent: the
+     * dial, or — for a call whose mint was still on its way at the dial — the
+     * mint's answer. What a slow mint takes is the mint's own (its timeouts and
+     * retries bound it), never the time the call needs after it.
+     */
+    private fun startBudget() {
+        if (budgetStarted || !dialWanted || minting || phase == Phase.DONE) return
+        budgetStarted = true
+        budgetTimer = scheduler.schedule(RtcDial.ATTEMPT_BUDGET_MS) { budgetSpent() }
+    }
+
     /** Twelve seconds and no media: whatever step it is on, the WebSocket takes the call. */
     private fun budgetSpent() {
         budgetTimer = null
@@ -868,6 +897,7 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
         val frame = CallAnalytics.frame(name, data) ?: return
         if (phase == Phase.LIVE) control?.sendHere("app_event", frame)
         else if (early.size < EARLY_ROWS) early += frame
+        listener.onRow(name, data)
     }
 
     /** The connection healed: [what] ended a trouble that began at [since]. */
@@ -909,14 +939,33 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
     private fun qualityRow() {
         if (qualitySent || phase != Phase.LIVE) return
         qualitySent = true
-        row(CallAnalytics.QUALITY, mapOf(
-            "duration_s" to (now() - mediaAt) / 1000.0,
-            "loss_pct" to quality.lossPct(),
-            "jitter_avg_ms" to quality.jitterAvgMs(),
-            "jitter_max_ms" to quality.jitterMaxMs(),
-            "rtt_avg_ms" to quality.rttAvgMs(),
+        row(CallAnalytics.QUALITY, qualityData())
+    }
+
+    /**
+     * HOW THE CALL ENDED ([CallAnalytics.ENDED]), once, for a call that was
+     * dialled: before the BYE, or at the far side's, while the channel is still
+     * open — and to the call's report either way.
+     */
+    private fun endedRow(cause: String) {
+        if (endedTold || !dialWanted) return
+        endedTold = true
+        row(CallAnalytics.ENDED, mapOf(
+            "cause" to cause,
+            "transport" to "rtc",
+            "after_ms" to if (phase == Phase.LIVE) now() - mediaAt else null,
+            "voice_heard" to firstVoiceSeen,
         ))
     }
+
+    /** The quality row's input from the readings so far. */
+    private fun qualityData(): Map<String, Any?> = mapOf(
+        "duration_s" to (now() - mediaAt) / 1000.0,
+        "loss_pct" to quality.lossPct(),
+        "jitter_avg_ms" to quality.jitterAvgMs(),
+        "jitter_max_ms" to quality.jitterMaxMs(),
+        "rtt_avg_ms" to quality.rttAvgMs(),
+    )
 
     /**
      * The far side's audio across the call, from the readings taken five
@@ -1027,14 +1076,14 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
     private fun dropped(why: String) {
         if (phase != Phase.LIVE) return
         step("media", "dropped: $why")
-        end(GraineCallOutcome.EndReason.FAILED, LOST)
+        end(GraineCallOutcome.EndReason.FAILED, LOST, CallEnd.MEDIA_DROP)
     }
 
     private fun audioFailed(message: String) {
         step("audio", "failed")
         CallLog.error("the call's audio failed: $message")
         when (phase) {
-            Phase.LIVE -> end(GraineCallOutcome.EndReason.FAILED, "The microphone stopped working.")
+            Phase.LIVE -> end(GraineCallOutcome.EndReason.FAILED, "The microphone stopped working.", CallEnd.FAILED)
             Phase.DONE, Phase.IDLE -> Unit
             else -> if (dialWanted) fallback(RtcFallback.ERROR, "the audio could not start") else {
                 mediaFailure = "the audio could not start"
@@ -1053,6 +1102,8 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
 
     private fun onStats(s: GraineRtcStats) {
         quality.add(s)
+        // The audio so far, for the call's connection report: once a second of the five readings, never a row.
+        if (++readings % READINGS_PER_REPORT == 0) listener.onRow(CallAnalytics.QUALITY, qualityData())
         if (!firstAudioSeen && s.bytesReceived > 0) {
             firstAudioSeen = true
             firstAudioAt = now()
@@ -1165,13 +1216,15 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
     /**
      * Hang up from this side — BYE, or CANCEL before the answer — and release
      * everything. A call that had media writes its quality row first, from the
-     * readings it already has: nothing is waited for. No event follows.
+     * readings it already has, then how it ended ([cause]: the app or the user
+     * ended it, unless the app says why else): nothing is waited for. No event follows.
      */
-    fun hangUp() {
+    fun hangUp(cause: String = CallEnd.LOCAL_END) {
         released = true
         scheduler.post {
             if (phase == Phase.DONE) return@post
             qualityRow()
+            endedRow(cause)
             phase = Phase.DONE
             reconnecting = false
             release()
@@ -1206,10 +1259,11 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
         listener.onRefused(message)
     }
 
-    private fun end(reason: GraineCallOutcome.EndReason, error: String?) {
+    private fun end(reason: GraineCallOutcome.EndReason, error: String?, cause: String) {
         if (phase == Phase.DONE) return
-        // The far side's BYE, or the path lost: the quality row at once, while the channel is still open.
+        // The far side's BYE, or the path lost: the quality row at once, while the channel is still open — and why it ended.
         qualityRow()
+        endedRow(cause)
         phase = Phase.DONE
         release()
         endCaptionTurn()
@@ -1252,6 +1306,8 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
     companion object {
         /** How often the far side's audio is read: "agent speaking", and the first audio and voice for the log. */
         const val STATS_MS = 200L
+        /** The connection report hears the audio so far every this many readings: once a second. */
+        const val READINGS_PER_REPORT = 5
         /** How long an in-dialog offer waits for the media's answer before the last SDP is sent instead. */
         const val OFFER_ANSWER_WAIT_MS = 3_000L
         /** What the call says when the connection is lost after the call was up. */

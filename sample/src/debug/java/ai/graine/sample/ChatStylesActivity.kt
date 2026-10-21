@@ -27,7 +27,7 @@ import org.json.JSONObject
  *   adb shell am start -n ai.graine.sample/.ChatStylesActivity --es style soft --es moment typing --ez dark true
  *
  * style   classic | soft | bold | glass | minimal | crisp | cozy | calm | compact | lively   (none: the list)
- * moment  conversation | typing | rating | reconnecting | offline
+ * moment  conversation | typing | rating | reconnecting | offline | fresh | disconnected
  * dark    true for the dark scheme
  * frame   window: the compact window that rides above the voice bar (default: the whole screen)
  * rtl     true to lay the screen out right to left

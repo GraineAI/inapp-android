@@ -8,6 +8,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 import java.util.Date
+import java.util.TimeZone
 
 /**
  * THE CHAT WINDOW v2'S DECISIONS (contract/DESIGN.md "Chat window v2"), as
@@ -148,6 +149,32 @@ class ChatLookTest {
         assertEquals(listOf("first", "last", "single", "single", "single"), ChatLook.positions(rows))
     }
 
+    @Test fun aNewConversationsMarkerRowFollowsItsDayLineAndBreaksTheGroup() {
+        val utc = TimeZone.getTimeZone("UTC")
+        val now = 1_792_400_400_000L
+        val day = 86_400_000L
+        fun turn(id: String, role: Role, at: Long, text: String = "x") = GraineChatTurn(id, role, text, Date(at))
+        val turns = listOf(turn("t1", Role.AGENT, now - day), turn("t2", Role.CUSTOMER, now - day + 10_000),
+            turn("t3", Role.AGENT, now - day + 20_000), turn("t4", Role.AGENT, now - 60_000))
+        // Yesterday, t1, t2, t3, Today, t4.
+        val rows = ChatRows.build(turns, Date(now), utc)
+        assertEquals(setOf(5), ChatLook.freshAt(rows, turns, setOf("t4")))
+        assertTrue("after the day line of the turn it stands before", rows[4] is ChatRows.Row.Day && (rows[5] as ChatRows.Row.Turn).turn.id == "t4")
+        assertTrue(ChatLook.freshAt(rows, turns, emptySet()).isEmpty())
+
+        // One day: two of the agent's turns are a group, and a marker row between them breaks it.
+        val sameDay = listOf(turn("a", Role.AGENT, now - 60_000), turn("b", Role.AGENT, now - 30_000))
+        val one = ChatRows.build(sameDay, Date(now), utc)
+        assertEquals(listOf("first", "last"), ChatLook.positions(one))
+        assertEquals(listOf("single", "single"), ChatLook.positions(one, ChatLook.freshAt(one, sameDay, setOf("b"))))
+
+        // A component alone draws no bubble: its marker row goes before the next turn that does — or ends the messages.
+        val withCard = listOf(turn("a", Role.AGENT, now - 60_000), turn("c", Role.AGENT, now - 50_000, text = ""), turn("d", Role.CUSTOMER, now - 40_000))
+        val drawn = ChatRows.build(withCard.filter { it.text.isNotEmpty() }, Date(now), utc)
+        assertEquals(setOf(1), ChatLook.freshAt(drawn, withCard, setOf("c")))
+        assertEquals(setOf(1), ChatLook.freshAt(drawn.take(1), withCard.take(2), setOf("c")))
+    }
+
     // ── times, marks, what a screen reader says ───────────────────────────────
 
     @Test fun timesBelowOrInsideAndOnlyWhereTheyShow() {
@@ -200,6 +227,20 @@ class ChatLookTest {
         assertEquals("an ended conversation let go of: the words, no dot", ChatLook.Status(ChatLook.StatusKind.TEXT, "Online", false),
             status(online = false, ended = true))
         assertEquals("Replies in seconds", ChatLook.status(h, "Replies in seconds", "Typing…", true, false, false, false, false, false, "Connecting…").words)
+    }
+
+    @Test fun aConversationGraineEndedItselfSaysDisconnectedUntilItConnectsAgain() {
+        val h = classic.header
+        fun gone(head: ChatStyleHeader = h, connecting: Boolean = false, failed: Boolean = false, ended: Boolean = false) =
+            ChatLook.status(head, "", "Typing…", false, connecting, false, failed, false, ended, "Connecting…", disconnected = true)
+        assertEquals(ChatLook.Status(ChatLook.StatusKind.DISCONNECTED, "Disconnected", false), gone())
+        assertEquals("not connecting, and never the subtitle", ChatLook.StatusKind.DISCONNECTED, gone(h.copy(status = "online")).kind)
+        assertEquals("said even where the design draws no line", ChatLook.StatusKind.DISCONNECTED, gone(h.copy(status = "none")).kind)
+        assertEquals(ChatLook.StatusKind.DISCONNECTED, gone(ended = true).kind)
+        assertEquals("opened again: connecting", ChatLook.StatusKind.CONNECTING, gone(connecting = true).kind)
+        assertEquals(ChatLook.StatusKind.FAILED, gone(failed = true).kind)
+        assertEquals("connected again: online", ChatLook.StatusKind.ONLINE,
+            ChatLook.status(h, "", "Typing…", true, false, false, false, false, false, "Connecting…", disconnected = true).kind)
     }
 
     @Test fun theBannerIsCalmAndOnlyWhenItMeansSomething() {
@@ -374,6 +415,8 @@ class ChatLookTest {
         assertEquals(source.rating, x.rating)
         assertNull("only the SDK's own chat carries a pin", x.pin)
         assertFalse("nor an attach handler", x.canAttach)
+        assertTrue("nor marker rows", x.marks.isEmpty())
+        assertFalse(x.disconnected)
         assertTrue(x.canCall)
         assertFalse(x.connecting)
     }

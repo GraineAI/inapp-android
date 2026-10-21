@@ -42,6 +42,10 @@ internal data class ChatExtras(
     val canCall: Boolean = false,
     /** The app handles attachments ([GraineChat.onAttach]): the paperclip may show. */
     val canAttach: Boolean = false,
+    /** Graine ended the conversation itself ([GraineChat.disconnected]): the header says "Disconnected". */
+    val disconnected: Boolean = false,
+    /** The turns a "Disconnected · new conversation" row goes before ([GraineChat.marks]). */
+    val marks: Set<String> = emptySet(),
 ) {
     companion object {
         fun of(source: ChatSource, canCall: Boolean): ChatExtras {
@@ -56,6 +60,8 @@ internal data class ChatExtras(
                 everConnected = g?.everConnected ?: false,
                 canCall = canCall,
                 canAttach = g?.onAttach != null,
+                disconnected = g?.disconnected ?: false,
+                marks = g?.marks ?: emptySet(),
             )
         }
     }
@@ -69,12 +75,13 @@ internal data class ChatExtras(
  * no fill of its own) to the composer (when it floats); the header in its
  * style and alignment, its status line and call button; the pinned card as a
  * bar; the calm reconnect banner; the thread — a lazy list of the pinned card,
- * the upcoming calls, the welcome, day lines and earlier calls, the bubbles in
- * their shape and groups with times, marks and status, the agent's quick
- * replies, the starters, the typing indicator and the rating; the
- * scroll-to-latest pill; the docked chips; and the composer — a bar, a pill or
- * a floating capsule, with its microphone, paperclip and call button where the
- * design and the app allow. A design from before v2 is the classic chat,
+ * the upcoming calls, the welcome, day lines and earlier calls, where a new
+ * conversation began under earlier lines, the bubbles in their shape and
+ * groups with times, marks and status, the agent's quick replies, the
+ * starters, the typing indicator and the rating; the scroll-to-latest pill;
+ * the docked chips; and the composer — a bar, a pill or a floating capsule,
+ * with its microphone, paperclip and call button where the design and the
+ * app allow. A design from before v2 is the classic chat,
  * drawn exactly as it always was.
  *
  * With window chrome a 32 dp title bar replaces the header: no avatar, the
@@ -595,7 +602,7 @@ internal class ChatWindowView(
         callButton.contentDescription = ChatLook.callLabel(sc.title)
         title.text = sc.title
         val st = ChatLook.status(s.header, sc.chat.subtitle, ChatLook.typingWords(s.typing), isOnline, x.connecting, x.reconnecting, failed, typing,
-            x.ended, sc.loader.text.connecting ?: "Connecting…")
+            x.ended, sc.loader.text.connecting ?: "Connecting…", disconnected = x.disconnected)
         statusRow.visibility = if (st.kind == ChatLook.StatusKind.NONE) GONE else VISIBLE
         dot.visibility = if (st.dot) VISIBLE else GONE
         status.text = st.words ?: ""
@@ -724,7 +731,9 @@ internal class ChatWindowView(
         lastMessages = pieces.turns
         trackReveal(turns)
         val rows = ChatRows.build(turns)
-        val positions = ChatLook.positions(rows)
+        // Where the server began a new conversation under earlier lines: a row of the window's own, never a turn.
+        val fresh = ChatLook.freshAt(rows, pieces.turns, x.marks)
+        val positions = ChatLook.positions(rows, fresh)
         val restored = pieces.turns.any { it.restored }
         val items = ArrayList<ThreadItem>()
         var after: String? = null
@@ -743,12 +752,16 @@ internal class ChatWindowView(
             add(ThreadItem.Welcome(welcome, if (startersInWelcome) chips.starters else emptyList(), chips.startersAsList, top("welcome")), welcome)
         }
         rows.forEachIndexed { i, row ->
+            if (i in fresh && row is ChatRows.Row.Turn) add(ThreadItem.Fresh(row.turn.id, top("fresh")), "fresh")
             when (row) {
                 is ChatRows.Row.Day -> add(ThreadItem.Day(row, top("day")), "day")
                 is ChatRows.Row.Voice -> add(ThreadItem.Voice(row, top("voice")), "voice")
                 is ChatRows.Row.Turn -> add(ThreadItem.Bubble(row.turn, positions[i], revealShownFor(row.turn), top("bubble", positions[i])), "bubble")
+                // The window places its own markers (ChatLook.freshAt): rows built without marks carry none.
+                is ChatRows.Row.NewConversation -> Unit
             }
         }
+        if (rows.size in fresh) add(ThreadItem.Fresh("end", top("fresh")), "fresh")
         if (chips.startersInThread && !startersInWelcome) add(ThreadItem.Starters(chips.starters, chips.startersAsList, top("starters")), "starters")
         if (chips.repliesInThread) add(ThreadItem.Replies(chips.replies, top("replies")), "replies")
         if (typing) add(ThreadItem.Typing(top("typing")), "typing")

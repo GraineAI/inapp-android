@@ -63,6 +63,21 @@ data class GraineCallOutcome @JvmOverloads constructor(
     val hosted: Boolean = false,
     /** A [Kind.MISSED] ring refused because another call was live. */
     val busy: Boolean = false,
+    /**
+     * How the call connected ([GraineCallConnection]), as it stood when the
+     * call ended — on [Kind.ENDED] and [Kind.FAILED]; null otherwise, and for
+     * a call that never got as far as connecting.
+     */
+    val connection: GraineCallConnection? = null,
+    /**
+     * Who or what ended the call, on [Kind.ENDED] and [Kind.FAILED]:
+     * `local_end` (this app or the user hung up), `remote_bye` (the agent's
+     * side hung up), `media_drop` (the audio path dropped and did not
+     * recover), `audio_watch` (nothing arrived for too long: the SDK's own
+     * watch ended it) or `failed` (anything else — the call could not go on).
+     * Null otherwise.
+     */
+    val endCause: String? = null,
 ) {
     enum class Kind(val wire: String) { ANSWERED("answered"), DECLINED("declined"), MISSED("missed"), ENDED("ended"), FAILED("failed") }
 
@@ -89,6 +104,40 @@ data class GraineCallOutcome @JvmOverloads constructor(
         @JvmField val MISSED = GraineCallOutcome(Kind.MISSED)
         @JvmStatic @JvmOverloads fun ended(reason: EndReason, error: String? = null) = GraineCallOutcome(Kind.ENDED, reason, error)
         @JvmStatic fun failed(error: String) = GraineCallOutcome(Kind.FAILED, null, error)
+    }
+}
+
+/**
+ * WHAT A LOST FOREGROUND SERVICE DOES TO A CALL — the rule, pure. The service
+ * keeps the microphone and the process alive in the background and carries the
+ * ongoing notification; it never carries the call's audio. So a call already
+ * dialled CARRIES ON without it; one still waiting for it STARTS NOW when the
+ * app is in front and unlocked (Android lets an app in front record); anything
+ * else cannot record, and FAILS.
+ */
+internal object CallServiceLoss {
+    enum class Act { CARRY_ON, START_NOW, FAIL }
+
+    fun act(dialled: Boolean, inFront: Boolean, locked: Boolean): Act = when {
+        dialled -> Act.CARRY_ON
+        inFront && !locked -> Act.START_NOW
+        else -> Act.FAIL
+    }
+}
+
+/** Why a call ended — [GraineCallOutcome.endCause], and the `ended` row's `cause`. */
+internal object CallEnd {
+    const val LOCAL_END = "local_end"
+    const val REMOTE_BYE = "remote_bye"
+    const val MEDIA_DROP = "media_drop"
+    const val AUDIO_WATCH = "audio_watch"
+    const val FAILED = "failed"
+
+    /** An end nobody said more about, from its outcome: who ended it, else a failure. */
+    fun of(o: GraineCallOutcome): String = when (o.endReason) {
+        GraineCallOutcome.EndReason.LOCAL -> LOCAL_END
+        GraineCallOutcome.EndReason.REMOTE -> REMOTE_BYE
+        else -> FAILED
     }
 }
 
@@ -120,6 +169,67 @@ interface GraineCallListener {
      * screen shows its reconnecting moment meanwhile.
      */
     fun onCallReconnecting(reconnecting: Boolean) {}
+    /**
+     * The call's connection report grew ([GraineCalls.connection]): the
+     * transport and the tap's wait once it connected, the agent's first
+     * words, a recovery, the audio — about once a second on WebRTC while the
+     * call is live.
+     */
+    fun onCallConnection(connection: GraineCallConnection) {}
+}
+
+/**
+ * HOW A CALL CONNECTED — the same facts as the call's Connection in
+ * Execution Logs, live while the call goes ([GraineCalls.connection],
+ * [GraineCallListener.onCallConnection]) and final on its outcome
+ * ([GraineCallOutcome.connection]). Each fact is null until it is known (a
+ * call carried over the WebSocket has no audio figures).
+ * Timings and network figures only — nothing personal.
+ *
+ * The tap's wait, in order: [setupMs], [loginMs], [answerMs], [firstWordsMs];
+ * [tapToVoiceMs] is all of it, as the customer felt it.
+ */
+data class GraineCallConnection @JvmOverloads constructor(
+    /** What carried the call: "webrtc" or "websocket". */
+    val transport: String? = null,
+    /** Prepared before the tap ([GraineCalls.prepareCall], or a ring's, ready by its answer); false: set up after the tap. */
+    val prepared: Boolean? = null,
+    /** How long before the tap a prepared call was ready, in seconds. */
+    val preparedAgeSeconds: Long? = null,
+    /** Where the call's credential came from: "direct" (issued directly, WebRTC) or "web" (issued through the web). */
+    val credential: String? = null,
+    /** From the tap to the call being placed — without the login, on a call set up after the tap. */
+    val setupMs: Long? = null,
+    /** The device signing in to the call server, inside the setup (a prepared call logged in before the tap: null). */
+    val loginMs: Long? = null,
+    /** From the call being placed to it being answered. */
+    val answerMs: Long? = null,
+    /** From the answer to the agent's voice reaching the phone. */
+    val firstWordsMs: Long? = null,
+    /** From the tap to the agent's voice: the wait the customer felt. */
+    val tapToVoiceMs: Long? = null,
+    /** The audio — the readings so far while the call is live, the call's own at its end. WebRTC only. */
+    val audio: Audio? = null,
+    /** How many times the connection recovered on its own. */
+    val recoveries: Int = 0,
+) {
+    /** The audio as the phone measured it. */
+    data class Audio @JvmOverloads constructor(
+        /** Packets lost of all the far side sent, in percent (two decimals). */
+        val lossPct: Double? = null,
+        val jitterAvgMs: Long? = null,
+        val jitterPeakMs: Long? = null,
+        /** The round trip, on average. */
+        val rttMs: Long? = null,
+        /** In a word: [GOOD], [FAIR] or [POOR] — Execution Logs' verdict, on the thresholds of [ConnectionQuality]. */
+        val quality: String? = null,
+    )
+
+    companion object {
+        const val GOOD = "good"
+        const val FAIR = "fair"
+        const val POOR = "poor"
+    }
 }
 
 /** How native calls look and ring. Pass to GraineCalls.configure once, in Application.onCreate. */

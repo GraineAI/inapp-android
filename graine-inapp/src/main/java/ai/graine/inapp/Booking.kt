@@ -68,9 +68,17 @@ internal object Booking {
      */
     fun available(rules: GraineSchedulingRules, identified: Boolean): Boolean = blocked(rules, identified) == null
 
-    /** Why the sheet cannot book now, as its line; null when it can. */
-    fun blocked(rules: GraineSchedulingRules, identified: Boolean): String? = when {
+    /**
+     * Why the sheet cannot book now, as its line; null when it can.
+     * [identityKnown] false: whether the user is identified cannot be told
+     * yet — identify() was given someone, and this launch's session, which
+     * names the trait, has not arrived — so the sheet does not tell someone who
+     * may well be signed in to sign in: it is not available yet, and the sheet
+     * redraws when the session arrives.
+     */
+    fun blocked(rules: GraineSchedulingRules, identified: Boolean, identityKnown: Boolean = true): String? = when {
         !rules.ringsAndroid || !rules.usersCanBook -> errorLine(GraineErrorCode.SCHEDULING_OFF, rules)
+        !identified && !identityKnown -> errorLine(GraineErrorCode.SCHEDULING_OFF, rules)
         !identified -> errorLine(GraineErrorCode.IDENTITY_REQUIRED, rules)
         else -> null
     }
@@ -86,11 +94,15 @@ internal object Booking {
      * agent's settings not loaded yet ([loaded]: this launch's session or the
      * one kept on the device), Graine not ringing this phone, users not
      * allowed to book, the user not identified. Null when booking is available.
+     * [identityKnown] false — identify() was given someone and this launch's
+     * session, which names the trait that identifies them, has not arrived —
+     * is still [NOT_LOADED], never a [NOT_IDENTIFIED] that may be wrong.
      */
-    fun unavailableReason(rules: GraineSchedulingRules, identified: Boolean, loaded: Boolean): String? = when {
+    fun unavailableReason(rules: GraineSchedulingRules, identified: Boolean, loaded: Boolean, identityKnown: Boolean = true): String? = when {
         !loaded -> NOT_LOADED
         !rules.ringsAndroid -> RINGS_NOT_SET_UP
         !rules.usersCanBook -> SCHEDULING_OFF
+        !identified && !identityKnown -> NOT_LOADED
         !identified -> NOT_IDENTIFIED
         else -> null
     }

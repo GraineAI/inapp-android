@@ -248,6 +248,20 @@ class GraineCalls internal constructor(
     private val micGiveUp = Runnable {
         if (micPending) { micPending = false; ending(CallEnd.FAILED); machine.fail("The microphone permission was not granted.") }
     }
+    /**
+     * TALK, THEN CALL: the call in progress ended a web view call (the voice
+     * bar's) that holds the phone's audio until its page says it is over — its
+     * microphone, and the audio mode the web view set and puts back as it
+     * closes. This call's route and its dial wait for that ([connect]), at most
+     * [WEB_CALL_RELEASE_MS]. Main thread.
+     */
+    private var webCallWaiting = false
+    /** The call in progress waited for a web view call and is done waiting: it connects whatever the web view says now. Main thread. */
+    private var webCallWaited = false
+    private val webCallGiveUp = Runnable {
+        if (webCallWaiting) CallLog.error("the voice bar's call still held the audio ${WEB_CALL_RELEASE_MS / 1000} s after it was ended: the call starts anyway")
+        webCallDone()
+    }
     /** When [configure] first ran (elapsedRealtime): the setup self-check's clock. 0 before. */
     @Volatile private var configuredAt = 0L
     /** Each setup problem is logged once a launch. */
@@ -386,6 +400,10 @@ class GraineCalls internal constructor(
         // The agent it is for: its rules ring it, its key reports it, its design draws it.
         val agent = route(push)
         callAgents[push.callId] = agent
+        // Before the person answers: the app proof refreshed and a fresh identity token asked for, in the background (APP-IDENTITY.md §6).
+        runCatching { agent.ringArrived() }
+        // A fresh server token, in the background, before anyone answers (CLIENT-TOKENS.md §2.3): the answer finds one.
+        runCatching { agent.clientTokens.ring() }
         // Masked like every variable the app hands over: nothing leaves the device unmasked. A call Graine
         // rang rings for as long as Graine waits for it (the agent's ring timeout), so both call it missed together.
         val hosted = if (push.hosted) agent.schedulingRules else null
@@ -646,6 +664,9 @@ class GraineCalls internal constructor(
     /** Who the user is changed for [agent] — identify, sign-out, the memory choice: a call prepared for anyone else goes. */
     internal fun whoChanged(agent: GraineInApp, who: IdentityEnvelope) = onMain { transports.whoChanged(agent, who) }
 
+    /** The identity token changed: a call prepared for [agent] with the old one goes — the tap prepares again, with the new one. */
+    internal fun proofChanged(agent: GraineInApp) = onMain { transports.releasePrepared { it.key.agent === agent } }
+
     /** The phone's time zone changed: it is part of who every call is minted for, so a call prepared under the old one goes. */
     internal fun timeZoneChanged() = onMain {
         val zone = IdentityRules.timezone()
@@ -796,9 +817,14 @@ class GraineCalls internal constructor(
         serviceLost("could not start (${e.message ?: e.javaClass.simpleName})")
     }
 
-    /** The system stopped the service under a live call. */
+    /**
+     * The system stopped the service under a live call. Only the call's own: the
+     * last call's, stopped as that call ended, can go away after the next call
+     * began — no loss to that one, which waits for its own.
+     */
     internal fun serviceStopped(s: GraineCallService) = onMain {
-        if (service.get() === s) service = WeakReference(null)
+        if (service.get() !== s) return@onMain
+        service = WeakReference(null)
         if (machine.state == GraineCallState.CONNECTING || machine.state == GraineCallState.ACTIVE) serviceLost("was stopped")
     }
 
@@ -829,6 +855,15 @@ class GraineCalls internal constructor(
 
     private fun connect() {
         val c = machine.call ?: return
+        // Talk, then call: the web view's call lets go of the phone's audio before this call takes it.
+        if (!webCallWaited && GraineInApp.webViewCallHoldsAudio()) {
+            if (!webCallWaiting) {
+                webCallWaiting = true
+                CallLog.debug("waiting for the voice bar's call to let go of the audio")
+                main.postDelayed(webCallGiveUp, WEB_CALL_RELEASE_MS)
+            }
+            return
+        }
         // The call's own agent: its session, its key, who it knows the user as, its actions and its view of the screen.
         val graine = agentFor(c.callId)
         // This launch's session, or the one kept on the device, starts the call now; the network refreshes it behind.
@@ -842,6 +877,19 @@ class GraineCalls internal constructor(
             if (s == null) { ending(CallEnd.FAILED); machine.fail("The agent could not be loaded."); return@loadSession }
             open(c, graine, CallAgentIds.of(s))
         }
+    }
+
+    /** A web view call let go of the phone's audio: a call that waited for it ([connect]) goes on, once none holds it. */
+    internal fun webCallReleased() = onMain {
+        if (webCallWaiting && !GraineInApp.webViewCallHoldsAudio()) webCallDone()
+    }
+
+    private fun webCallDone() {
+        if (!webCallWaiting) return
+        webCallWaiting = false
+        webCallWaited = true
+        main.removeCallbacks(webCallGiveUp)
+        if (machine.state == GraineCallState.CONNECTING && session == null) connect()
     }
 
     /** Call [c]'s conversation with [graine]'s agent, at [ids]. Main thread. */
@@ -940,6 +988,8 @@ class GraineCalls internal constructor(
                 // The SDK's own runner, on the main thread as every handler expects; it always answers.
                 runAction = { name, args, answer -> main.post { graine.executeAction(name, args, answer) } },
                 contextFrame = { graine.currentContextFrame() },
+                // The ticket carries the agent's server token; checked only here, never once the call is up.
+                tokens = graine.clientTokens,
             ),
             events,
         )
@@ -977,6 +1027,9 @@ class GraineCalls internal constructor(
         cancelRing()
         main.removeCallbacks(micGiveUp)
         main.removeCallbacks(audioCheck)
+        main.removeCallbacks(webCallGiveUp)
+        webCallWaiting = false
+        webCallWaited = false
         voiceHeard = null
         micPending = false
         session?.hangUp(endCause?.takeIf { it.first == call?.callId }?.second ?: CallEnd.LOCAL_END)
@@ -1135,7 +1188,7 @@ class GraineCalls internal constructor(
             .setAutoCancel(false)
             .setContentIntent(screenIntent(c, ACTION_SHOW, REQUEST_SHOW))
             .setFullScreenIntent(screenIntent(c, ACTION_SHOW, REQUEST_FULL_SCREEN), true)
-        if (Build.VERSION.SDK_INT >= 26) b.setTimeoutAfter(config.ringTimeoutMs)
+        if (Build.VERSION.SDK_INT >= 26) b.setTimeoutAfter(ringingTimeoutMs())
         if (Build.VERSION.SDK_INT >= 31) {
             val person = Person.Builder().setName(name).setImportant(true).build()
             b.setStyle(Notification.CallStyle.forIncomingCall(person, decline, answer))
@@ -1161,6 +1214,14 @@ class GraineCalls internal constructor(
         // In front already: show the call screen itself, as a call app does.
         resumed.get()?.let { openCallScreen(it, c, ACTION_SHOW) }
     }
+
+    /**
+     * How long the ring's notification rings before the system takes it down:
+     * as long as the call rings — a ring Graine sends rings for the agent's
+     * ring time, not the app's — so it never goes while the call can still be
+     * answered. Main thread.
+     */
+    internal fun ringingTimeoutMs(): Long = machine.ringingMs.takeIf { it > 0 } ?: config.ringTimeoutMs
 
     private fun cancelRing() {
         tone.stop()
@@ -1303,6 +1364,12 @@ class GraineCalls internal constructor(
         private const val REQUEST_MISSED = 0x6E75
         private const val REQUEST_CALL_BACK = 0x6E76
         private const val MIC_WAIT_MS = 60_000L
+        /**
+         * The longest a call waits for a web view call it ended to let go of the
+         * audio: just past the voice bar's own end watchdog (4 s), which ends a
+         * page that never confirms. A page confirms in a fraction of a second.
+         */
+        internal const val WEB_CALL_RELEASE_MS = 5_000L
         /** How long after the call is up the route and focus are applied again if none of the agent's audio was heard. */
         internal const val AUDIO_CHECK_MS = 3_000L
         /** How many calls' agents are remembered: the one in progress, and the few before it whose outcomes may still be reported. */

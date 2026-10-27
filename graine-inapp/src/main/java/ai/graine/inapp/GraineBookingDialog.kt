@@ -190,6 +190,8 @@ class GraineBookingDialog @JvmOverloads constructor(
     override fun onStart() {
         super.onStart()
         graine.addListener(sessionListener)
+        // Opened before this launch's session (or after it failed to load): it is asked for, and its arrival redraws the sheet.
+        graine.loadSession { }
         unwatch = listOf(
             graine.onDesignChange { paint() },
             // Who is signed in decides whether the sheet can book: its line and its button follow.

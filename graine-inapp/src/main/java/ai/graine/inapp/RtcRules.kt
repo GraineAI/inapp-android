@@ -60,6 +60,173 @@ internal object RtcIce {
         servers.any { s -> s.urls.any { u -> u.trim().let { it.startsWith("turn:", ignoreCase = true) || it.startsWith("turns:", ignoreCase = true) } } }
 
     fun capFor(wantRelay: Boolean): Long = if (wantRelay) RELAY_CAP_MS else GATHER_CAP_MS
+
+    /**
+     * THE WAIT FOR THIS GATHERING, on the link it is on (the bar's gatherCapMs).
+     * Without TURN: the public-candidate cap. With TURN and a server-reflexive
+     * candidate in hand: the relay cap — UDP works, the relay is a spare. With
+     * TURN and no UDP path yet, the relay may be the only path, and on a slow
+     * link its allocation takes longer: the cap grows with the link's pace, to
+     * twice at most, and drops back the moment a server-reflexive one arrives.
+     */
+    fun capFor(wantRelay: Boolean, pace: Double, sawSrflx: Boolean): Long {
+        if (!wantRelay) return GATHER_CAP_MS
+        if (sawSrflx) return RELAY_CAP_MS
+        return Math.round(RELAY_CAP_MS * pace.coerceIn(1.0, 2.0))
+    }
+
+    /** How a candidate reaches the far side: by kind, a relay by the protocol it reaches its relay with. */
+    enum class Via { HOST, SRFLX, PRFLX, RELAY_UDP, RELAY_TCP, RELAY_TLS, OTHER }
+
+    private val PRIORITY = Regex("^(?:a=)?candidate:\\S+\\s+\\d+\\s+\\S+\\s+(\\d+)\\s")
+
+    /**
+     * A candidate line read for [Via]. The relay protocol is not written in the
+     * line, but the library puts it in the priority's type preference (its top
+     * byte: 2 a relay reached over UDP, 1 over TCP, 0 over TLS — libwebrtc's
+     * ICE_TYPE_PREFERENCE_RELAY_*). A relay whose priority cannot be read
+     * counts as UDP: never evidence that UDP is blocked.
+     */
+    fun via(line: String?): Via = when (kind(line)) {
+        Kind.HOST -> Via.HOST
+        Kind.SRFLX -> Via.SRFLX
+        Kind.PRFLX -> Via.PRFLX
+        Kind.RELAY -> when (PRIORITY.find(line.orEmpty().trim())?.groupValues?.get(1)?.toLongOrNull()?.let { it ushr 24 }) {
+            1L -> Via.RELAY_TCP
+            0L -> Via.RELAY_TLS
+            else -> Via.RELAY_UDP
+        }
+        else -> Via.OTHER
+    }
+}
+
+/**
+ * THE LINK'S PACE (the bar's networkPace): 1 on a good link, up to [MAX] —
+ * from what the call measured: its registration (three handshakes and two
+ * round trips; 2 s is a good mobile link's, server time included), the warm
+ * socket's probe (about a round trip; 0.8 s), the call's own round trip
+ * (250 ms). The largest wins. Nothing measured is a good link: every
+ * deadline only ever grows from its base, never shrinks below it. No
+ * platform hint is read — none comes without a new permission.
+ */
+internal object RtcPace {
+    const val MAX = 2.5
+
+    fun of(registerMs: Long?, probeMs: Long?, rttMs: Double?): Double {
+        var p = 1.0
+        if (registerMs != null && registerMs > 0) p = Math.max(p, registerMs / 2_000.0)
+        if (probeMs != null && probeMs > 0) p = Math.max(p, probeMs / 800.0)
+        if (rttMs != null && rttMs.isFinite() && rttMs > 0) p = Math.max(p, rttMs / 250.0)
+        return Math.round(Math.min(MAX, p) * 10) / 10.0
+    }
+
+    /** [baseMs] on this link: never shorter, at most [capMs]. */
+    fun scaled(baseMs: Long, pace: Double, capMs: Long = Long.MAX_VALUE): Long =
+        Math.min(Math.round(baseMs * pace.coerceIn(1.0, MAX)), capMs)
+}
+
+/**
+ * THE MEDIA PATH, KEPT INSIDE WEBRTC (the bar's lib/rtc-resilience.ts — the
+ * same numbers). The WebSocket is the last resort: a path that will not come
+ * up, or was lost, is restarted inside the call first — a new gathering in a
+ * re-INVITE, never a new call — and nothing is restarted or dialled into no
+ * network.
+ */
+internal object RtcResilience {
+    /** Answered, and nothing in flight at all this long after (× pace): restarted early. */
+    const val EARLY_RESTART_MS = 2_500L
+    /** After a restart is sent, how long the new path has to come up (× pace, at most 15 s); twice that while it moves. */
+    const val RESTART_WINDOW_MS = 6_000L
+    const val RESTART_WINDOW_CAP_MS = 15_000L
+    const val RESTART_HARD_CAP_MS = 24_000L
+    /** A setup still making progress is given twice its deadline, at most this. */
+    const val SETUP_EXTENDED_CAP_MS = 30_000L
+    /** Answered, and no media this long after, whatever the recovery is doing: the WebSocket takes the call. */
+    const val SETUP_HARD_CAP_MS = 30_000L
+    /** A lost path's first restart, this long after it went (at once on `failed`): ICE heals most blips by itself. */
+    const val RESTART_AFTER_MS = 3_000L
+    /** How long a lost path may stay lost with a network, restarts included (× pace, at most 30 s), before the call has dropped. */
+    const val PATH_LOST_GIVE_UP_MS = 15_000L
+    const val PATH_LOST_GIVE_UP_CAP_MS = 30_000L
+    /** Lost and offline this long: dropped. Time offline is never counted against the path. */
+    const val OFFLINE_HOLD_MS = 30_000L
+    /** The network came back: a moment for ICE to heal by itself before a restart. */
+    const val ONLINE_SETTLE_MS = 2_000L
+    /** A restart that cannot go yet (no network, the socket reconnecting) is tried again this often. */
+    const val RESTART_RETRY_MS = 1_000L
+    /** How far apart the readings that judge progress are, and how often a moving setup is looked at again. */
+    const val PROGRESS_LOOK_MS = 1_000L
+    /** Restarts per trouble: the first, and a second only when something changed. */
+    const val MAX_RESTARTS = 2
+    /** A dial that failed offline waits this long for the network before its redial. */
+    const val REDIAL_OFFLINE_WAIT_MS = 15_000L
+    /** The whole attempt, however many dials and waits it extends to, from its budget's start. */
+    const val ATTEMPT_HARD_CAP_MS = 30_000L
+
+    fun setupDeadlineMs(pace: Double): Long = RtcPace.scaled(RtcDial.ICE_CONNECT_DEADLINE_MS, pace)
+    fun setupExtendedCapMs(pace: Double): Long = Math.min(2 * setupDeadlineMs(pace), SETUP_EXTENDED_CAP_MS)
+    fun earlyRestartMs(pace: Double): Long = RtcPace.scaled(EARLY_RESTART_MS, pace)
+    fun restartWindowMs(pace: Double): Long = RtcPace.scaled(RESTART_WINDOW_MS, pace, RESTART_WINDOW_CAP_MS)
+    fun restartExtendedCapMs(pace: Double): Long = Math.min(2 * restartWindowMs(pace), RESTART_HARD_CAP_MS)
+    fun pathLostGiveUpMs(pace: Double): Long = RtcPace.scaled(PATH_LOST_GIVE_UP_MS, pace, PATH_LOST_GIVE_UP_CAP_MS)
+
+    /**
+     * MAY THIS DIAL RESTART ICE (again)? The first restart always may. A
+     * second only when something changed a new gathering can use: the network
+     * itself, or UDP now looks blocked and the relays over TCP and TLS were not
+     * tried alone yet. A refusal ends restarts on the dial.
+     */
+    fun restartPermitted(restarts: Int, networkChanged: Boolean, udpBlocked: Boolean, relayOnlyTried: Boolean, refused: Boolean): Boolean {
+        if (refused) return false
+        if (restarts <= 0) return true
+        if (restarts >= MAX_RESTARTS) return false
+        return networkChanged || (udpBlocked && !relayOnlyTried)
+    }
+
+    /** Nothing in flight: the offer or the answer carried no candidate at all, so no pair can form. Unknown (-1) says nothing. */
+    fun nothingInFlight(offerCandidates: Int, answerCandidates: Int): Boolean = offerCandidates == 0 || answerCandidates == 0
+
+    /** A TURN URL that reaches its relay over TCP or TLS: `turns:`, or `turn:` with `transport=tcp`. */
+    fun isTcpTlsRelayUrl(url: String): Boolean {
+        val u = url.trim().lowercase()
+        return u.startsWith("turns:") || (u.startsWith("turn:") && Regex("[?&]transport=tcp\\b").containsMatchIn(u))
+    }
+
+    /** The servers cut down to the relays over TCP and TLS, credentials kept; empty when there are none. */
+    fun tcpTlsRelays(servers: List<GraineRtcIceServer>): List<GraineRtcIceServer> =
+        servers.mapNotNull { s -> s.urls.filter { isTcpTlsRelayUrl(it) }.takeIf { it.isNotEmpty() }?.let { GraineRtcIceServer(it, s.username, s.credential) } }
+
+    /**
+     * DOES UDP LOOK BLOCKED? Nothing public came back over UDP — no
+     * server-reflexive candidate, no relay reached over UDP — while a relay
+     * over TCP or TLS did, or one is configured to try. Not judged before
+     * anything was gathered.
+     */
+    fun udpLooksBlocked(gathered: Gathered, servers: List<GraineRtcIceServer>): Boolean {
+        if (gathered.total == 0) return false
+        if (gathered.srflx > 0 || gathered.relayUdp > 0) return false
+        return gathered.relayTcp + gathered.relayTls > 0 || tcpTlsRelays(servers).isNotEmpty()
+    }
+
+    /** What one dial gathered, by [RtcIce.Via]. */
+    class Gathered {
+        var host = 0; var srflx = 0; var relayUdp = 0; var relayTcp = 0; var relayTls = 0
+        val total: Int get() = host + srflx + relayUdp + relayTcp + relayTls
+
+        fun add(line: String) {
+            when (RtcIce.via(line)) {
+                RtcIce.Via.HOST -> host++
+                RtcIce.Via.SRFLX -> srflx++
+                RtcIce.Via.RELAY_UDP -> relayUdp++
+                RtcIce.Via.RELAY_TCP -> relayTcp++
+                RtcIce.Via.RELAY_TLS -> relayTls++
+                else -> Unit
+            }
+        }
+
+        /** A new network: what the last one said about UDP no longer holds. */
+        fun forget() { host = 0; srflx = 0; relayUdp = 0; relayTcp = 0; relayTls = 0 }
+    }
 }
 
 /**
@@ -108,6 +275,14 @@ internal object RtcDial {
      * first provisional reply to the INVITE with credentials (RtcCallSession, onChallenged).
      */
     const val ANSWER_AFTER_HEARD_MS = 500L
+
+    /**
+     * [ANSWER_AFTER_HEARD_MS] on the link the dial is on: exactly 500 ms on a
+     * good one, longer only on a link measured to be slow ([RtcPace]) — where
+     * one delayed packet between the reply and the answer would otherwise
+     * redial a healthy call. 1.25 s at the slowest.
+     */
+    fun answerAfterHeardMs(pace: Double): Long = RtcPace.scaled(ANSWER_AFTER_HEARD_MS, pace)
     /**
      * How long a dial given up on keeps its socket for its own ending: its CANCEL and the 487, or the
      * ACK and BYE of an answer that crossed the CANCEL, all travel on the socket the dial was placed
@@ -120,6 +295,19 @@ internal object RtcDial {
     const val ICE_CONNECT_DEADLINE_MS = 8_000L
     /** Dials per call: the first, and one on a fresh connection. Then the WebSocket. */
     const val MAX_DIALS = 2
+    /**
+     * …and a third when the failure was the LINK's — nothing back to the
+     * INVITE, the socket closed under it, a request timed out on the way — or
+     * the server refused it with 491 for its own race (a +300 ms link,
+     * measured on production 26 Oct 2026: the INVITE with credentials answered
+     * 491 and the call went to the WebSocket at once). None of these dials was
+     * answered as far as this side can tell, and a late answer to an abandoned
+     * dial is ACKed and ended with a BYE, so the third INVITE never stands
+     * beside a second greeting. A dial heard and not answered keeps its two.
+     */
+    const val MAX_DIALS_ON_LINK_FAILURE = 3
+    /** Failures that are the link's, before any answer ([MAX_DIALS_ON_LINK_FAILURE]). */
+    private val LINK_CAUSES = setOf("no_response", SipFailure.CONNECTION_ERROR, SipFailure.REQUEST_TIMEOUT)
     /** The whole attempt — mint, registration, INVITE, answer, ICE — before the WebSocket takes the call. */
     const val ATTEMPT_BUDGET_MS = 12_000L
     /** A registration that does not complete within this is refused. */
@@ -144,6 +332,8 @@ internal object RtcDial {
     fun verdict(code: Int?, reason: String?, dialsSoFar: Int): Verdict {
         val r = reason.orEmpty()
         if (r == "Canceled" || r == "User Denied Media Access") return Verdict.IGNORE
+        // 491 Request Pending: the server's own race (RFC 3261 §14.1), never an answer about this call.
+        if ((r in LINK_CAUSES || code == 491) && dialsSoFar < MAX_DIALS_ON_LINK_FAILURE) return Verdict.REDIAL
         val networkish = r in NETWORK_CAUSES && (r != "SIP Failure Code" || code == null || code >= 500)
         if (networkish && dialsSoFar < MAX_DIALS) return Verdict.REDIAL
         return Verdict.FALLBACK
@@ -154,21 +344,19 @@ internal object RtcDial {
         val r = reason ?: "failed"
         if (r == "no_response") return "no reply to the INVITE"
         if (r == "no_answer") return "not answered"
+        if (code == 491) return "491 Request Pending"
         return if (code != null) "$r $code" else r
     }
 }
 
 /**
- * THE MEDIA WATCH, after the call connected (the bar's rule, plus one
- * restart): ICE `failed`, or `disconnected` past [DISCONNECTED_GRACE_MS], ends
- * the call as dropped — unless one ICE restart brings it back: tried once the
- * drop has lasted [RESTART_AFTER_MS] (at once on `failed`), given until
- * [RECOVERY_WINDOW_MS] after the drop began.
+ * THE MEDIA WATCH, after the call connected: the recovery's rules (RtcRecovery,
+ * [RtcResilience]) — a restart [RESTART_AFTER_MS] into a drop (at once on
+ * `failed`), never into no network, and the call dropped only after
+ * [RtcResilience.PATH_LOST_GIVE_UP_MS] × pace with a network.
  */
 internal object RtcMediaWatch {
-    const val DISCONNECTED_GRACE_MS = 8_000L
-    const val RESTART_AFTER_MS = 3_000L
-    const val RECOVERY_WINDOW_MS = 10_000L
+    const val RESTART_AFTER_MS = RtcResilience.RESTART_AFTER_MS
 }
 
 /** THE OFFER AS SENT: the codecs reordered as the bar's `preferredCodecs: ["opus", "PCMU"]` does. */
@@ -197,6 +385,9 @@ internal object RtcSdp {
     /** The candidates' types in an SDP, for a log line: "host srflx relay". */
     fun candidateTypes(sdp: String?): String =
         sdp.orEmpty().split("\r\n").filter { it.startsWith("a=candidate:") }.map { RtcIce.kind(it).name.lowercase() }.joinToString(" ")
+
+    /** How many candidates an SDP carries: an offer, or an answer, with none cannot make a path. */
+    fun candidateCount(sdp: String?): Int = sdp.orEmpty().split("\r\n").count { it.startsWith("a=candidate:") }
 }
 
 /** The call's credentials, as the mint returns them. */
@@ -241,14 +432,30 @@ internal object RtcMint {
         return CallVariables.ticketVariables(open(call), open(sdk)) ?: emptyMap()
     }
 
-    /** The body: the key, the control channel's session id, the variables, and the ticket's identity fields. */
+    /**
+     * The body: the key, the control channel's session id, the variables, the
+     * ticket's identity fields — and `audio_ready_signal`: this phone says when
+     * the call's audio plays ([AUDIO_READY]), so the agent's greeting waits for it.
+     */
     fun body(publishableKey: String, sessionId: String, variables: Map<String, String>, identity: IdentityEnvelope?, callId: String?): JSONObject {
         val o = JSONObject().put("publishableKey", publishableKey).put("session_id", sessionId)
         if (variables.isNotEmpty()) o.put("variables", JSONObject(variables as Map<*, *>))
         identity?.into(o)
         callId?.let { o.put("callId", it) }
+        o.put(AUDIO_READY_SIGNAL, true)
         return o
     }
+
+    /** The mint's promise that the phone will send [AUDIO_READY]: on every mint, grant and direct-mint body. */
+    const val AUDIO_READY_SIGNAL = "audio_ready_signal"
+
+    /**
+     * THE PHONE'S WORD THAT THE CALL'S AUDIO IS PLAYING, once per call on the
+     * control channel — the speaker's playout running. The agent's greeting
+     * waits for it (a few seconds at most) instead of playing to a phone whose
+     * audio has not started. The same frame the iOS SDK sends.
+     */
+    const val AUDIO_READY = "{\"type\":\"audio\",\"state\":\"ready\"}"
 
     /**
      * The credentials in a 200's body, or null when any part a call needs is

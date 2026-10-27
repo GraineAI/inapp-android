@@ -348,6 +348,10 @@ internal class CallTransports(
             http = agent.env.http,
             // The grant this agent kept warm for the call (RtcDirect.kt): its mint goes to the gateway.
             direct = agent.env.directMint,
+            // The phone's network, for the call's recovery (never restarted or redialled into none).
+            network = runCatching { AndroidRtcNetwork(appContext) }.getOrDefault(RtcNetwork.NONE),
+            // The web route's mint carries the agent's server token (CLIENT-TOKENS.md).
+            tokens = agent.clientTokens,
         )
     }
 
@@ -427,6 +431,9 @@ internal class CallTransportSession(
                 events.onOpen()
                 events.onEnded(GraineCallOutcome.EndReason.REMOTE, message)
             }
+            // Refused for the server token or the key: as the WebSocket's ticket would be — the call fails before it
+            // starts, with the code and Graine's sentence, and no second attempt.
+            override fun onDenied(error: String) = events.onFailed(error)
             override fun onEnded(reason: GraineCallOutcome.EndReason, error: String?) = events.onEnded(reason, error)
             override fun onCaption(role: Role, text: String, live: Boolean) = events.onCaption(role, text, live)
             override fun onAgentSpeaking(speaking: Boolean) = events.onAgentSpeaking(speaking)

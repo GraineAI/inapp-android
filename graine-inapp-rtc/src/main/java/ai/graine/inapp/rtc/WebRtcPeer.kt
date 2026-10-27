@@ -179,6 +179,12 @@ internal class WebRtcPeer private constructor(
         override fun onAddTrack(receiver: RtpReceiver, streams: Array<out MediaStream>) {}
     }
 
+    /** The speaker started playing the call's audio: the SDK tells the agent the phone is ready to hear it. */
+    private class PlayoutState(private val listener: GraineRtcPeer.Listener) : JavaAudioDeviceModule.AudioTrackStateCallback {
+        override fun onWebRtcAudioTrackStart() = listener.onPlayoutStarted()
+        override fun onWebRtcAudioTrackStop() {}
+    }
+
     /** The microphone or the speaker failing under the call: the SDK ends it, or carries it elsewhere before media. */
     private class AudioErrors(private val listener: GraineRtcPeer.Listener) :
         JavaAudioDeviceModule.AudioRecordErrorCallback, JavaAudioDeviceModule.AudioTrackErrorCallback {
@@ -222,6 +228,7 @@ internal class WebRtcPeer private constructor(
                     .build())
                 .setAudioRecordErrorCallback(errors)
                 .setAudioTrackErrorCallback(errors)
+                .setAudioTrackStateCallback(PlayoutState(listener))
                 .createAudioDeviceModule()
             val factory = try {
                 PeerConnectionFactory.builder().setAudioDeviceModule(adm).createPeerConnectionFactory()

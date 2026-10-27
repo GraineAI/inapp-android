@@ -163,6 +163,8 @@ internal class CallSessionDeps(
     val contextFrame: () -> JSONObject? = { null },
     /** Where blocking work (the ticket) runs. */
     val io: (() -> Unit) -> Unit = { work -> Thread({ work() }, "graine-call-ticket").apply { isDaemon = true }.start() },
+    /** The call's agent's server tokens: the ticket carries one when they are in play (CLIENT-TOKENS.md); null sends none. */
+    val tokens: ClientTokens? = null,
 )
 
 /**
@@ -325,16 +327,32 @@ internal class VoiceCallSession(
 
     private class Ticket(val ticket: String, val wsUrl: String)
 
-    /** A fresh ticket — the gateway burns them. Null on any failure: the direct URL is used. */
+    /**
+     * Graine refused the ticket — for this app (EmbedRequest.appRefusal), or for
+     * the server token or the key (ClientTokenRules.refusal): the call fails with
+     * it, and never tries the direct socket instead. Written on the ticket's
+     * thread before the scheduler hears of it.
+     */
+    @Volatile private var refused: GraineError? = null
+
+    /**
+     * A fresh ticket — each is single-use — through the one door (the app's
+     * declaration and proofs, the user's token and pass), carrying the server
+     * token when tokens are in play (a new connection: [ClientTokenWire]). Null
+     * on any failure: the direct URL is used — except after a refusal
+     * ([refused]), which ends the call before it starts.
+     */
     private fun fetchTicket(): Ticket? = try {
         val body = JSONObject().put("publishableKey", config.publishableKey).put("mode", "voice")
         CallVariables.ticketVariables(config.callVariables, config.sdkVariables)?.let { body.put("metadata", JSONObject(it as Map<*, *>)) }
         // Beside the metadata, never in it: the 12-key cap must never drop who the user is or which call this is.
         config.identity?.into(body)
         config.callId?.let { body.put("callId", it) }
-        val reply = deps.http.post("${config.baseUrl.trimEnd('/')}/api/embed/ticket", body.toString())
+        val url = "${config.baseUrl.trimEnd('/')}/api/embed/ticket"
+        val reply = EmbedRequest.send(url, body, tokens = deps.tokens, newConnection = true) { json -> deps.http.post(url, json) }
         if (reply.code !in 200..299) {
-            CallLog.debug("no ticket (HTTP ${reply.code}); using the direct socket")
+            refused = EmbedRequest.appRefusal(reply) ?: ClientTokenRules.refusal(reply.code, reply.body)
+            CallLog.debug(refused?.let { "the ticket was refused (${it.code.wire})" } ?: "no ticket (HTTP ${reply.code}); using the direct socket")
             null
         } else {
             val o = JSONObject(reply.body)
@@ -349,6 +367,11 @@ internal class VoiceCallSession(
 
     private fun connect(ticket: Ticket?) {
         if (phase != Phase.CONNECTING) return
+        // Refused for this app, the token or the key: the call cannot start, and the direct socket is not another way past it.
+        refused?.let { e ->
+            failBeforeOpen(ClientTokenRules.callError(e))
+            return
+        }
         if (ticket != null) ticketMs = scheduler.now() - ticketAskedAt
         val url: String
         val protocols: List<String>

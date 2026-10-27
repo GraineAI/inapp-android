@@ -56,6 +56,23 @@ internal class FakePeer(var offer: String = Trace.OFFER) : GraineRtcPeer {
         if (hasLocal) listener!!.onCandidate(c) else pool += c
     }
     fun ice(state: String) = listener!!.onIceState(state)
+    /** A candidate line exactly as written — its priority says how a relay reaches its relay (RtcIce.via). */
+    fun raw(line: String) { if (hasLocal) listener!!.onCandidate(line) else pool += line }
+}
+
+/** A relay candidate reached over [via] ("udp", "tcp" or "tls"), its priority as libwebrtc writes it. */
+internal fun relayLine(via: String): String {
+    val pref = when (via) { "udp" -> 2L; "tcp" -> 1L; else -> 0L }
+    return "candidate:7 1 udp ${(pref shl 24) or 0xFFFF00L or 255L} 203.0.113.9 50000 typ relay raddr 0.0.0.0 rport 0"
+}
+
+/** The phone's network as a test switches it: online by default; [set] tells every watch. */
+internal class FakeNetwork : RtcNetwork {
+    var on = true
+    private val watchers = mutableListOf<(Boolean) -> Unit>()
+    override fun online(): Boolean = on
+    override fun watch(onChange: (online: Boolean) -> Unit): () -> Unit { watchers += onChange; return { watchers.remove(onChange) } }
+    fun set(online: Boolean) { on = online; for (w in watchers.toList()) w(online) }
 }
 
 internal fun rtcStats(bytes: Long = 0, level: Double? = null, energy: Double? = null, duration: Double? = null) =

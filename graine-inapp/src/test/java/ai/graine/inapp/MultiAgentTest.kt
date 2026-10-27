@@ -182,6 +182,33 @@ class MultiAgentTest {
         assertEquals(listOf("Where is my order?", "It ships today."), support.chat.messages.map { it.text })
     }
 
+    @Test fun anAgentMadeLaterNeverGivesTheNextUserTheLastOnesChoice() {
+        // B said "don't remember me" on an earlier launch, on this install.
+        device.rememberMemory("user_id", "B", false)
+        // Offline at launch: no agent's session has named the trait when A chooses, and B replaces A.
+        val support = agent(GraineInApp.DEFAULT, "pk_support")
+        settle()
+        support.identify(mapOf("user_id" to "A"), memory = true)
+        support.identify(mapOf("user_id" to "B"))
+        settle()
+        sessions["pk_support"] = supportSession
+        sessions["pk_billing"] = session("agent-billing", "web-billing", "#16A34A", 30, canBook = false)
+        val billing = agent("billing", "pk_billing")
+        settle()
+        assertEquals("B", billing.identityEnvelope().value)
+        assertFalse("A's choice is not B's on an agent made later either", billing.memoryEnabled)
+        assertEquals("B's kept choice was not overwritten", false, device.memoryFor("user_id", "B"))
+        support.loadSession { }
+        settle()
+        assertFalse(support.memoryEnabled)
+        // The choice made for B, then an agent made later: B's.
+        support.setMemory(true)
+        sessions["pk_care"] = session("agent-care", "web-care", "#DB2777", 30, canBook = false)
+        val care = agent("care", "pk_care")
+        settle()
+        assertTrue(care.memoryEnabled)
+    }
+
     @Test fun identifyingOnOneAgentIdentifiesTheUserForAllAndNullSignsOutEverywhere() {
         val (support, sales) = twoAgents()
         sales.identify(mapOf("user_id" to "U-1001", "name" to "Asha"))

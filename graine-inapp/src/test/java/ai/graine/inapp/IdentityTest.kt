@@ -197,6 +197,55 @@ class IdentityTest {
         assertTrue(InstallIds.valid(env.installId))
     }
 
+    @Test fun aChoiceMadeBeforeTheSessionIsNeverFiledForTheNextUser() {
+        val (_, store) = tempStore()
+        // B said "don't remember me" on an earlier launch, on this install.
+        store.rememberMemory("patient_id", "B", false)
+        val session = SessionIdentity("patient_id", 2)
+        // A chose memory on, signed out, and B signed in — all before this launch's session named the trait.
+        val state = IdentityState { store }
+        state.set(mapOf("patient_id" to "A"), memory = true)
+        state.set(null, memory = null)
+        state.set(mapOf("patient_id" to "B"), memory = null)
+        state.onSession(session)
+        assertFalse("B's own choice, not A's", state.memory())
+        assertEquals("B's kept choice is never overwritten", false, store.memoryFor("patient_id", "B"))
+        // Straight from A to B, and a choice made with nobody identified, are not B's either.
+        val direct = IdentityState { store }
+        direct.set(mapOf("patient_id" to "A"), memory = true)
+        direct.set(mapOf("patient_id" to "B"), memory = null)
+        direct.onSession(session)
+        assertFalse(direct.memory())
+        val unnamed = IdentityState { store }
+        unnamed.setMemory(true)
+        unnamed.set(mapOf("patient_id" to "B"), memory = null)
+        unnamed.onSession(session)
+        assertFalse(unnamed.memory())
+        assertEquals(false, store.memoryFor("patient_id", "B"))
+        // The same user back before the session, with other traits: their choice is theirs.
+        val back = IdentityState { store }
+        back.set(mapOf("patient_id" to "C"), memory = false)
+        back.set(null, memory = null)
+        back.set(mapOf("patient_id" to "C", "plan" to "gold"), memory = null)
+        back.onSession(session)
+        assertFalse(back.memory())
+        assertEquals(false, store.memoryFor("patient_id", "C"))
+    }
+
+    @Test fun theSameUserWrittenAnotherWayKeepsTheChoiceMadeBeforeTheSession() {
+        val (_, store) = tempStore()
+        val state = IdentityState { store }
+        state.set(mapOf("phone" to "+91 98765 43210"), memory = false)
+        state.set(mapOf("phone" to "98765-43210"), memory = null)
+        state.onSession(SessionIdentity("phone", 2))
+        assertFalse("one user as Graine keys them: their choice stands", state.memory())
+        assertEquals(false, store.memoryFor("phone", "9876543210"))
+        assertTrue(IdentityRules.sameUser("email", "Asha@Example.com", " asha@example.com"))
+        assertFalse(IdentityRules.sameUser("email", "asha@example.com", "ravi@example.com"))
+        assertFalse("nobody is nobody's same user", IdentityRules.sameUser("email", null, "asha@example.com"))
+        assertTrue(IdentityRules.sameUser(null, "u-1", "u-1"))
+    }
+
     @Test fun theIdentifyingTraitNeverReachesThePrompt() {
         val vars = VariableStore()
         vars.setIdentity(mapOf("user_id" to "P-1234", "name" to "Asha", "plan" to "gold"))

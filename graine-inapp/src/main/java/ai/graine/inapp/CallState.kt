@@ -279,6 +279,10 @@ internal class CallMachine(
         private set
     private var cancelRing: (() -> Unit)? = null
 
+    /** How long the ringing call rings before it is missed: its push's own time (a ring Graine sends), else the configured one. */
+    var ringingMs = 0L
+        private set
+
     val live: Boolean get() = state != GraineCallState.IDLE
 
     /** A push. Null when a call is live: another call's push was reported missed, the live call's own was ignored. */
@@ -297,8 +301,10 @@ internal class CallMachine(
         for ((k, v) in push.variables) if (k != "who_called" && !(k == "call_reason" && push.reason != null)) vars[k] = v
         val c = GraineCall(push.callId, GraineCall.Direction.INCOMING, push.callerName, push.reason, vars, push.hosted)
         call = c
+        // Known before the ring is shown: its notification rings for exactly as long.
+        ringingMs = push.ringTimeoutMs?.takeIf { it > 0 } ?: ringTimeoutMs()
         move(GraineCallState.RINGING)
-        cancelRing = schedule(push.ringTimeoutMs?.takeIf { it > 0 } ?: ringTimeoutMs()) { ringTimedOut(c.callId) }
+        cancelRing = schedule(ringingMs) { ringTimedOut(c.callId) }
         return c
     }
 

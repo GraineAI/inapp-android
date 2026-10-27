@@ -170,6 +170,7 @@ class RtcDirectTest {
         assertEquals("call_next_1", ask.getString("callId"))
         assertFalse("a grant is no call: no session id", ask.has("session_id"))
         assertFalse("and no variables", ask.has("variables"))
+        assertTrue("every body for the call carries the audio-ready promise", ask.getBoolean("audio_ready_signal"))
         assertEquals("the gateway asked once, before anything relies on it", 1, hosts.probes)
 
         val id = direct.takeCallId(key, user)
@@ -178,6 +179,7 @@ class RtcDirectTest {
         val m = hosts.directMints.single()
         assertEquals("v1.grant1.sig", m.getString("grant"))
         assertEquals(s.sessionId, m.getString("session_id"))
+        assertTrue("the direct mint carries it too", m.getBoolean("audio_ready_signal"))
         assertEquals("kyc_help", m.getJSONObject("variables").getString("call_reason"))
         assertEquals("Asha", m.getJSONObject("variables").getString("name"))
         assertTrue("the web route was never asked", webMints.isEmpty())

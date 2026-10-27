@@ -74,9 +74,14 @@ class RtcRulesTest {
     @Test fun redialsTheNetworksFailuresOnceAndFallsBackOnPolicy() {
         val v = RtcDial::verdict
         assertEquals(RtcDial.Verdict.IGNORE, v(null, "Canceled", 1))
-        for (r in listOf("no_response", "no_answer", "Connection Error", "Request Timeout", "Unavailable", "WebRTC Error", "Authentication Error")) {
+        for (r in listOf("no_answer", "Unavailable", "WebRTC Error", "Authentication Error")) {
             assertEquals(r, RtcDial.Verdict.REDIAL, v(null, r, 1))
             assertEquals("$r, out of dials", RtcDial.Verdict.FALLBACK, v(null, r, 2))
+        }
+        // The link's own failures earn a third dial (RtcResilienceTest), and never a fourth.
+        for (r in listOf("no_response", "Connection Error", "Request Timeout")) {
+            assertEquals(r, RtcDial.Verdict.REDIAL, v(null, r, 2))
+            assertEquals("$r, out of dials", RtcDial.Verdict.FALLBACK, v(null, r, 3))
         }
         assertEquals("a 5xx is the network's", RtcDial.Verdict.REDIAL, v(503, "SIP Failure Code", 1))
         assertEquals("a 4xx is a refusal", RtcDial.Verdict.FALLBACK, v(420, "SIP Failure Code", 1))
@@ -128,6 +133,7 @@ class RtcRulesTest {
         assertEquals("Asia/Kolkata", body.getString("timezone"))
         assertEquals("call_9", body.getString("callId"))
         assertFalse("never the direct grant", body.has("grant_only"))
+        assertTrue("this phone says when the call's audio plays", body.getBoolean("audio_ready_signal"))
         assertEquals("payment_due", body.getJSONObject("variables").getString("call_reason"))
         assertFalse("the identity rides beside the variables", body.getJSONObject("variables").has("identity"))
         assertFalse(RtcMint.body("pk", "s", emptyMap(), null, null).has("variables"))

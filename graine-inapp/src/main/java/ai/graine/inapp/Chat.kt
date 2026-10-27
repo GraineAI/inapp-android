@@ -130,6 +130,34 @@ internal object ChatFrames {
     fun text(data: String): String = JSONObject().put("type", "text").put("data", data).toString()
 
     /** `{type:"app_event", event:{name, …}}` — something the agent may speak up about (client.ts reportEvent()). */
+    /**
+     * An app's event as the runtime reads it (sdk/ios ChatWire.appEventFrame,
+     * React Native's chat): the call's own [detail], the pacing keys
+     * (`cooldown_seconds`, `max_per_session`, `quiet`) at the event's level,
+     * and everything else the app sent under `data` — a `name` or `detail`
+     * key included, so the app's data never renames the event or replaces
+     * what the call said happened. The fields [appEvent] writes beside `name`.
+     */
+    fun eventFields(detail: String?, data: Map<String, Any?>): Map<String, Any?> {
+        val fields = LinkedHashMap<String, Any?>()
+        val inner = LinkedHashMap<String, Any?>()
+        when (val nested = data["data"]) {
+            null -> Unit
+            is Map<*, *> -> nested.forEach { (k, v) -> inner[k.toString()] = v }
+            else -> inner["data"] = nested
+        }
+        for ((k, v) in data) {
+            when (k) {
+                "cooldown_seconds", "max_per_session", "quiet" -> fields[k] = v
+                "data" -> Unit
+                else -> if (!inner.containsKey(k)) inner[k] = v
+            }
+        }
+        detail?.let { fields["detail"] = it }
+        if (inner.isNotEmpty()) fields["data"] = inner
+        return fields
+    }
+
     fun appEvent(name: String, data: Map<String, Any?>): String {
         val event = JSONObject().put("name", name)
         for ((k, v) in data) if (k != "name") event.put(k, Protocol.toJson(v))
@@ -268,6 +296,15 @@ internal interface ChatSessionEvents {
     fun onClosed(code: Int, error: String?, unsent: List<String>) {}
     /** The agent's words, markers removed; nothing between turns. */
     fun onAgentWords(text: String) {}
+    /**
+     * It never opened, and trying again will not open it: Graine refused its
+     * ticket — for this app (`app_not_allowed`, or `app_not_verified` after the
+     * proof and a second try), or for the server token or the publishable key
+     * ([ClientTokenRules.REFUSALS]). Final: never followed by a reconnect of its
+     * own, and no other way in is tried. `unsent` are the lines that were
+     * waiting for it. Unless implemented, [onFailed] hears its sentence.
+     */
+    fun onRefused(error: GraineError, unsent: List<String>) = onFailed(error.message)
     /** A turn began: its first words or its start marker. */
     fun onAgentTurnStart() {}
     /** The turn's words are complete (`<end_of_stream>`). */
@@ -296,6 +333,8 @@ internal class ChatSessionDeps(
     val contextFrame: () -> JSONObject? = { null },
     /** Where blocking work (the ticket) runs. */
     val io: (() -> Unit) -> Unit = { work -> Thread({ work() }, "graine-chat-ticket").apply { isDaemon = true }.start() },
+    /** The agent's server tokens: the ticket carries one when they are in play (CLIENT-TOKENS.md); null sends none. */
+    val tokens: ClientTokens? = null,
 )
 
 /**
@@ -390,13 +429,32 @@ internal class TextChatSession(
 
     private class Ticket(val ticket: String, val wsUrl: String)
 
-    /** A fresh text ticket — each is single-use, and a text one opens a typed conversation, not a call. Null: the direct URL. */
+    /**
+     * Graine refused the ticket — for this app (`app_not_allowed`, or
+     * `app_not_verified` after the proof and a second try: EmbedRequest.appRefusal),
+     * or for the server token or the key (ClientTokenRules.refusal): the
+     * conversation's answer, set before [connect] runs. The chat fails with it,
+     * and never tries the direct socket instead.
+     */
+    @Volatile private var refused: GraineError? = null
+
+    /**
+     * A fresh text ticket — each is single-use, and a text one opens a typed
+     * conversation, not a call — through the one door (the app's declaration and
+     * proofs, the user's token and pass) carrying the server token when tokens
+     * are in play (a new connection: [ClientTokenWire]). Null: the direct URL —
+     * except after a refusal ([refused]), which is final.
+     */
     private fun fetchTicket(): Ticket? = try {
         val body = JSONObject().put("publishableKey", config.publishableKey).put("mode", "text")
         CallVariables.forTicket(config.variables)?.let { body.put("metadata", JSONObject(it as Map<*, *>)) }
         config.identity?.into(body)
-        val reply = deps.http.post("${config.baseUrl.trimEnd('/')}/api/embed/ticket", body.toString())
-        if (reply.code !in 200..299) null else {
+        val url = "${config.baseUrl.trimEnd('/')}/api/embed/ticket"
+        val reply = EmbedRequest.send(url, body, tokens = deps.tokens, newConnection = true) { json -> deps.http.post(url, json) }
+        if (reply.code !in 200..299) {
+            refused = EmbedRequest.appRefusal(reply) ?: ClientTokenRules.refusal(reply.code, reply.body)
+            null
+        } else {
             val o = JSONObject(reply.body)
             val t = o.optString("ticket")
             val u = o.optString("wsUrl")
@@ -408,6 +466,14 @@ internal class TextChatSession(
 
     private fun connect(ticket: Ticket?) {
         if (phase != Phase.CONNECTING) return
+        // Refused for this app, the token or the key: the direct socket would only be another way past that answer.
+        refused?.let { e ->
+            phase = Phase.CLOSED
+            stopTimers()
+            events.onRefused(e, outbox.toList())
+            outbox.clear()
+            return
+        }
         val url: String
         val protocols: List<String>
         if (ticket != null) {

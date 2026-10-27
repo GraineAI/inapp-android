@@ -325,7 +325,8 @@ class CallAnalyticsRowsTest {
         peer.candidate("srflx"); pump()
         s.dial(deps(), listener); pump()
         peer.ice("checking"); pump()
-        sched.advance(RtcDial.ICE_CONNECT_DEADLINE_MS); pump()
+        // An ICE restart inside the call at the deadline first (RtcRecovery); the WebSocket when its window ends.
+        sched.advance(RtcDial.ICE_CONNECT_DEADLINE_MS + RtcResilience.RESTART_WINDOW_MS); pump()
         assertEquals(listOf("fallback ice_timeout"), log)
         assertEquals(listOf(CallAnalytics.frame("media", mapOf("reason" to "ice_timeout", "transport" to "rtc"))), handedOver)
         assertTrue("never on the WebRTC attempt's own channel", rowsOn(control).isEmpty())
@@ -337,6 +338,8 @@ class CallAnalyticsRowsTest {
         peer.candidate("srflx"); pump()
         s.dial(deps(), listener); pump()
         peer.ice("checking"); peer.ice("failed"); pump()
+        // Restarted at once; handed over at the deadline, never before it.
+        sched.advance(RtcDial.ICE_CONNECT_DEADLINE_MS); pump()
         assertEquals(listOf("fallback ice_timeout"), log)
         assertEquals("{\"name\":\"media\",\"detail\":\"no audio path (ice_failed)\",\"quiet\":true,\"telemetry\":true,\"data\":{\"reason\":\"ice_failed\",\"transport\":\"rtc\"}}",
             handedOver.single().removePrefix(APP_EVENT).dropLast(1))
@@ -490,7 +493,7 @@ class CallAnalyticsRowsTest {
         peers.single().candidate("srflx"); pump()
         assertTrue("answered", peers.single().remoteAnswer != null)
         peers.single().ice("checking"); pump()
-        sched.advance(RtcDial.ICE_CONNECT_DEADLINE_MS); pump()
+        sched.advance(RtcDial.ICE_CONNECT_DEADLINE_MS + RtcResilience.RESTART_WINDOW_MS); pump()
         val voice = voiceSockets.single()
         assertTrue(voice.sent.isEmpty())
         open(voice)
@@ -579,7 +582,7 @@ class CallAnalyticsRowsTest {
         live()
         control.deliver(READY); pump()
         peer.ice("disconnected"); pump()
-        sched.advance(RtcMediaWatch.RECOVERY_WINDOW_MS); pump()
+        sched.advance(RtcResilience.PATH_LOST_GIVE_UP_MS); pump()
         assertEquals(listOf("ended failed"), log)
         assertEquals("media_drop", ended().getJSONObject("data").getString("cause"))
     }

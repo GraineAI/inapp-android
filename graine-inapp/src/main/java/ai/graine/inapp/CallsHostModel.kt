@@ -591,6 +591,13 @@ internal object CallsHostEvent {
     const val INCOMING = "incoming"
     const val VOIP_TOKEN = "voipToken"
     const val ACTION = "action"
+    /**
+     * `{}`: a request of the SDK's was refused for its server token — the
+     * JavaScript or Dart token manager fetches a fresh one (one question at a
+     * time) and calls `setClientToken`; the request waits at most 5 s for it,
+     * then goes once more (CLIENT-TOKENS.md §2.4).
+     */
+    const val NEED_CLIENT_TOKEN = "needClientToken"
 
     /**
      * `{callId, outcome, reason?, error?, durationSeconds?, hosted?, agent?, connection?, cause?}`: `reason`
@@ -842,6 +849,10 @@ internal interface CallsHostPlatform {
     fun identify(traits: Map<String, Any?>?)
     fun setVariables(values: Map<String, Any?>)
     fun setScreen(screen: GraineScreen?)
+    /** The server token JavaScript or Dart pushed (null: none), for every agent's requests (CLIENT-TOKENS.md §2.4). */
+    fun setClientToken(token: String?) {}
+    /** Once the instance is made: how an agent's request refused for its token asks for another — [ask], from any thread. */
+    fun askForClientTokens(ask: () -> Unit) {}
     fun registerAction(name: String, handler: (JSONObject, (ActionResult) -> Unit) -> Unit): () -> Unit
     /** A push's data, to the calls; false when it is not a call. */
     fun handlePush(data: Map<String, String>): Boolean
@@ -892,6 +903,7 @@ internal class CallsHostCore(private val platform: CallsHostPlatform, private va
     private var heldIdentity: Held<Map<String, Any?>?>? = null
     private var heldVariables: Held<Map<String, Any?>?>? = null
     private var heldScreen: Held<GraineScreen?>? = null
+    private var heldClientToken: Held<String?>? = null
     /** [setSpeakerByDefault] before anything was configured: applied, and kept, by the first configure or restore. */
     private var heldSpeakerByDefault: Boolean? = null
 
@@ -931,6 +943,8 @@ internal class CallsHostCore(private val platform: CallsHostPlatform, private va
         if (instance == null) {
             val made = platform.makeInstance(next)
             instance = made.copy(baseUrl = made.baseUrl.trimEnd('/'))
+            // A request refused for its server token asks JavaScript or Dart for another, on the main loop.
+            platform.askForClientTokens { platform.nextTurn { needClientToken() } }
             releaseHeld()
         }
         val running = instance
@@ -1047,13 +1061,35 @@ internal class CallsHostCore(private val platform: CallsHostPlatform, private va
         platform.setScreen(screen)
     }
 
+    /**
+     * THE SERVER TOKEN JavaScript's or Dart's own token manager holds
+     * (CLIENT-TOKENS.md §2.4): on every change, null for none. Every request the
+     * SDK makes carries it from then on; one refused for it raises
+     * [CallsHostEvent.NEED_CLIENT_TOKEN]. A blank or non-string value is none.
+     * Before there is an instance it is held, and applied when it is made. An
+     * agent the app configured with a token provider of its own ignores it.
+     */
+    fun setClientToken(raw: Any?) {
+        val token = (raw as? String)?.trim()?.takeIf { it.isNotEmpty() }
+        if (instance == null) {
+            heldClientToken = Held(token)
+            return
+        }
+        platform.setClientToken(token)
+    }
+
+    /** A request of the SDK's was refused for its server token: JavaScript or Dart is asked for a fresh one. */
+    fun needClientToken() = sinks.emit(CallsHostEvent.NEED_CLIENT_TOKEN, emptyMap())
+
     private fun releaseHeld() {
         heldIdentity?.let { platform.identify(it.value) }
         heldVariables?.let { platform.setVariables(variables.replace(it.value)) }
         heldScreen?.let { platform.setScreen(it.value) }
+        heldClientToken?.let { platform.setClientToken(it.value) }
         heldIdentity = null
         heldVariables = null
         heldScreen = null
+        heldClientToken = null
         actions.names.forEach { register(it) }
     }
 

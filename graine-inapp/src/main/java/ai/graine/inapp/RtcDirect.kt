@@ -159,6 +159,12 @@ internal class RtcDirectMint(
     private val timers: CallScheduler = ExecutorScheduler("graine-direct-mint"),
     /** A new id for a call this app places, as it names them. */
     private val newCallId: () -> String = { CallIds.next() },
+    /**
+     * The server tokens of the agent a publishable key selects: a grant request
+     * to the web route carries one when they are in play (CLIENT-TOKENS.md).
+     * Null: none is sent.
+     */
+    private val tokens: (publishableKey: String) -> ClientTokens? = { key -> AppShared.all().firstOrNull { it.config.publishableKey == key }?.clientTokens },
 ) {
     /** What a grant was asked for — the key, who the user is, which call. A grant is used for exactly this and nothing else. */
     private data class GrantKey(val publishableKey: String, val identity: IdentityEnvelope?, val callId: String?)
@@ -286,7 +292,11 @@ internal class RtcDirectMint(
         var waitMs: Long? = null
         var signsNone = false
         try {
-            val reply = http.post(baseUrl.trimEnd('/') + RtcMint.PATH, grantBody(ask).toString(), WEB_TIMEOUT_MS)
+            // Through the one door (the app's declaration and proofs, the user's token and pass), and an rtc-session
+            // request like the mint's, so it carries the agent's server token the same way.
+            val url = baseUrl.trimEnd('/') + RtcMint.PATH
+            val agentTokens = runCatching { tokens(ask.publishableKey) }.getOrNull()
+            val reply = EmbedRequest.send(url, grantBody(ask), tokens = agentTokens, newConnection = true) { json -> http.post(url, json, WEB_TIMEOUT_MS) }
             if (reply.code == 200) {
                 offer = RtcGrantOffer.of(reply.body)
                 if (offer == null) {
@@ -295,6 +305,8 @@ internal class RtcDirectMint(
                 }
             } else {
                 waitMs = (if (reply.code == 429) reply.retryAfterSeconds?.times(1000) else null) ?: QUIET_MS
+                // This app is not one of the agent's: final, so no grant is asked for again — until an answer brings one.
+                if (code(reply.body) == GraineErrorCode.APP_NOT_ALLOWED.wire) signsNone = true
                 note("grant: HTTP ${reply.code}${code(reply.body)?.let { " $it" } ?: ""}")
             }
         } catch (e: Exception) {
@@ -398,7 +410,7 @@ internal class RtcDirectMint(
             return null
         }
         if (!probeReady(h.offer.url, dialling)) return null
-        val body = JSONObject().put("grant", h.offer.grant).put("session_id", sessionId)
+        val body = JSONObject().put("grant", h.offer.grant).put("session_id", sessionId).put(RtcMint.AUDIO_READY_SIGNAL, true)
         // The variables travel with the credential, as they do through the web route: the gateway cleans them by the same rule.
         if (request.variables.isNotEmpty()) body.put("variables", JSONObject(request.variables as Map<*, *>))
         val started = clock()
@@ -630,6 +642,20 @@ internal class RtcDirectMint(
         refused = 0
         for (url in routes) claimProbe(url)?.let { probeNow += it }
         note("direct mint: the rest is over; asking the gateway again")
+    }
+
+    /**
+     * The identity token changed for [publishableKey]: every grant kept for
+     * it — signed under the verdict the old token had — goes, with the next
+     * call's on its way; the next warm-up asks again, with the new token.
+     */
+    fun forgetGrants(publishableKey: String) {
+        synchronized(lock) {
+            held.keys.removeAll { it.publishableKey == publishableKey }
+            next.remove(publishableKey)
+            fetching.remove(publishableKey)
+            fetchingCalls.removeAll { it.publishableKey == publishableKey }
+        }
     }
 
     // ── bookkeeping ─────────────────────────────────────────────────────────

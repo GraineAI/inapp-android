@@ -41,6 +41,12 @@ internal object Protocol {
          * value never becomes a variable, and is never logged.
          */
         const val IDENTITY = "graine:identity"
+        /**
+         * The server token — `{token}`, a string or null — for the page's own
+         * requests (CLIENT-TOKENS.md §2.2): after `graine:ready` and on every
+         * change, while tokens are in play. Never logged.
+         */
+        const val CLIENT_TOKEN = ClientTokenRules.PAGE_TOKEN
     }
 
     /** Messages the page sends out. */
@@ -67,6 +73,12 @@ internal object Protocol {
          * measure them never sends it.
          */
         const val LEVELS = "graine:levels"
+        /**
+         * A request of the page's was refused for its server token: the host
+         * asks for a fresh one (one question at a time) and posts it; the page
+         * waits at most 5 s and sends that request once more.
+         */
+        const val NEED_CLIENT_TOKEN = ClientTokenRules.PAGE_NEEDS_TOKEN
     }
 
     /**
@@ -123,6 +135,20 @@ internal object Protocol {
      */
     fun deliver(message: JSONObject): String = "window.postMessage(${message}, \"*\"); true;"
 
+    /**
+     * An app's event for a voice call, in the page's event form —
+     * `{type: "graine:app-event", event: {name, detail?, pacing keys, data?}}`,
+     * which the page hands the runtime as it is: the same event the chat
+     * sends ([ChatFrames.eventFields]), so the app's data never renames it or
+     * replaces its detail, whichever conversation hears it.
+     */
+    fun appEvent(name: String, detail: String?, data: Map<String, Any?>): JSONObject {
+        val event = LinkedHashMap<String, Any?>()
+        event["name"] = name
+        event.putAll(ChatFrames.eventFields(detail, data))
+        return out(Out.APP_EVENT, "event" to event)
+    }
+
     fun out(type: String, vararg fields: Pair<String, Any?>): JSONObject {
         val o = JSONObject().put("type", type)
         for ((k, v) in fields) o.put(k, toJson(v))
@@ -173,6 +199,7 @@ internal object Protocol {
             // Passed on as the engine wrote it: a stage this build does not know is ignored where it is handled.
             In.PROGRESS -> PageMessage.Progress(o.optString("stage"))
             In.LEVELS -> PageMessage.Levels(level(o, "agent"), level(o, "mic"))
+            In.NEED_CLIENT_TOKEN -> PageMessage.NeedClientToken
             else -> null
         }
     }
@@ -190,8 +217,12 @@ internal object Protocol {
     /** Kotlin values → JSON values, recursively. Anything else becomes its string form. */
     fun toJson(v: Any?): Any = when (v) {
         null -> JSONObject.NULL
-        is JSONObject, is JSONArray, is String, is Boolean, is Int, is Long, is Double, is Float -> v
-        is Number -> v.toDouble()
+        // JSON has no NaN or infinity (org.json throws on them): null, as the iOS SDK writes them — never an exception
+        // out of the app's reportEvent() or track(), nor an event lost on a session's thread.
+        is Double -> if (v.isFinite()) v else JSONObject.NULL
+        is Float -> if (v.isFinite()) v else JSONObject.NULL
+        is JSONObject, is JSONArray, is String, is Boolean, is Int, is Long -> v
+        is Number -> v.toDouble().let { if (it.isFinite()) it else JSONObject.NULL }
         is Map<*, *> -> JSONObject().also { o -> v.forEach { (k, x) -> o.put(k.toString(), toJson(x)) } }
         is Iterable<*> -> JSONArray().also { a -> v.forEach { a.put(toJson(it)) } }
         is Array<*> -> JSONArray().also { a -> v.forEach { a.put(toJson(it)) } }
@@ -263,6 +294,8 @@ internal sealed class PageMessage {
     data class Progress(val stage: String) : PageMessage()
     /** `graine:levels` — the agent's and the microphone's levels, 0–1; null for one the page did not say. */
     data class Levels(val agent: Float?, val mic: Float?) : PageMessage()
+    /** `graine:need-client-token` — the page was refused for its server token and wants a fresh one. */
+    object NeedClientToken : PageMessage()
 }
 
 /**

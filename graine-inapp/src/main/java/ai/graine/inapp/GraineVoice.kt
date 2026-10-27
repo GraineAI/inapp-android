@@ -310,6 +310,8 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
             graine.onContext { frame -> if (connected) postContext(frame) },
             // A sign-in, a sign-out or a memory choice reaches the page for its next call.
             graine.onIdentity { env -> if (ready) postIdentity(env) },
+            // Every new server token reaches the page for its own requests; a call in progress is never touched by it.
+            graine.clientTokens.onChange { token -> graine.main.post { if (ready) postClientToken(token) } },
         )
         graine.foregroundWatchers.add(foregroundWatcher)
         load(idle = true)
@@ -437,9 +439,7 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
     fun reportEvent(name: String, detail: String? = null, data: Map<String, Any?> = emptyMap()) {
         if (!connected) return
         graine.currentContextFrame()?.let { postContext(it) }
-        val payload = LinkedHashMap<String, Any?>(data)
-        detail?.let { payload["detail"] = it }
-        post(Protocol.out(Protocol.Out.APP_EVENT, "name" to name, "data" to payload))
+        post(Protocol.appEvent(name, detail, data))
     }
 
     /** Reload the page and start the retry ladder over. For a "Try again" button. */
@@ -509,14 +509,34 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
         Protocol.Out.VARIABLES -> "{${m.optJSONObject("variables")?.keys()?.asSequence()?.joinToString() ?: ""}}"
         Protocol.Out.APP_CONTEXT -> "screen=${m.optJSONObject("context")?.optString("screen")}"
         Protocol.Out.IDENTITY -> "identity=${if (m.isNull("value")) "none" else "set"} memory=${m.optBoolean("memory")}"
+        Protocol.Out.CLIENT_TOKEN -> "token=${if (m.isNull("token")) "none" else "set"}"
         else -> m.toString().take(300)
     }
 
-    /** Who is using the app, for the page's ticket and rtc-session (contract §1.3). */
+    /**
+     * Who is using the app, for the page's ticket and rtc-session (contract
+     * §1.3) — with the identity token and the user pass that belong to that
+     * value (APP-IDENTITY.md §1.3), which the page sends inside the identity
+     * as every request of the SDK does. Never in the page's URL, and never in
+     * the debug log ([redactForLog] names an identity, nothing of it).
+     */
     private fun postIdentity(env: IdentityEnvelope) {
-        post(Protocol.out(Protocol.Out.IDENTITY,
-            "value" to env.value, "installId" to env.installId, "memory" to env.memory, "timezone" to env.timezone))
+        val proof = graine.identityProofFor(env.value)
+        val message = Protocol.out(Protocol.Out.IDENTITY,
+            "value" to env.value, "installId" to env.installId, "memory" to env.memory, "timezone" to env.timezone)
+        proof?.token?.let { message.put("token", it) }
+        proof?.pass?.let { message.put("pass", it) }
+        post(message)
     }
+
+    /** The server token, for the page's own requests (CLIENT-TOKENS.md §2.2) — only while tokens are in play. */
+    private fun postClientToken(token: String?) {
+        if (!graine.clientTokens.inPlay) return
+        postClientTokenAnswer(token)
+    }
+
+    /** The answer to the page's `graine:need-client-token`: the newest token — null when there is none, so it stops waiting. */
+    private fun postClientTokenAnswer(token: String?) = post(Protocol.out(Protocol.Out.CLIENT_TOKEN, "token" to token))
 
     private fun onMainThread(): Boolean = android.os.Looper.myLooper() == android.os.Looper.getMainLooper()
 
@@ -529,6 +549,13 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
         Build.VERSION.SDK_INT < 23 ||
             graine.application.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
+    /**
+     * This engine's call still holds the phone's audio — its microphone, and
+     * the audio mode the web view set and puts back as it closes: live, or
+     * placed and not yet over. A start still waiting for the page holds nothing.
+     */
+    internal val holdsAudio: Boolean get() = connected || (connecting && startedCall)
+
     private fun setCall(connected: Boolean, connecting: Boolean) {
         val changed = connected != this.connected || connecting != this.connecting
         val liveChanged = connected != this.connected
@@ -539,6 +566,8 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
         if (changed) report { it.onCallState(connected, connecting) }
         // No call, no levels: the last ones heard never outlive it.
         if (!connected) heard(0f, 0f)
+        // Over: a native call waiting for this one to let go of the audio (talk, then call) goes on.
+        if (changed && !connected && !connecting) AppShared.callsIfMade()?.webCallReleased()
     }
 
     /** The page's levels: followed while a call is live (the microphone's while it is not muted), 0 otherwise. */
@@ -572,6 +601,8 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
                 // composed from these and nothing later can repair it.
                 post(Protocol.out(Protocol.Out.VARIABLES, "variables" to graine.currentVariables()))
                 postIdentity(graine.identityEnvelope())
+                // The token the page's own ticket and rtc-session carry, before anything asks for one.
+                postClientToken(graine.clientTokens.newest)
                 graine.currentContextFrame()?.let { postContext(it) }
                 if (pendingStart && hasMic()) { pendingStart = false; beginCall() }
                 else if (!startedCall) post(Protocol.out(Protocol.Out.WARM))
@@ -660,6 +691,9 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
                 if (msg.active) setCall(connected = connected, connecting = true)
                 report { it.onReconnecting(msg.active) }
             }
+            // Refused for its token: one question at a time, at most one asked anew in 5 s; the page hears the newest
+            // token either way (it waits at most 5 s, then sends that request once more).
+            PageMessage.NeedClientToken -> graine.clientTokens.refreshForPage { token -> graine.main.post { postClientTokenAnswer(token) } }
             is PageMessage.Progress -> {
                 if (progress.onStage(msg.stage)) {
                     // Neither transport could carry the call: stop saying "connecting", and

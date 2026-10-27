@@ -63,8 +63,8 @@ class ChatIdentityTest {
         dir.deleteRecursively()
     }
 
-    private fun agent(): GraineInApp {
-        val session = JSONObject("""{"agentId":"agent-1","webcallAgentId":"web-1","appearance":{"title":"Asha"},"identity":{"field":"user_id"}}""")
+    private fun agent(field: String = "user_id"): GraineInApp {
+        val session = JSONObject("""{"agentId":"agent-1","webcallAgentId":"web-1","appearance":{"title":"Asha"},"identity":{"field":"$field"}}""")
         val env = AgentEnv(
             main = TestMain(clock),
             io = Executor { it.run() },
@@ -155,6 +155,39 @@ class ChatIdentityTest {
         assertTrue(g.chat.messages.isEmpty())
         assertEquals("connecting again as nobody", 3, sockets.size)
         assertNull("an anonymous ticket", lastTicketIdentity())
+    }
+
+    @Test fun theSameUserWrittenAnotherWayChangesNothingAndIsNeverSignedOut() {
+        // Graine keys a user by the normalised value (identity-vectors.json): these are one user.
+        val g = agent(field = "email")
+        g.identify(mapOf("email" to "Asha@Example.com")); settle()
+        val s = shownOnline(g)
+        says(s, "Hello Asha.")
+        g.identify(mapOf("email" to "asha@example.com", "name" to "Asha")); settle()
+        assertEquals("still the one connection", 1, sockets.size)
+        assertFalse("never stopped", types(s).contains("stop"))
+        assertTrue(g.chat.connected)
+        assertEquals(listOf("Hello Asha."), g.chat.messages.map { it.text })
+        assertTrue("the user still on the phone is never signed out", signOuts.isEmpty())
+    }
+
+    @Test fun anEventsNameAndDetailAreTheCallsOwnAndTheAppsDataStaysUnderData() {
+        val g = agent()
+        g.identify(mapOf("user_id" to "u-1")); settle()
+        val s = shownOnline(g)
+        g.reportEvent("reminder_opened", "The user came from the breakfast reminder",
+            mapOf("name" to "spoofed", "detail" to "not this", "quiet" to true, "cooldown_seconds" to 0, "meal" to "breakfast"))
+        settle()
+        val ev = s.sent.map { JSONObject(it) }.last { it.optString("type") == "app_event" }.getJSONObject("event")
+        assertEquals("the call's own name", "reminder_opened", ev.getString("name"))
+        assertEquals("the call's own detail", "The user came from the breakfast reminder", ev.getString("detail"))
+        assertTrue("the runtime's keys at the event's level", ev.getBoolean("quiet"))
+        assertEquals(0, ev.getInt("cooldown_seconds"))
+        val data = ev.getJSONObject("data")
+        assertEquals("spoofed", data.getString("name"))
+        assertEquals("not this", data.getString("detail"))
+        assertEquals("breakfast", data.getString("meal"))
+        assertFalse("never loose beside the runtime's keys", ev.has("meal"))
     }
 
     @Test fun theSameIdentityChangesNothingOnAnOpenChat() {

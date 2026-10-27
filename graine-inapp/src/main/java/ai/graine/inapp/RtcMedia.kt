@@ -62,6 +62,8 @@ interface GraineRtcPeer {
         fun onIceState(state: String)
         /** The microphone or the speaker failed under the call. */
         fun onAudioError(message: String)
+        /** The speaker started playing the call's audio — the phone's playout is running (from 0.14.4). */
+        fun onPlayoutStarted() {}
     }
 
     /**

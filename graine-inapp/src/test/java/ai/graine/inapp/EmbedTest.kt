@@ -34,9 +34,9 @@ class EmbedTest {
         reply = HttpReply(400, """{"error":"Something new.","code":"brand_new_code"}""")
         assertEquals("a code this build does not know is carried", GraineErrorCode.Unknown("brand_new_code"),
             (api.post(EmbedApi.SCHEDULE, JSONObject()) as EmbedReply.Failed).error.code)
-        // No code in the body: the status says what it is.
+        // No code in the body: the status says what it is — a bare 500 is an answer nobody expected, as on every SDK.
         for ((status, code) in listOf(400 to "invalid_request", 401 to "invalid_key", 403 to "origin_refused", 404 to "not_found",
-                429 to "rate_limited", 500 to "unavailable", 503 to "unavailable")) {
+                429 to "rate_limited", 500 to "http_500", 502 to "unavailable", 503 to "unavailable", 504 to "unavailable")) {
             reply = HttpReply(status, "not json")
             assertEquals("$status", code, (api.post(EmbedApi.LIST, JSONObject()) as EmbedReply.Failed).error.code.wire)
         }

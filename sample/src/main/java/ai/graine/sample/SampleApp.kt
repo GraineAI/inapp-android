@@ -32,6 +32,9 @@ class SampleApp : Application() {
             //   adb shell setprop debug.graine.transport rtc
             transport = if (BuildConfig.DEBUG) debugTransport() else null,
         ))
+        // Step 2b, for an agent that requires a verified app: prove this app now, so the first conversation never
+        // waits for it (the SDK also does it by itself). Debug builds use a debug token instead: it is logged once.
+        graine.prepareAppVerification { verdict -> android.util.Log.i("GraineSample", "app verification: ${verdict.word}") }
         // Step 3: something the agent may do. Declare it on the agent too.
         // It is also the one handler a component's `on_select.path` runs through ("compare?ids={id}").
         graine.registerAction("open_screen") { args ->

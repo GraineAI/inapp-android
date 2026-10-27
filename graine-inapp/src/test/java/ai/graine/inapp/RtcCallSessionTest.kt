@@ -43,9 +43,13 @@ class RtcCallSessionTest {
 
     private var mint: () -> HttpReply = { HttpReply(200, mintReply().toString()) }
 
+    private val net = FakeNetwork()
+    /** The ICE servers each peer was made with, in order. */
+    private val peerServers = mutableListOf<List<GraineRtcIceServer>>()
+
     private val env = RtcEnv(
         scheduler = sched,
-        createPeer = { _, l -> FakePeer().also { it.listener = l; peers += it } },
+        createPeer = { servers, l -> peerServers += servers; FakePeer().also { it.listener = l; peers += it } },
         http = HttpPost { url, json ->
             assertEquals("https://www.graine.ai/api/embed/rtc-session", url)
             mints += JSONObject(json)
@@ -63,6 +67,7 @@ class RtcCallSessionTest {
         newSessionId = { "0123456789abcdef0123456789abcdef" },
         wallClock = { 1_800_000_000_000L },
         steps = { step, detail -> steps += "$step: $detail" },
+        network = net,
     )
 
     private val request = RtcCallRequest(
@@ -148,6 +153,27 @@ class RtcCallSessionTest {
         assertEquals(listOf("media"), log)
         log.clear()
         return s
+    }
+
+    /** 0.14.4: once the speaker plays, the control channel hears {"type":"audio","state":"ready"} — once — and the greeting can go. */
+    @Test fun theSpeakerPlayingIsSaidOnceOnTheControlChannel() {
+        val s = live()
+        assertTrue("the mint promised it", mints.single().getBoolean("audio_ready_signal"))
+        control.deliver("{\"type\":\"control_ready\",\"session_id\":\"${s.sessionId}\"}"); pump()
+        assertFalse(control.sent.contains(RtcMint.AUDIO_READY))
+        peer.listener!!.onPlayoutStarted(); pump()
+        peer.listener!!.onPlayoutStarted(); pump()
+        assertEquals(listOf(RtcMint.AUDIO_READY), control.sent.filter { it == RtcMint.AUDIO_READY })
+        assertEquals("{\"type\":\"audio\",\"state\":\"ready\"}", RtcMint.AUDIO_READY)
+    }
+
+    /** A speaker that starts before the control channel joined waits there, like every frame. */
+    @Test fun aSpeakerThatPlaysBeforeTheChannelJoinsIsSaidOnceItJoins() {
+        val s = live()
+        peer.listener!!.onPlayoutStarted(); pump()
+        assertTrue(control.sent.isEmpty())
+        control.deliver("{\"type\":\"control_ready\",\"session_id\":\"${s.sessionId}\"}"); pump()
+        assertEquals(1, control.sent.count { it == RtcMint.AUDIO_READY })
     }
 
     @Test fun placesTheCallAsTheBarDoes() {
@@ -279,7 +305,8 @@ class RtcCallSessionTest {
         assertEquals(listOf("fallback register_failed"), log)
     }
 
-    @Test fun noReplyIsDialledOnceMoreOnAFreshConnectionThenFallsBack() {
+    /** No reply is the link's failure: a fresh connection, then a third (MAX_DIALS_ON_LINK_FAILURE), then the WebSocket. */
+    @Test fun noReplyIsDialledOnAFreshConnectionTwiceThenFallsBack() {
         sbc.inviteAnswer = FakeSbc.Answer.SILENT
         val s = prepared()
         s.dial(deps, listener); pump()
@@ -293,8 +320,14 @@ class RtcCallSessionTest {
         peer.candidate("srflx"); pump()
         assertEquals(1, sip.requests("INVITE").size)
         sched.advance(4_000); pump()
+        assertTrue("the link's second silence earns a third dial", log.isEmpty())
+        assertEquals("a third socket", 3, sipSockets.size)
+        peer.candidate("srflx"); pump()
+        assertEquals(1, sip.requests("INVITE").size)
+        sched.advance(4_000); pump()
         assertEquals(listOf("fallback no_response"), log)
-        assertTrue(steps.any { it.startsWith("dial: no reply to the INVITE: redial") })
+        assertEquals("never a fourth", 3, sipSockets.size)
+        assertEquals(2, steps.count { it.startsWith("dial: no reply to the INVITE: redial") })
     }
 
     /** 16 Oct: the SBC said "trying" and the call never reached the agent, every other tap. */
@@ -478,15 +511,27 @@ class RtcCallSessionTest {
         assertTrue(log.isEmpty())
     }
 
-    @Test fun answeredWithNoMediaPathFallsBackAfterEightSeconds() {
+    /** Answered with no media path: an ICE restart inside the call at 8 s — a re-INVITE, not a new call — then the WebSocket after its window. */
+    @Test fun answeredWithNoMediaPathIsRestartedAtEightSecondsThenFallsBack() {
         val s = prepared()
         s.dial(deps, listener); pump()
         peer.ice("checking"); pump()
+        val invites = sip.requests("INVITE").size
         sched.advance(7_999); pump()
+        assertFalse(peer.calls.contains("createOffer(restart)"))
+        sched.advance(1); pump()
+        assertTrue("no ICE restart at the deadline", peer.calls.contains("createOffer(restart)"))
+        peer.candidate("srflx"); pump()
+        val reinvite = sip.requests("INVITE").last()
+        assertEquals("one re-INVITE, inside the answered dialog", invites + 1, sip.requests("INVITE").size)
+        assertTrue(reinvite.toTag != null)
+        assertTrue("moved to the WebSocket while its restart was under way", log.isEmpty())
+        sched.advance(RtcResilience.RESTART_WINDOW_MS - 1); pump()
         assertTrue(log.isEmpty())
         sched.advance(1); pump()
         assertEquals(listOf("fallback ice_timeout"), log)
         assertEquals("the answered call is hung up", 1, sip.requests("BYE").size)
+        assertEquals("one dial: the restart was no new call", 1, sipSockets.size)
     }
 
     @Test fun aPolicyRefusalFallsBackWithoutASecondDial() {
@@ -526,7 +571,8 @@ class RtcCallSessionTest {
         assertEquals(listOf("fallback error"), log)
     }
 
-    @Test fun aLostPathGetsOneIceRestartThenTheNextLossIsFinal() {
+    /** A lost path is restarted 3 s in; a later loss is its own trouble and gets its own restart; dropped only after 15 s lost. */
+    @Test fun aLostPathIsRestartedAndEveryLaterLossGetsItsOwnRestart() {
         live()
         peer.ice("disconnected"); pump()
         sched.advance(2_999); pump()
@@ -540,29 +586,39 @@ class RtcCallSessionTest {
         peer.ice("checking"); peer.ice("connected"); pump()
         assertTrue("back, the call goes on", log.isEmpty())
         peer.ice("disconnected"); pump()
-        sched.advance(7_999); pump()
+        sched.advance(3_000); pump()
+        assertEquals("the next loss restarted too", 2, peer.calls.count { it == "createOffer(restart)" })
+        peer.candidate("srflx"); pump()
+        sched.advance(RtcResilience.PATH_LOST_GIVE_UP_MS - 3_000 - 1); pump()
         assertTrue(log.isEmpty())
         sched.advance(1); pump()
         assertEquals(listOf("ended failed"), log)
     }
 
-    @Test fun aRestartThatDoesNotReconnectWithinTenSecondsEndsTheCall() {
+    @Test fun aRestartThatDoesNotReconnectEndsTheCallFifteenSecondsAfterTheDrop() {
         live()
         peer.ice("disconnected"); pump()
         sched.advance(3_000); pump()
         peer.candidate("srflx"); pump()
-        sched.advance(6_999); pump()
-        assertTrue(log.isEmpty())
+        sched.advance(RtcResilience.PATH_LOST_GIVE_UP_MS - 3_000 - 1); pump()
+        assertTrue("dropped at the old 10 s, with its path still to come", log.isEmpty())
         sched.advance(1); pump()
         assertEquals(listOf("ended failed"), log)
     }
 
-    @Test fun iceFailedRestartsAtOnceAndARefusedRestartEndsTheCall() {
+    /** ICE failed restarts at once; a refused restart ends restarts — never the call: the give-up decides, and the path may come back. */
+    @Test fun iceFailedRestartsAtOnceAndARefusedRestartLeavesTheCallToTheGiveUp() {
         live()
         sbc.inviteAnswer = FakeSbc.Answer.BUSY
         peer.ice("failed"); pump()
         assertTrue(peer.calls.contains("createOffer(restart)"))
         peer.candidate("srflx"); pump()
+        assertTrue("a refused restart hung the call up", log.isEmpty())
+        peer.ice("checking"); peer.ice("connected"); pump()
+        assertTrue("the old path came back: the call goes on", log.isEmpty())
+        peer.ice("failed"); pump()
+        assertEquals("a far side that refused a restart is asked no more", 1, peer.calls.count { it == "createOffer(restart)" })
+        sched.advance(RtcResilience.PATH_LOST_GIVE_UP_MS); pump()
         assertEquals(listOf("ended failed"), log)
     }
 
@@ -857,7 +913,7 @@ class RtcCallSessionTest {
         peer.ice("disconnected"); pump()
         sched.advance(3_000); pump()
         peer.candidate("srflx"); pump()
-        sched.advance(7_000); pump()
+        sched.advance(RtcResilience.PATH_LOST_GIVE_UP_MS - 3_000); pump()
         assertEquals(listOf("ended failed"), log)
         assertEquals(listOf(true, false), reconnects)
         assertEquals("both before the end was told", listOf(0, 0), reconnectsAt)
@@ -869,5 +925,157 @@ class RtcCallSessionTest {
         s.hangUp(); pump()
         peer.ice("connected"); pump()
         assertEquals("no event follows a hang-up", listOf(true), reconnects)
+    }
+
+    // ── weak networks: recover inside WebRTC first (RtcRecovery, RtcResilience) ──
+
+    /** Production, 26 Oct 2026, a +300 ms link: the INVITE with credentials answered 491 and the call went to the WebSocket at once. */
+    @Test fun aRequestPendingIsDialledAgainOnAFreshConnectionNotMovedToTheWebSocket() {
+        sbc.inviteAnswer = FakeSbc.Answer.REQUEST_PENDING
+        val s = prepared()
+        s.dial(deps, listener); pump()
+        assertTrue("a 491 went to the WebSocket", log.isEmpty())
+        assertEquals("dialled again on a fresh connection", 2, sipSockets.size)
+        assertTrue(steps.any { it.startsWith("dial: 491 Request Pending: redial") })
+        sbc.inviteAnswer = FakeSbc.Answer.OK
+        peer.candidate("srflx"); pump()
+        peer.ice("connected"); pump()
+        assertEquals(listOf("media"), log)
+    }
+
+    @Test fun aThirdDialLeavesTheSecondsLateAnswerToItsOwnSocketNeverThisCall() {
+        sbc.inviteAnswer = FakeSbc.Answer.SILENT
+        val s = prepared()
+        s.dial(deps, listener); pump()
+        sched.advance(4_000); pump()
+        peer.candidate("srflx"); pump()
+        val second = sipSockets[1]
+        val invite2 = second.requests("INVITE").single()
+        sched.advance(4_000); pump()
+        assertEquals("the link's second silence: a third dial", 3, sipSockets.size)
+        second.deliver(sbc.answerTo(invite2)); pump()
+        assertTrue("the abandoned dial's answer was taken for this call's", log.isEmpty())
+        assertTrue(peers.none { it.remoteAnswer != null })
+    }
+
+    @Test fun anAnswerWithNoCandidateIsRestartedEarlyAndStillNotMovedBeforeItsDeadline() {
+        sbc.answerSdp = Trace.ANSWER.split("\r\n").filterNot { it.startsWith("a=candidate:") }.joinToString("\r\n")
+        val s = prepared()
+        s.dial(deps, listener); pump()
+        peer.ice("checking"); pump()
+        sched.advance(2_499); pump()
+        assertFalse(peer.calls.contains("createOffer(restart)"))
+        sched.advance(1); pump()
+        assertTrue("nothing in flight, and the restart waited for the deadline", peer.calls.contains("createOffer(restart)"))
+        peer.candidate("srflx"); pump()
+        sched.advance(5_499); pump()
+        assertTrue("moved sooner than the deadline it had before", log.isEmpty())
+        sched.advance(501); pump()
+        assertEquals("the restart's window over (8.5 s): the WebSocket", listOf("fallback ice_timeout"), log)
+    }
+
+    @Test fun aRedialWaitsForTheNetworkAndDialsWhenItReturns() {
+        sbc.inviteAnswer = FakeSbc.Answer.SILENT
+        val s = prepared()
+        s.dial(deps, listener); pump()
+        net.set(false)
+        sched.advance(4_000); pump()
+        assertEquals("a redial went into no network", 1, sipSockets.size)
+        assertEquals(1, peers.size)
+        sched.advance(5_000); pump()
+        assertTrue(log.isEmpty())
+        net.set(true); pump()
+        assertEquals("the network back: dialled", 2, sipSockets.size)
+        assertEquals(2, peers.size)
+    }
+
+    @Test fun aHangUpWhileTheRedialWaitsForTheNetworkDialsNothingAfter() {
+        sbc.inviteAnswer = FakeSbc.Answer.SILENT
+        val s = prepared()
+        s.dial(deps, listener); pump()
+        net.set(false)
+        sched.advance(4_000); pump()
+        s.hangUp(); pump()
+        net.set(true); pump()
+        sched.advance(20_000); pump()
+        assertEquals("a redial followed the hang-up", 1, sipSockets.size)
+        assertTrue(log.isEmpty())
+    }
+
+    @Test fun aRedialWhoseNetworkNeverReturnsFallsBack() {
+        sbc.inviteAnswer = FakeSbc.Answer.SILENT
+        val s = prepared()
+        s.dial(deps, listener); pump()
+        net.set(false)
+        sched.advance(4_000); pump()
+        sched.advance(RtcResilience.REDIAL_OFFLINE_WAIT_MS - 1); pump()
+        assertTrue(log.isEmpty())
+        sched.advance(1); pump()
+        assertEquals(listOf("fallback no_response"), log)
+    }
+
+    private fun mintWithRelays() = JSONArray()
+        .put(JSONObject().put("urls", "stun:stun.example.invalid:80"))
+        .put(JSONObject().put("urls", "turn:relay.example.invalid:80").put("username", "u").put("credential", "c"))
+        .put(JSONObject().put("urls", "turns:relay.example.invalid:443?transport=tcp").put("username", "u").put("credential", "c"))
+
+    @Test fun aDialThatFoundUdpBlockedMakesTheNextGatherOnlyTheRelaysOverTcpAndTls() {
+        mint = { HttpReply(200, mintReply().put("ice_servers", mintWithRelays()).toString()) }
+        sbc.inviteAnswer = FakeSbc.Answer.SILENT
+        val s = RtcCallSession(request, env)
+        s.prepare(); pump()
+        // This network: no server-reflexive candidate, no relay over UDP; only the relay over TLS came back.
+        peer.raw("candidate:1 1 udp 2122194688 192.0.2.10 65463 typ host")
+        peer.raw(relayLine("tls")); pump()
+        s.dial(deps, listener); pump()
+        assertEquals(3, peerServers[0].size)
+        sched.advance(4_000); pump()
+        assertEquals(2, peers.size)
+        assertEquals("the redial waited on UDP again", listOf(listOf("turns:relay.example.invalid:443?transport=tcp")), peerServers[1].map { it.urls })
+        // A new network: what this one said about UDP no longer holds (TURN-only never sticks).
+        net.set(true); pump()
+        peer.raw(relayLine("tls")); pump()
+        sched.advance(4_000); pump()
+        assertEquals(3, peerServers[2].size)
+    }
+
+    @Test fun aDialWhoseUdpWorkedKeepsEveryServerOnItsRedial() {
+        mint = { HttpReply(200, mintReply().put("ice_servers", mintWithRelays()).toString()) }
+        sbc.inviteAnswer = FakeSbc.Answer.SILENT
+        val s = RtcCallSession(request, env)
+        s.prepare(); pump()
+        peer.raw("candidate:2 1 udp 1685987072 198.51.100.7 65463 typ srflx raddr 192.0.2.10 rport 65463")
+        peer.raw(relayLine("udp")); pump()
+        s.dial(deps, listener); pump()
+        sched.advance(4_000); pump()
+        assertEquals(3, peerServers[1].size)
+    }
+
+    @Test fun aRestartNeverSaysTheAudioIsReadyAgainNorPlacesANewCall() {
+        val s = live()
+        control.deliver("{\"type\":\"control_ready\",\"session_id\":\"${s.sessionId}\"}"); pump()
+        peer.listener!!.onPlayoutStarted(); pump()
+        peer.ice("disconnected"); pump()
+        sched.advance(3_000); pump()
+        peer.candidate("srflx"); pump()
+        peer.ice("checking"); peer.ice("connected"); pump()
+        peer.listener!!.onPlayoutStarted(); pump()
+        assertEquals("said once per call, never again after a restart", 1, control.sent.count { it == RtcMint.AUDIO_READY })
+        assertEquals("the restart placed no new call", 1, sipSockets.size)
+        assertFalse("the call ended or moved", log.any { it.startsWith("ended") || it.startsWith("fallback") })
+    }
+
+    @Test fun aPathLostOfflineIsNeverRestartedUntilTheNetworkIsBack() {
+        live()
+        net.set(false); pump()
+        peer.ice("disconnected"); pump()
+        sched.advance(20_000); pump()
+        assertFalse("a restart went into no network", peer.calls.contains("createOffer(restart)"))
+        assertTrue("time offline was counted against the path", log.isEmpty())
+        net.set(true); pump()
+        sched.advance(RtcResilience.ONLINE_SETTLE_MS - 1); pump()
+        assertFalse("restarted before ICE could heal by itself", peer.calls.contains("createOffer(restart)"))
+        sched.advance(1); pump()
+        assertTrue(peer.calls.contains("createOffer(restart)"))
     }
 }

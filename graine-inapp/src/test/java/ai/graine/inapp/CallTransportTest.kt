@@ -158,7 +158,8 @@ class CallTransportTest {
         val s = CallTransportSession(config, deps, sessionEvents)
         s.start(); pump()
         peers.single().candidate("srflx"); pump()
-        sched.advance(RtcDial.ICE_CONNECT_DEADLINE_MS); pump()
+        // An ICE restart inside the call first (RtcRecovery); the WebSocket when its window ends.
+        sched.advance(RtcDial.ICE_CONNECT_DEADLINE_MS + RtcResilience.RESTART_WINDOW_MS); pump()
         assertEquals(listOf("websocket: ice_timeout"), owner.said)
         assertEquals(1, sipSockets.single().requests("BYE").size)
         assertEquals(1, tickets.size)

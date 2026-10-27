@@ -68,6 +68,19 @@ class GraineChat internal constructor(
         private set
 
     /**
+     * Why the chat could not connect, when Graine refused it for the server
+     * token or the publishable key — `TOKEN_REQUIRED`, `TOKEN_INVALID`,
+     * `TOKEN_EXPIRED` (the SDK already asked [GraineConfig.tokenProvider] again
+     * and tried once more), `TOKEN_SCOPE`, `KEY_REVOKED`; [GraineError.reason]
+     * says which part failed. Null otherwise. Such a refusal is final for that
+     * try: [failed] is true and nothing reconnects by itself; [connect] or
+     * [send] tries again. [GraineListener.onError] hears its sentence too.
+     * New in 0.14.4.
+     */
+    var error: GraineError? = null
+        private set
+
+    /**
      * The conversation dropped — or a try to open it failed — while the
      * customer is in the chat, and it is being made again: from then until it
      * is connected, gives up ([failed]) or is closed. [connecting] is true
@@ -278,6 +291,7 @@ class GraineChat internal constructor(
     fun connect(): Unit = onMain {
         wanted = true
         failed = false
+        error = null
         reconnect.reset()
         transcript.deliver(GraineChatTurn.Delivery.FAILED, GraineChatTurn.Delivery.SENDING)
         openSession()
@@ -301,8 +315,16 @@ class GraineChat internal constructor(
         }
     }
 
-    /** At most every ten seconds unless asked, and only where Graine rings this app. */
+    /**
+     * At most every ten seconds unless asked, and only where Graine rings this
+     * app — which, like who the user is, the agent's settings say: before they
+     * arrive this waits for them rather than deciding there is nothing to show.
+     */
     private fun fetchUpcoming(force: Boolean) {
+        if (graine.session == null) {
+            graine.loadSession { s -> if (s != null) onMain { fetchUpcoming(force) } }
+            return
+        }
         if (!graine.schedulingRules.ringsAndroid) return
         val now = SystemClock.uptimeMillis()
         if (!force && lastUpcomingFetch != 0L && now - lastUpcomingFetch < UPCOMING_EVERY_MS) return
@@ -329,8 +351,11 @@ class GraineChat internal constructor(
      * Load the first page of [pastSessions] — the user's most recent
      * sessions with this agent — replacing what was loaded. While it loads,
      * `loading` is true and what was loaded stays; a refusal keeps it too,
-     * with `error` saying why. With nobody signed in nothing is asked: `error`
-     * is `identity_required` at once. New in 0.14.3.
+     * with `error` saying why. It waits for the agent's settings first (they
+     * name the trait that identifies the user): with nobody identified by it
+     * nothing is asked and `error` is `identity_required`; settings that could
+     * not be loaded leave their own reason (`unavailable`, `network`…), and
+     * asking again loads them again. New in 0.14.3.
      */
     fun refreshPastSessions(): Unit = onMain { fetchPastSessions(more = false) }
 
@@ -347,10 +372,14 @@ class GraineChat internal constructor(
      * ONE PAST SESSION'S CHAT HISTORY, oldest first — the session as
      * [pastSessions] describes it, and every message said in it. [done] hears
      * it once, on the main thread, or why not: `INVALID_REQUEST` for a blank
-     * id and `IDENTITY_REQUIRED` with nobody signed in (nothing is sent);
-     * `NOT_FOUND` for a session Graine does not know or that is another
-     * user's — and for an answer that arrives after the identity changed;
-     * `DEVICE_LIMIT`, `RATE_LIMITED`, `UNAVAILABLE`, `NETWORK`. New in 0.14.3.
+     * id and `IDENTITY_REQUIRED` when nobody is identified by the trait this
+     * agent identifies users by (nothing is sent; the message names the
+     * trait), or someone else was identified while the agent's settings
+     * loaded (nothing is sent); `NOT_FOUND` for a session Graine does not know or that is
+     * another user's — and for an answer that arrives after the identity
+     * changed; `DEVICE_LIMIT`, `RATE_LIMITED`, `UNAVAILABLE`, `NETWORK` — and,
+     * when the agent's settings could not be loaded, their own reason
+     * (`UNAVAILABLE`, `NETWORK`, `INVALID_KEY`, `ORIGIN_REFUSED`). New in 0.14.3.
      */
     fun sessionTranscript(id: String, done: GraineCallback<GraineSessionTranscript>): Unit = onMain {
         val wanted = id.trim()
@@ -359,17 +388,16 @@ class GraineChat internal constructor(
             return@onMain
         }
         // Who the user is waits for the agent's settings: they name the trait that identifies them.
-        graine.loadSession {
-            val who = graine.identityEnvelope()
+        graine.afterSession({ e -> done.onResult(null, e) }, forWhoAsked = true) { who ->
             val value = who.value
             if (value == null) {
-                done.onResult(null, GraineError(GraineErrorCode.IDENTITY_REQUIRED, NOBODY))
-                return@loadSession
+                done.onResult(null, graine.identityRequired())
+                return@afterSession
             }
             graine.request(EmbedApi.SESSION_TRANSCRIPT, who.who(JSONObject()).put("id", wanted)) { r ->
                 when {
                     // Asked for someone who is no longer the one signed in: not this user's session.
-                    graine.identityEnvelope().value != value ->
+                    !graine.stillIdentified(value) ->
                         done.onResult(null, GraineError(GraineErrorCode.NOT_FOUND, "That session is not this user's."))
                     r is EmbedReply.Ok -> done.onResult(PastSessionsWire.transcript(r.body, wanted), null)
                     r is EmbedReply.Failed -> done.onResult(null, r.error)
@@ -397,14 +425,16 @@ class GraineChat internal constructor(
         if (!more) pastGeneration++
         val generation = pastGeneration
         setPastSessions(pastSessions.copy(loading = true, error = null))
-        // Who the user is waits for the agent's settings: they name the trait that identifies them.
-        graine.loadSession {
-            if (pastGeneration != generation) return@loadSession
-            val who = graine.identityEnvelope()
+        // Who the user is waits for the agent's settings: they name the trait that identifies them. Settings that
+        // could not be loaded are their own reason, kept as a refusal is: asking again loads them again.
+        graine.afterSession({ e ->
+            if (pastGeneration == generation) setPastSessions(pastSessions.copy(loading = false, error = e.code.wire))
+        }) { who ->
+            if (pastGeneration != generation) return@afterSession
             if (who.value == null) {
                 pastCursor = null
                 setPastSessions(GrainePastSessions(error = GraineErrorCode.IDENTITY_REQUIRED.wire))
-                return@loadSession
+                return@afterSession
             }
             val body = who.who(JSONObject())
             if (more && cursor != null) body.put("cursor", cursor)
@@ -517,6 +547,7 @@ class GraineChat internal constructor(
                 // Offline, gave up, or never opened: the customer typing is the customer asking again.
                 wanted = true
                 failed = false
+                error = null
                 reconnect.reset()
                 cancelRetry()
                 openSession()
@@ -545,7 +576,9 @@ class GraineChat internal constructor(
      *
      * [done] hears `null` when it is done, or the [GraineError] Graine
      * answered (`DEVICE_LIMIT`, `NETWORK`, …) — the chat is then as it was,
-     * connected again. On the main thread.
+     * connected again. Called before the agent's settings have loaded, it
+     * waits for them (they say who the user is); settings that could not be
+     * loaded are their own reason, and nothing was let go of. On the main thread.
      */
     @JvmOverloads
     fun newConversation(done: GraineCallback<Unit>? = null): Unit = onMain {
@@ -662,6 +695,7 @@ class GraineChat internal constructor(
         setState(connected = false, connecting = false)
         if (live && wanted) {
             failed = false
+            error = null
             reconnect.reset()
             transcript.deliver(GraineChatTurn.Delivery.FAILED, GraineChatTurn.Delivery.SENDING)
             openSession()
@@ -711,6 +745,8 @@ class GraineChat internal constructor(
                 runAction = { name, args, answer -> main.post { graine.executeAction(name, args, answer) } },
                 contextFrame = { graine.currentContextFrame() },
                 io = graine.env.ticketIo ?: { work -> Thread({ work() }, "graine-chat-ticket").apply { isDaemon = true }.start() },
+                // The ticket carries the agent's server token; checked only here, never on the open socket.
+                tokens = graine.clientTokens,
             ),
             events,
             ArrayList(outbox),
@@ -758,6 +794,26 @@ class GraineChat internal constructor(
         val r = Runnable { retry = null; if (wanted && session == null) openSession() }
         retry = r
         main.postDelayed(r, delay)
+        changed()
+    }
+
+    /**
+     * GRAINE REFUSED THE CONVERSATION for the server token or the publishable
+     * key (CLIENT-TOKENS.md §2.5): the chat fails with that refusal — [error] —
+     * and no reconnect follows: the next would meet the same answer. What was
+     * waiting to go is marked as not sent; [connect] or [send] tries again.
+     */
+    private fun refused(e: GraineError) {
+        unwatchContext?.invoke(); unwatchContext = null
+        session = null
+        transcript.disconnected()
+        cancelRetry()
+        failed = true
+        error = e
+        CallLog.debug("chat: refused (${e.code.wire}${e.reason?.let { ", $it" } ?: ""})")
+        transcript.deliver(GraineChatTurn.Delivery.SENDING, GraineChatTurn.Delivery.FAILED)
+        setState(connected = false, connecting = false)
+        report { it.onError(e.message) }
         changed()
     }
 
@@ -813,6 +869,7 @@ class GraineChat internal constructor(
 
         override fun onOpen() = mine {
             failed = false
+            error = null
             everConnected = true
             active()
             // What a history on this connection replaces: what is settled now, before the waiting lines go.
@@ -826,6 +883,13 @@ class GraineChat internal constructor(
         override fun onFailed(error: String) = mine {
             CallLog.debug("chat: $error")
             dropped()
+        }
+
+        /** Graine refused the ticket — this app, the token or the key: final — no reconnect, what was waiting is marked as not sent but kept, and the app hears why. */
+        override fun onRefused(error: GraineError, unsent: List<String>) = mine {
+            // Still the customer's to send: they go on the next try.
+            outbox.addAll(0, unsent)
+            refused(error)
         }
 
         override fun onClosed(code: Int, error: String?, unsent: List<String>) = mine {
@@ -960,8 +1024,6 @@ class GraineChat internal constructor(
         const val CLOSE_UNSEEN_MS = 15_000L
         /** The longest [closeDelaySeconds] may be: 5 minutes, Graine's own idle limit. */
         internal const val CLOSE_DELAY_MAX_SECONDS = 300
-        /** The message an identity is asked for in: nobody is signed in. */
-        private const val NOBODY = "Nobody is signed in: identify() the user first."
 
         /** A close delay in seconds, kept within 0–[CLOSE_DELAY_MAX_SECONDS], as milliseconds. */
         internal fun closeDelayMsOf(seconds: Int): Long = seconds.coerceIn(0, CLOSE_DELAY_MAX_SECONDS) * 1000L

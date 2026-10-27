@@ -1,0 +1,863 @@
+{
+  "$comment": "Generated from CLIENT-TOKENS.md (build-json.mjs). Every SDK test and the dashboard and backend tests read this file. A missing file must FAIL, never skip. testSeedHex is a TEST key made for these vectors only; it signs nothing real.",
+  "version": 1,
+  "sdkVersion": "0.14.4",
+  "errorCodes": [
+    {
+      "wire": "token_required",
+      "status": 401,
+      "swift": "tokenRequired",
+      "kotlin": "TOKEN_REQUIRED",
+      "kmp": "TokenRequired",
+      "dart": "tokenRequired",
+      "ts": "token_required",
+      "retry": "refresh_then_retry_once"
+    },
+    {
+      "wire": "token_invalid",
+      "status": 401,
+      "swift": "tokenInvalid",
+      "kotlin": "TOKEN_INVALID",
+      "kmp": "TokenInvalid",
+      "dart": "tokenInvalid",
+      "ts": "token_invalid",
+      "retry": "refresh_then_retry_once"
+    },
+    {
+      "wire": "token_expired",
+      "status": 401,
+      "swift": "tokenExpired",
+      "kotlin": "TOKEN_EXPIRED",
+      "kmp": "TokenExpired",
+      "dart": "tokenExpired",
+      "ts": "token_expired",
+      "retry": "refresh_then_retry_once"
+    },
+    {
+      "wire": "token_scope",
+      "status": 403,
+      "swift": "tokenScope",
+      "kotlin": "TOKEN_SCOPE",
+      "kmp": "TokenScope",
+      "dart": "tokenScope",
+      "ts": "token_scope",
+      "retry": "never"
+    },
+    {
+      "wire": "key_revoked",
+      "status": 401,
+      "swift": "keyRevoked",
+      "kotlin": "KEY_REVOKED",
+      "kmp": "KeyRevoked",
+      "dart": "keyRevoked",
+      "ts": "key_revoked",
+      "retry": "never"
+    },
+    {
+      "wire": "bot_check_failed",
+      "status": 403,
+      "swift": "botCheckFailed",
+      "kotlin": "BOT_CHECK_FAILED",
+      "kmp": "BotCheckFailed",
+      "dart": "botCheckFailed",
+      "ts": "bot_check_failed",
+      "retry": "website_challenge_then_retry_once"
+    }
+  ],
+  "reasons": {
+    "token_invalid": [
+      "malformed",
+      "signature",
+      "unknown_key",
+      "issuer",
+      "not_yet_valid"
+    ],
+    "token_scope": [
+      "agent",
+      "scope",
+      "user"
+    ],
+    "bot_check_failed": [
+      "missing",
+      "failed",
+      "expired",
+      "unavailable"
+    ]
+  },
+  "scopes": [
+    "chat",
+    "call",
+    "memory",
+    "booking",
+    "workflows"
+  ],
+  "routeScopes": {
+    "$comment": "anyOf: the token needs at least one of these; [] = any valid token. ticket: by mode, or [] for purpose vouch.",
+    "session": [],
+    "app_verify": [],
+    "signout": [],
+    "ticket_text": [
+      "chat"
+    ],
+    "ticket_voice": [
+      "call"
+    ],
+    "ticket_vouch": [],
+    "rtc": [
+      "call"
+    ],
+    "devices": [
+      "call"
+    ],
+    "calls_outcome": [
+      "call"
+    ],
+    "calls_schedule": [
+      "booking"
+    ],
+    "calls_list": [
+      "booking"
+    ],
+    "calls_cancel": [
+      "booking"
+    ],
+    "memory_list": [
+      "memory"
+    ],
+    "memory_forget": [
+      "memory"
+    ],
+    "conversation_new": [
+      "chat"
+    ],
+    "sessions_list": [
+      "chat",
+      "call"
+    ],
+    "sessions_transcript": [
+      "chat",
+      "call"
+    ],
+    "workflow_start": [
+      "workflows"
+    ]
+  },
+  "mint": {
+    "route": "POST /v2/client-tokens",
+    "minTtlSeconds": 60,
+    "maxTtlSeconds": 3600,
+    "defaultTtlSeconds": 3600,
+    "maxUserIdLength": 256
+  },
+  "token": {
+    "alg": "EdDSA",
+    "typ": "JWT",
+    "issuer": "graine",
+    "audience": "graine-embed",
+    "skewSeconds": 60,
+    "ringGraceSeconds": 900,
+    "kidLength": 16,
+    "testSeedHex": "25d660b4c9ff7f7659d15fc8927860c7d5e09168b543833411cdf5b57310b0ef",
+    "publicKey": "A9zKYr3yhePyV0Wv5LPehJUaMChSWZUDhOebh_z_gdg",
+    "kid": "o3eTM9mY0DxNw5j2",
+    "claims": {
+      "iss": "graine",
+      "aud": "graine-embed",
+      "org": "org_test_1",
+      "agt": "agt_test_a",
+      "sub": "user-123",
+      "scp": [
+        "chat",
+        "call"
+      ],
+      "iat": 1793000000,
+      "exp": 1793003600,
+      "jti": "ct_vector_0001"
+    },
+    "tokens": {
+      "valid": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6Im8zZVRNOW1ZMER4Tnc1ajIifQ.eyJpc3MiOiJncmFpbmUiLCJhdWQiOiJncmFpbmUtZW1iZWQiLCJvcmciOiJvcmdfdGVzdF8xIiwiYWd0IjoiYWd0X3Rlc3RfYSIsInN1YiI6InVzZXItMTIzIiwic2NwIjpbImNoYXQiLCJjYWxsIl0sImlhdCI6MTc5MzAwMDAwMCwiZXhwIjoxNzkzMDAzNjAwLCJqdGkiOiJjdF92ZWN0b3JfMDAwMSJ9.lTT56ovgiBPHP629EmKWHdVjBdCJg1YS69QKGczpFe3DBup7e_5BqoqI1XDlt9u3oPgvr6n0QPse0P5dPE3YAw",
+      "allScopes": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6Im8zZVRNOW1ZMER4Tnc1ajIifQ.eyJpc3MiOiJncmFpbmUiLCJhdWQiOiJncmFpbmUtZW1iZWQiLCJvcmciOiJvcmdfdGVzdF8xIiwiYWd0IjoiYWd0X3Rlc3RfYSIsInN1YiI6InVzZXItMTIzIiwic2NwIjpbImNoYXQiLCJjYWxsIiwibWVtb3J5IiwiYm9va2luZyIsIndvcmtmbG93cyJdLCJpYXQiOjE3OTMwMDAwMDAsImV4cCI6MTc5MzAwMzYwMCwianRpIjoiY3RfdmVjdG9yXzAwMDIifQ.ulrFVuX6osdz0TMsCIMzxnr5tl4ws3G1Z0VASKNpD5aiNOoYGTeNNYvE62k8dHZfczD5XF7xMd3KPr8QaEOlCg",
+      "callOnly": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6Im8zZVRNOW1ZMER4Tnc1ajIifQ.eyJpc3MiOiJncmFpbmUiLCJhdWQiOiJncmFpbmUtZW1iZWQiLCJvcmciOiJvcmdfdGVzdF8xIiwiYWd0IjoiYWd0X3Rlc3RfYSIsInN1YiI6InVzZXItMTIzIiwic2NwIjpbImNhbGwiXSwiaWF0IjoxNzkzMDAwMDAwLCJleHAiOjE3OTMwMDM2MDAsImp0aSI6ImN0X3ZlY3Rvcl8wMDAzIn0.Z6oJxUOfcpgHJoM-mQIwWtRVsGN9hNy8PWAgOvGDe_R74zxY7VnURcRl4aG1mD6Z8lgG_WShKVG_tefRAV0JBQ",
+      "email": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6Im8zZVRNOW1ZMER4Tnc1ajIifQ.eyJpc3MiOiJncmFpbmUiLCJhdWQiOiJncmFpbmUtZW1iZWQiLCJvcmciOiJvcmdfdGVzdF8xIiwiYWd0IjoiYWd0X3Rlc3RfYSIsInN1YiI6IkFsaWNlQEV4YW1wbGUuY29tIiwic2NwIjpbImNoYXQiLCJjYWxsIl0sImlhdCI6MTc5MzAwMDAwMCwiZXhwIjoxNzkzMDAzNjAwLCJqdGkiOiJjdF92ZWN0b3JfMDAwNCJ9.GvR14xfkVwQL1_t1MvMUVjUcYsy1ZxYA4hD2GJAO-Y3MRpEZZ-U4Qj5UydDh4IoCuWUdPoR49jUg2AuFN5bEDQ",
+      "webcallTwin": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6Im8zZVRNOW1ZMER4Tnc1ajIifQ.eyJpc3MiOiJncmFpbmUiLCJhdWQiOiJncmFpbmUtZW1iZWQiLCJvcmciOiJvcmdfdGVzdF8xIiwiYWd0IjoiYWd0X3Rlc3RfYV93ZWIiLCJzdWIiOiJ1c2VyLTEyMyIsInNjcCI6WyJjaGF0IiwiY2FsbCJdLCJpYXQiOjE3OTMwMDAwMDAsImV4cCI6MTc5MzAwMzYwMCwianRpIjoiY3RfdmVjdG9yXzAwMDUifQ.i6xnOCN-DzVSHmVA1JaS1on0jbe6X9TDxc5eqX5OZhc-3CuT_HguL530mSYwm1HkCeveHzpq6la00eIHM_8KBg",
+      "otherOrg": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6Im8zZVRNOW1ZMER4Tnc1ajIifQ.eyJpc3MiOiJncmFpbmUiLCJhdWQiOiJncmFpbmUtZW1iZWQiLCJvcmciOiJvcmdfdGVzdF8yIiwiYWd0IjoiYWd0X3Rlc3RfYSIsInN1YiI6InVzZXItMTIzIiwic2NwIjpbImNoYXQiLCJjYWxsIl0sImlhdCI6MTc5MzAwMDAwMCwiZXhwIjoxNzkzMDAzNjAwLCJqdGkiOiJjdF92ZWN0b3JfMDAwNiJ9.xEPWea-crXL4qmq7nvACIuBn-rBOntfJDt_J63Pj4c53U3ORF1D_nuBmjdQlEohjXwHetIr63azuDl65zxBOCg",
+      "unknownKid": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6IkFBQUFBQUFBQUFBQUFBQUEifQ.eyJpc3MiOiJncmFpbmUiLCJhdWQiOiJncmFpbmUtZW1iZWQiLCJvcmciOiJvcmdfdGVzdF8xIiwiYWd0IjoiYWd0X3Rlc3RfYSIsInN1YiI6InVzZXItMTIzIiwic2NwIjpbImNoYXQiLCJjYWxsIl0sImlhdCI6MTc5MzAwMDAwMCwiZXhwIjoxNzkzMDAzNjAwLCJqdGkiOiJjdF92ZWN0b3JfMDAwNyJ9.EIE8DPB5jM4Xu4zpI5M_CudB6DUjery8jVZ0uzJbn0Pow3A3tU5VSHjEldTPakn6esdNVfeRJxSsfsdQbps5BQ",
+      "wrongIssuer": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6Im8zZVRNOW1ZMER4Tnc1ajIifQ.eyJpc3MiOiJzb21lb25lLWVsc2UiLCJhdWQiOiJncmFpbmUtZW1iZWQiLCJvcmciOiJvcmdfdGVzdF8xIiwiYWd0IjoiYWd0X3Rlc3RfYSIsInN1YiI6InVzZXItMTIzIiwic2NwIjpbImNoYXQiLCJjYWxsIl0sImlhdCI6MTc5MzAwMDAwMCwiZXhwIjoxNzkzMDAzNjAwLCJqdGkiOiJjdF92ZWN0b3JfMDAwOCJ9.CzWd03ruqqdOMuRXWSqSB_RHXfGLbL85SlyTWS9w6hNVIPJ-yLYulATNuNZxkwi4iHyO7rzvvG3jCj_Wr7abCw",
+      "wrongAudience": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6Im8zZVRNOW1ZMER4Tnc1ajIifQ.eyJpc3MiOiJncmFpbmUiLCJhdWQiOiJvdGhlciIsIm9yZyI6Im9yZ190ZXN0XzEiLCJhZ3QiOiJhZ3RfdGVzdF9hIiwic3ViIjoidXNlci0xMjMiLCJzY3AiOlsiY2hhdCIsImNhbGwiXSwiaWF0IjoxNzkzMDAwMDAwLCJleHAiOjE3OTMwMDM2MDAsImp0aSI6ImN0X3ZlY3Rvcl8wMDA5In0.e3pfU7W0q7q_0waSehEEyJ-og_X8Kof5oixbUf9om9IpgxbcXI8ZZrC_vaLY4JY06pkigq7rrQallydYc8bbAg",
+      "tampered": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCIsImtpZCI6Im8zZVRNOW1ZMER4Tnc1ajIifQ.eyJpc3MiOiJncmFpbmUiLCJhdWQiOiJncmFpbmUtZW1iZWQiLCJvcmciOiJvcmdfdGVzdF8xIiwiYWd0IjoiYWd0X3Rlc3RfYSIsInN1YiI6InVzZXItOTk5Iiwic2NwIjpbImNoYXQiLCJjYWxsIl0sImlhdCI6MTc5MzAwMDAwMCwiZXhwIjoxNzkzMDAzNjAwLCJqdGkiOiJjdF92ZWN0b3JfMDAwMSJ9.lTT56ovgiBPHP629EmKWHdVjBdCJg1YS69QKGczpFe3DBup7e_5BqoqI1XDlt9u3oPgvr6n0QPse0P5dPE3YAw",
+      "algNone": "eyJhbGciOiJub25lIiwidHlwIjoiSldUIiwia2lkIjoibzNlVE05bVkwRHhOdzVqMiJ9.eyJpc3MiOiJncmFpbmUiLCJhdWQiOiJncmFpbmUtZW1iZWQiLCJvcmciOiJvcmdfdGVzdF8xIiwiYWd0IjoiYWd0X3Rlc3RfYSIsInN1YiI6InVzZXItMTIzIiwic2NwIjpbImNoYXQiLCJjYWxsIl0sImlhdCI6MTc5MzAwMDAwMCwiZXhwIjoxNzkzMDAzNjAwLCJqdGkiOiJjdF92ZWN0b3JfMDAwMSJ9.",
+      "garbage": "not-a-token"
+    }
+  },
+  "verification": [
+    {
+      "name": "valid chat ticket",
+      "token": "valid",
+      "route": "ticket",
+      "embed": {
+        "orgId": "org_test_1",
+        "agentId": "agt_test_a",
+        "webcallAgentId": "agt_test_a_web",
+        "identityField": "user_id"
+      },
+      "now": 1793000010,
+      "mode": "text",
+      "expect": {
+        "verdict": "valid"
+      }
+    },
+    {
+      "name": "valid voice ticket",
+      "token": "valid",
+      "route": "ticket",
+      "embed": {
+        "orgId": "org_test_1",
+        "agentId": "agt_test_a",
+        "webcallAgentId": "agt_test_a_web",
+        "identityField": "user_id"
+      },
+      "now": 1793000010,
+      "mode": "voice",
+      "expect": {
+        "verdict": "valid"
+      }
+    },
+    {
+      "name": "valid session (no scope)",
+      "token": "callOnly",
+      "route": "session",
+      "embed": {
+        "orgId": "org_test_1",
+        "agentId": "agt_test_a",
+        "webcallAgentId": "agt_test_a_web",
+        "identityField": "user_id"
+      },
+      "now": 1793000010,
+      "expect": {
+        "verdict": "valid"
+      }
+    },
+    {
+      "name": "token for agent A on agent B",
+      "token": "valid",
+      "route": "ticket",
+      "embed": {
+        "orgId": "org_test_1",
+        "agentId": "agt_test_b",
+        "webcallAgentId": "agt_test_b",
+        "identityField": "user_id"
+      },
+      "now": 1793000010,
+      "mode": "text",
+      "expect": {
+        "verdict": "wrong_agent",
+        "code": "token_scope",
+        "reason": "agent",
+        "status": 403
+      }
+    },
+    {
+      "name": "token for the agent's web-call twin",
+      "token": "webcallTwin",
+      "route": "rtc",
+      "embed": {
+        "orgId": "org_test_1",
+        "agentId": "agt_test_a",
+        "webcallAgentId": "agt_test_a_web",
+        "identityField": "user_id"
+      },
+      "now": 1793000010,
+      "expect": {
+        "verdict": "valid"
+      }
+    },
+    {
+      "name": "token from another organisation",
+      "token": "otherOrg",
+      "route": "rtc",
+      "embed": {
+        "orgId": "org_test_1",
+        "agentId": "agt_test_a",
+        "webcallAgentId": "agt_test_a_web",
+        "identityField": "user_id"
+      },
+      "now": 1793000010,
+      "expect": {
+        "verdict": "wrong_agent",
+        "code": "token_scope",
+        "reason": "agent",
+        "status": 403
+      }
+    },
+    {
+      "name": "memory needs the memory scope",
+      "token": "valid",
+      "route": "memory_list",
+      "embed": {
+        "orgId": "org_test_1",
+        "agentId": "agt_test_a",
+        "webcallAgentId": "agt_test_a_web",
+        "identityField": "user_id"
+      },
+      "now": 1793000010,
+      "identityValue": "user-123",
+      "expect": {
+        "verdict": "scope",
+        "code": "token_scope",
+        "reason": "scope",
+        "status": 403
+      }
+    },
+    {
+      "name": "booking needs the booking scope",
+      "token": "valid",
+      "route": "calls_schedule",
+      "embed": {
+        "orgId": "org_test_1",
+        "agentId": "agt_test_a",
+        "webcallAgentId": "agt_test_a_web",
+        "identityField": "user_id"
+      },
+      "now": 1793000010,
+      "identityValue": "user-123",
+      "expect": {
+        "verdict": "scope",
+        "code": "token_scope",
+        "reason": "scope",
+        "status": 403
+      }
+    },
+    {
+      "name": "memory with every scope",
+      "token": "allScopes",
+      "route": "memory_list",
+      "embed": {
+        "orgId": "org_test_1",
+        "agentId": "agt_test_a",
+        "webcallAgentId": "agt_test_a_web",
+        "identityField": "user_id"
+      },
+      "now": 1793000010,
+      "identityValue": "user-123",
+      "expect": {
+        "verdict": "valid"
+      }
+    },
+    {
+      "name": "a chat ticket with call only",
+      "token": "callOnly",
+      "route": "ticket",
+      "embed": {
+        "orgId": "org_test_1",
+        "agentId": "agt_test_a",
+        "webcallAgentId": "agt_test_a_web",
+        "identityField": "user_id"
+      },
+      "now": 1793000010,
+      "mode": "text",
+      "expect": {
+        "verdict": "scope",
+        "code": "token_scope",
+        "reason": "scope",
+        "status": 403
+      }
+    },
+    {
+      "name": "a vouch ticket needs no scope",
+      "token": "callOnly",
+      "route": "ticket",
+      "embed": {
+        "orgId": "org_test_1",
+        "agentId": "agt_test_a",
+        "webcallAgentId": "agt_test_a_web",
+        "identityField": "user_id"
+      },
+      "now": 1793000010,
+      "mode": "text",
+      "purpose": "vouch",
+      "expect": {
+        "verdict": "valid"
+      }
+    },
+    {
+      "name": "past sessions with call only",
+      "token": "callOnly",
+      "route": "sessions_list",
+      "embed": {
+        "orgId": "org_test_1",
+        "agentId": "agt_test_a",
+        "webcallAgentId": "agt_test_a_web",
+        "identityField": "user_id"
+      },
+      "now": 1793000010,
+      "identityValue": "user-123",
+      "expect": {
+        "verdict": "valid"
+      }
+    },
+    {
+      "name": "expired within the 60 s skew",
+      "token": "valid",
+      "route": "ticket",
+      "embed": {
+        "orgId": "org_test_1",
+        "agentId": "agt_test_a",
+        "webcallAgentId": "agt_test_a_web",
+        "identityField": "user_id"
+      },
+      "now": 1793003659,
+      "mode": "text",
+      "expect": {
+        "verdict": "valid"
+      }
+    },
+    {
+      "name": "expired past the skew",
+      "token": "valid",
+      "route": "ticket",
+      "embed": {
+        "orgId": "org_test_1",
+        "agentId": "agt_test_a",
+        "webcallAgentId": "agt_test_a_web",
+        "identityField": "user_id"
+      },
+      "now": 1793003661,
+      "mode": "text",
+      "expect": {
+        "verdict": "expired",
+        "code": "token_expired",
+        "status": 401
+      }
+    },
+    {
+      "name": "expired, answering a booked ring within the grace",
+      "token": "valid",
+      "route": "rtc",
+      "embed": {
+        "orgId": "org_test_1",
+        "agentId": "agt_test_a",
+        "webcallAgentId": "agt_test_a_web",
+        "identityField": "user_id"
+      },
+      "now": 1793004200,
+      "callId": "call_test_1",
+      "expect": {
+        "verdict": "valid"
+      }
+    },
+    {
+      "name": "expired, answering a booked ring past the grace",
+      "token": "valid",
+      "route": "rtc",
+      "embed": {
+        "orgId": "org_test_1",
+        "agentId": "agt_test_a",
+        "webcallAgentId": "agt_test_a_web",
+        "identityField": "user_id"
+      },
+      "now": 1793004501,
+      "callId": "call_test_1",
+      "expect": {
+        "verdict": "expired",
+        "code": "token_expired",
+        "status": 401
+      }
+    },
+    {
+      "name": "minted in the future beyond the skew",
+      "token": "valid",
+      "route": "ticket",
+      "embed": {
+        "orgId": "org_test_1",
+        "agentId": "agt_test_a",
+        "webcallAgentId": "agt_test_a_web",
+        "identityField": "user_id"
+      },
+      "now": 1792999939,
+      "mode": "text",
+      "expect": {
+        "verdict": "invalid",
+        "code": "token_invalid",
+        "reason": "not_yet_valid",
+        "status": 401
+      }
+    },
+    {
+      "name": "minted in the future within the skew",
+      "token": "valid",
+      "route": "ticket",
+      "embed": {
+        "orgId": "org_test_1",
+        "agentId": "agt_test_a",
+        "webcallAgentId": "agt_test_a_web",
+        "identityField": "user_id"
+      },
+      "now": 1792999941,
+      "mode": "text",
+      "expect": {
+        "verdict": "valid"
+      }
+    },
+    {
+      "name": "the same user",
+      "token": "valid",
+      "route": "ticket",
+      "embed": {
+        "orgId": "org_test_1",
+        "agentId": "agt_test_a",
+        "webcallAgentId": "agt_test_a_web",
+        "identityField": "user_id"
+      },
+      "now": 1793000010,
+      "mode": "text",
+      "identityValue": "user-123",
+      "expect": {
+        "verdict": "valid"
+      }
+    },
+    {
+      "name": "a different user",
+      "token": "valid",
+      "route": "ticket",
+      "embed": {
+        "orgId": "org_test_1",
+        "agentId": "agt_test_a",
+        "webcallAgentId": "agt_test_a_web",
+        "identityField": "user_id"
+      },
+      "now": 1793000010,
+      "mode": "text",
+      "identityValue": "user-999",
+      "expect": {
+        "verdict": "wrong_user",
+        "code": "token_scope",
+        "reason": "user",
+        "status": 403
+      }
+    },
+    {
+      "name": "an email compared normalised",
+      "token": "email",
+      "route": "ticket",
+      "embed": {
+        "orgId": "org_test_1",
+        "agentId": "agt_test_a",
+        "webcallAgentId": "agt_test_a_web",
+        "identityField": "email"
+      },
+      "now": 1793000010,
+      "mode": "text",
+      "identityValue": " alice@example.COM ",
+      "expect": {
+        "verdict": "valid"
+      }
+    },
+    {
+      "name": "no token",
+      "token": null,
+      "route": "ticket",
+      "embed": {
+        "orgId": "org_test_1",
+        "agentId": "agt_test_a",
+        "webcallAgentId": "agt_test_a_web",
+        "identityField": "user_id"
+      },
+      "now": 1793000010,
+      "mode": "text",
+      "expect": {
+        "verdict": "missing",
+        "code": "token_required",
+        "status": 401
+      }
+    },
+    {
+      "name": "a tampered payload",
+      "token": "tampered",
+      "route": "ticket",
+      "embed": {
+        "orgId": "org_test_1",
+        "agentId": "agt_test_a",
+        "webcallAgentId": "agt_test_a_web",
+        "identityField": "user_id"
+      },
+      "now": 1793000010,
+      "mode": "text",
+      "expect": {
+        "verdict": "invalid",
+        "code": "token_invalid",
+        "reason": "signature",
+        "status": 401
+      }
+    },
+    {
+      "name": "an unknown key id",
+      "token": "unknownKid",
+      "route": "ticket",
+      "embed": {
+        "orgId": "org_test_1",
+        "agentId": "agt_test_a",
+        "webcallAgentId": "agt_test_a_web",
+        "identityField": "user_id"
+      },
+      "now": 1793000010,
+      "mode": "text",
+      "expect": {
+        "verdict": "invalid",
+        "code": "token_invalid",
+        "reason": "unknown_key",
+        "status": 401
+      }
+    },
+    {
+      "name": "alg none is never accepted",
+      "token": "algNone",
+      "route": "ticket",
+      "embed": {
+        "orgId": "org_test_1",
+        "agentId": "agt_test_a",
+        "webcallAgentId": "agt_test_a_web",
+        "identityField": "user_id"
+      },
+      "now": 1793000010,
+      "mode": "text",
+      "expect": {
+        "verdict": "invalid",
+        "code": "token_invalid",
+        "reason": "malformed",
+        "status": 401
+      }
+    },
+    {
+      "name": "another issuer",
+      "token": "wrongIssuer",
+      "route": "ticket",
+      "embed": {
+        "orgId": "org_test_1",
+        "agentId": "agt_test_a",
+        "webcallAgentId": "agt_test_a_web",
+        "identityField": "user_id"
+      },
+      "now": 1793000010,
+      "mode": "text",
+      "expect": {
+        "verdict": "invalid",
+        "code": "token_invalid",
+        "reason": "issuer",
+        "status": 401
+      }
+    },
+    {
+      "name": "another audience",
+      "token": "wrongAudience",
+      "route": "ticket",
+      "embed": {
+        "orgId": "org_test_1",
+        "agentId": "agt_test_a",
+        "webcallAgentId": "agt_test_a_web",
+        "identityField": "user_id"
+      },
+      "now": 1793000010,
+      "mode": "text",
+      "expect": {
+        "verdict": "invalid",
+        "code": "token_invalid",
+        "reason": "issuer",
+        "status": 401
+      }
+    },
+    {
+      "name": "not a token at all",
+      "token": "garbage",
+      "route": "ticket",
+      "embed": {
+        "orgId": "org_test_1",
+        "agentId": "agt_test_a",
+        "webcallAgentId": "agt_test_a_web",
+        "identityField": "user_id"
+      },
+      "now": 1793000010,
+      "mode": "text",
+      "expect": {
+        "verdict": "invalid",
+        "code": "token_invalid",
+        "reason": "malformed",
+        "status": 401
+      }
+    }
+  ],
+  "sdk": {
+    "wireField": "clientToken",
+    "pageMessages": {
+      "toPage": "graine:client-token",
+      "toHost": "graine:need-client-token",
+      "pageWaitMs": 5000
+    },
+    "decode": [
+      {
+        "token": "valid",
+        "iat": 1793000000,
+        "exp": 1793003600
+      },
+      {
+        "token": "callOnly",
+        "iat": 1793000000,
+        "exp": 1793003600
+      },
+      {
+        "token": "garbage",
+        "iat": null,
+        "exp": null
+      },
+      {
+        "token": "algNone",
+        "iat": 1793000000,
+        "exp": 1793003600
+      }
+    ],
+    "localExpiry": "localExp = min(exp, receivedAt + (exp - iat)); when that is no more than 15 s after receivedAt, localExp = receivedAt + (exp - iat)",
+    "usableForNewConnectionSeconds": 15,
+    "newConnectionWaitSeconds": 10,
+    "forcedRefreshMinIntervalSeconds": 5,
+    "minSecondsBetweenBackgroundRefreshes": 30,
+    "lead": "clamp(lifetime / 5, min(60, lifetime / 2), 600)",
+    "maxJitter": "min(30, lifetime / 10)",
+    "schedule": [
+      {
+        "name": "an hour, clocks agree",
+        "iat": 1000,
+        "exp": 4600,
+        "receivedAt": 1000,
+        "localExp": 4600,
+        "lead": 600,
+        "refreshAt": 4000,
+        "maxJitter": 30
+      },
+      {
+        "name": "five minutes",
+        "iat": 1000,
+        "exp": 1300,
+        "receivedAt": 1005,
+        "localExp": 1300,
+        "lead": 60,
+        "refreshAt": 1240,
+        "maxJitter": 30
+      },
+      {
+        "name": "one minute",
+        "iat": 1000,
+        "exp": 1060,
+        "receivedAt": 1000,
+        "localExp": 1060,
+        "lead": 30,
+        "refreshAt": 1030,
+        "maxJitter": 6
+      },
+      {
+        "name": "device clock ten minutes behind",
+        "iat": 10000,
+        "exp": 13600,
+        "receivedAt": 9400,
+        "localExp": 13000,
+        "lead": 600,
+        "refreshAt": 12400,
+        "maxJitter": 30
+      },
+      {
+        "name": "device clock ten minutes ahead",
+        "iat": 10000,
+        "exp": 13600,
+        "receivedAt": 10600,
+        "localExp": 13600,
+        "lead": 600,
+        "refreshAt": 13000,
+        "maxJitter": 30
+      },
+      {
+        "name": "a cached token, clocks agree",
+        "iat": 1000,
+        "exp": 4600,
+        "receivedAt": 4000,
+        "localExp": 4600,
+        "lead": 600,
+        "refreshAt": 4000,
+        "maxJitter": 30
+      },
+      {
+        "name": "device clock two hours ahead",
+        "iat": 10000,
+        "exp": 13600,
+        "receivedAt": 17200,
+        "localExp": 20800,
+        "lead": 600,
+        "refreshAt": 20200,
+        "maxJitter": 30
+      },
+      {
+        "name": "a stale token the server will judge",
+        "iat": 1000,
+        "exp": 4600,
+        "receivedAt": 5000,
+        "localExp": 8600,
+        "lead": 600,
+        "refreshAt": 8000,
+        "maxJitter": 30
+      }
+    ],
+    "usable": [
+      {
+        "localExp": 4600,
+        "now": 4584,
+        "usable": true
+      },
+      {
+        "localExp": 4600,
+        "now": 4585,
+        "usable": false
+      },
+      {
+        "localExp": 4600,
+        "now": 4700,
+        "usable": false
+      }
+    ],
+    "backoffSeconds": [
+      2,
+      4,
+      8,
+      16,
+      32,
+      60,
+      60
+    ],
+    "backoffJitter": 0.2
+  },
+  "keys": {
+    "statuses": [
+      "active",
+      "revoked_report",
+      "revoked"
+    ],
+    "maxWorking": 2,
+    "lastUsedEverySeconds": 600,
+    "previewSuffixLength": 6
+  },
+  "bot": {
+    "providers": [
+      "turnstile",
+      "recaptcha_enterprise"
+    ],
+    "passTtlSeconds": 1800,
+    "verifyTimeoutMs": 4000,
+    "defaultMinScore": 0.5,
+    "action": "graine_ticket",
+    "wire": {
+      "token": "botToken",
+      "pass": "botPass",
+      "answer": "bot"
+    },
+    "routes": [
+      "ticket",
+      "rtc"
+    ]
+  }
+}

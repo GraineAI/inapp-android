@@ -91,6 +91,16 @@ dependencies {
     // service (FirebasePush.kt checks for Firebase first). The React Native and
     // Flutter builds compile the same file against this same version.
     compileOnly("com.google.firebase:firebase-messaging:24.1.0")
+    // Play Integrity, the same way: only to COMPILE the one file that asks it for
+    // a token (PlayIntegrity.kt), never in the AAR's dependencies. An app that
+    // proves itself ("Require a verified app") adds
+    // implementation("com.google.android.play:integrity:1.4.0"); one that does
+    // not never loads that file (PlayIntegrity.present() checks first).
+    compileOnly("com.google.android.play:integrity:1.4.0")
+    // Coroutines, the same way: only for GraineInApp.verificationFlow, an
+    // extension in a file of its own (flow/VerificationFlow.kt). An app that
+    // collects flows has them already; one that does not never loads that file.
+    compileOnly("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
     testImplementation("junit:junit:4.13.2")
     // org.json is part of Android, but stubbed in JVM unit tests; the real one here.
     testImplementation("org.json:json:20240303")

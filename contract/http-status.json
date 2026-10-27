@@ -1,0 +1,30 @@
+{
+  "comment": "A REFUSAL'S CODE (SDK 0.14.4; inapp-platform-contract.md, 'A refusal's code'). One rule on every SDK — iOS, Android, Kotlin Multiplatform (through them), Flutter, React Native and the website loader — run against these vectors by each. A non-2xx answer whose JSON body carries a non-blank string `code` keeps that code (trimmed), known to the SDK or not. Otherwise the status decides: 400 and 422 → invalid_request; 401 → invalid_key; 403 → origin_refused; 404 → not_found; 429 → rate_limited; 502, 503, 504 and 520–524 → unavailable (a gateway that could not reach Graine or gave up waiting, Graine itself down, and the same answers from the CDN in front of it — worth trying again later); every other status → unknown. An SDK whose unknown code carries a word carries `http_<status>` (`raw` below: iOS .unknown(\"http_500\"), Android Unknown(\"http_500\")); the others say `unknown`. No answer at all is `network`, never a status. `name` says why the vector is here.",
+  "vectors": [
+    { "name": "a bad request", "status": 400, "body": {}, "code": "invalid_request" },
+    { "name": "a request the route could not process", "status": 422, "body": {}, "code": "invalid_request" },
+    { "name": "the publishable key was rejected", "status": 401, "body": {}, "code": "invalid_key" },
+    { "name": "this origin is not allowed", "status": 403, "body": {}, "code": "origin_refused" },
+    { "name": "not found", "status": 404, "body": {}, "code": "not_found" },
+    { "name": "too many requests", "status": 429, "body": {}, "code": "rate_limited" },
+    { "name": "a gateway that could not reach Graine", "status": 502, "body": {}, "code": "unavailable" },
+    { "name": "Graine is down", "status": 503, "body": {}, "code": "unavailable" },
+    { "name": "a gateway that gave up waiting", "status": 504, "body": {}, "code": "unavailable" },
+    { "name": "the CDN: an unknown error from the origin", "status": 520, "body": {}, "code": "unavailable" },
+    { "name": "the CDN: the origin refused the connection", "status": 521, "body": {}, "code": "unavailable" },
+    { "name": "the CDN: the connection to the origin timed out", "status": 522, "body": {}, "code": "unavailable" },
+    { "name": "the CDN: the origin is unreachable", "status": 523, "body": {}, "code": "unavailable" },
+    { "name": "the CDN: the origin did not answer in time", "status": 524, "body": {}, "code": "unavailable" },
+    { "name": "a bare 500: an answer nobody expected", "status": 500, "body": {}, "code": "unknown", "raw": "http_500" },
+    { "name": "not implemented", "status": 501, "body": {}, "code": "unknown", "raw": "http_501" },
+    { "name": "a 5xx outside the list", "status": 505, "body": {}, "code": "unknown", "raw": "http_505" },
+    { "name": "the CDN: a TLS handshake failure is a setting, not an outage", "status": 525, "body": {}, "code": "unknown", "raw": "http_525" },
+    { "name": "a 4xx with no meaning of its own", "status": 409, "body": {}, "code": "unknown", "raw": "http_409" },
+    { "name": "gone", "status": 410, "body": {}, "code": "unknown", "raw": "http_410" },
+    { "name": "a body that is not an object", "status": 503, "body": "Service Unavailable", "code": "unavailable" },
+    { "name": "a code the server sent wins over the status", "status": 503, "body": { "error": "Slow down.", "code": "rate_limited" }, "code": "rate_limited" },
+    { "name": "a code this SDK does not know passes through", "status": 409, "body": { "code": "brand_new_code" }, "code": "brand_new_code" },
+    { "name": "a code with spaces around it is trimmed", "status": 400, "body": { "code": "  identity_required " }, "code": "identity_required" },
+    { "name": "a blank code is no code", "status": 502, "body": { "code": "   " }, "code": "unavailable" }
+  ]
+}

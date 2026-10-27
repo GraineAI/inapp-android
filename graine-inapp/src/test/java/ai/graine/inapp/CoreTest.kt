@@ -71,6 +71,39 @@ class ProtocolTest {
         assertTrue(js.endsWith("\"*\"); true;"))
     }
 
+    @Test fun aNumberJsonCannotHoldIsNullNeverAnExceptionInTheAppsCall() {
+        // NaN and the infinities (a ratio of a missing reading) cannot be written as JSON: null, as the iOS and
+        // Kotlin Multiplatform SDKs write them — never a JSONException out of reportEvent() or track().
+        val js = Protocol.deliver(Protocol.out(Protocol.Out.APP_EVENT, "name" to "weighed",
+            "data" to mapOf("bmi" to Double.NaN, "trend" to Float.POSITIVE_INFINITY, "kg" to 72.5, "readings" to listOf(Double.NEGATIVE_INFINITY, 1))))
+        assertTrue(js, js.contains("\"bmi\":null") && js.contains("\"trend\":null"))
+        assertTrue(js, js.contains("\"kg\":72.5") && js.contains("\"readings\":[null,1]"))
+        val tracked = Protocol.toJson(mapOf("bmi" to Double.NaN, "steps" to 4200)) as JSONObject
+        assertTrue(tracked.isNull("bmi"))
+        assertEquals(4200, tracked.getInt("steps"))
+        val chat = JSONObject(ChatFrames.appEvent("weighed", mapOf("bmi" to Double.NaN, "quiet" to true)))
+        assertTrue(chat.getJSONObject("event").isNull("bmi"))
+        assertTrue(chat.getJSONObject("event").getBoolean("quiet"))
+    }
+
+    @Test fun aCallsEventIsTheChatsEventAndTheAppsDataNeverRenamesIt() {
+        val data = mapOf("name" to "spoofed", "detail" to "not this", "quiet" to true, "max_per_session" to 5, "meal" to "breakfast")
+        val message = Protocol.appEvent("reminder_opened", "The user came from the breakfast reminder", data)
+        assertEquals(Protocol.Out.APP_EVENT, message.getString("type"))
+        // The page's event form ({event}), which it hands the runtime as it is: never {name, data} for it to merge.
+        val ev = message.getJSONObject("event")
+        assertEquals("reminder_opened", ev.getString("name"))
+        assertEquals("The user came from the breakfast reminder", ev.getString("detail"))
+        assertTrue(ev.getBoolean("quiet"))
+        assertEquals(5, ev.getInt("max_per_session"))
+        assertEquals("spoofed", ev.getJSONObject("data").getString("name"))
+        assertEquals("not this", ev.getJSONObject("data").getString("detail"))
+        assertEquals("breakfast", ev.getJSONObject("data").getString("meal"))
+        // The same event the chat sends.
+        val chat = JSONObject(ChatFrames.appEvent("reminder_opened", ChatFrames.eventFields("The user came from the breakfast reminder", data)))
+        assertEquals(chat.getJSONObject("event").toString(), ev.toString())
+    }
+
     @Test fun everyMessageThePageSendsIsUnderstood() {
         assertEquals(PageMessage.Ready, Protocol.parse("""{"type":"graine:ready"}"""))
         assertEquals(PageMessage.Call(connected = true, connecting = false), Protocol.parse("""{"type":"graine:call","connected":true,"connecting":false}"""))

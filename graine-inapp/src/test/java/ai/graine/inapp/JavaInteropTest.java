@@ -51,6 +51,36 @@ public class JavaInteropTest {
         assertEquals("no_push_token", problem.getCode());
     }
 
+    @Test public void yourAppAndYourUsersFromJava() {
+        GraineVerification v = new GraineVerification();
+        assertEquals(GraineAppVerdict.OFF, v.getApp());
+        assertEquals(GraineUserVerdict.OFF, v.getUser());
+        assertNull(v.getAppReason());
+        assertEquals("testBuild", GraineAppVerdict.TEST_BUILD.getWord());
+        assertEquals("automatic", GraineDebugTokenMode.AUTOMATIC.getWord());
+        GraineVerificationListener heard = verification -> assertTrue(verification.getApp() != null);
+        heard.onVerification(v);
+        GraineAppVerdictCallback verdict = appVerdict -> assertTrue(appVerdict != null);
+        verdict.onVerdict(GraineAppVerdict.VERIFIED);
+        GraineIdentityTokenRefresher refresher = done -> done.onToken("fresh-token");
+        refresher.refresh(token -> assertEquals("fresh-token", token));
+        // As a Java app calls them: these lines compiling is the test.
+        GraineInApp graine = null;
+        if (graine != null) {
+            graine.identify(Collections.singletonMap("user_id", "user-123"), null, "identity-token");
+            graine.setIdentityToken("identity-token-2");
+            graine.setIdentityTokenRefresher(refresher);
+            graine.prepareAppVerification(verdict);
+            graine.addVerificationListener(heard);
+            graine.removeVerificationListener(heard);
+            graine.setDebugTokenMode(GraineDebugTokenMode.NEVER);
+            assertNull(graine.getDebugToken());
+            assertEquals(GraineAppVerdict.OFF, graine.getVerification().getApp());
+            assertNull(graine.getIdentityTokenRefresher());
+        }
+        assertEquals("app_not_allowed", GraineErrorCode.APP_NOT_ALLOWED.INSTANCE.getWire());
+    }
+
     @Test public void actionResultsAreStaticFactories() {
         assertEquals(ActionResult.Status.OK, ActionResult.ok().getStatus());
         assertEquals("Opened.", ActionResult.ok("Opened.").getMessage());

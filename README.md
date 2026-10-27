@@ -17,7 +17,7 @@ Integration guide: https://www.graine.ai/docs/in-app/android
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    implementation("ai.graine:inapp-android:0.14.3")
+    implementation("ai.graine:inapp-android:0.14.4")
 }
 ```
 
@@ -279,8 +279,8 @@ ring, the call screen or the outcomes.
 
 ```kotlin
 dependencies {
-    implementation("ai.graine:inapp-android:0.14.3")
-    implementation("ai.graine:inapp-android-rtc:0.14.3")   // same version as the SDK
+    implementation("ai.graine:inapp-android:0.14.4")
+    implementation("ai.graine:inapp-android-rtc:0.14.4")   // same version as the SDK
 }
 ```
 
@@ -310,21 +310,225 @@ dependencies {
 ## Who the user is, and memory
 
 ```kotlin
-graine.identify(mapOf("user_id" to user.id, "name" to user.firstName))   // after sign-in
+graine.identify(mapOf("user_id" to user.id, "name" to user.firstName))   // after sign-in and at every launch
 graine.identify(mapOf("user_id" to user.id), memory = false)             // this user: remember nothing
 graine.identify(null)                                                    // sign-out
 ```
 
 Traits become prompt variables, masked, as they always did. The one the agent's
-**Identity** setting names (`user_id` unless the dashboard chose `email`,
-`phone` or a field of yours) is how Graine tells your users apart: the agent
-remembers a user across conversations and devices, and can ring them back. It
+**Who is the user?** setting names (Agent → Memory; `user_id` unless the
+dashboard chose `email`, `phone` or a field of yours) is how Graine tells your
+users apart: the agent remembers a user across conversations and devices, and
+can ring them back. Send exactly that key, before the chat or a call opens. It
 is sent only with the SDK's own requests to Graine, and kept out of the
-prompt's variables. `setMemory(enabled)`, `memories { list, error -> }` (what the
+prompt's variables; a placeholder (`"guest"`, a masked value) is nobody, and
+that conversation has no memory.
+
+**How memory reaches the agent.** At the start of each chat, Talk session or
+call — in-app calls in both directions too — the agent gets what it remembers
+about the user: after its prompt for a prompt agent, in the flow's Briefing
+(which every step reads) for a flow agent. During the conversation it looks
+again only when the user refers to an earlier one ("last time", "I told you").
+New facts are ready about a minute after a conversation ends. `memory = false`
+keeps a user out of memory entirely, from their next conversation.
+
+`setMemory(enabled)`, `memories { list, error -> }` (what the
 agent remembers about the signed-in user, newest first) and
 `forgetMemory { deleted, error -> }` (how many were deleted) are there for your
-privacy screen; the memory choice is kept on this install.
-`installId` is a random id made on first launch.
+privacy screen; the memory choice is kept on this install. Both wait for the
+agent's settings — they name the trait that identifies the user — so a screen
+opened right after launch gets the answer, not "nobody is identified". When
+they refuse, `error.code` says why:
+
+| Code | What it means |
+| --- | --- |
+| `IDENTITY_REQUIRED` | Nobody is identified by the trait this agent identifies users by; the message names it. `identify() was given no usable "patient_id"…` is the usual mistake: `user_id` sent to an agent that identifies users by `patient_id` (logcat says so too, when `identify()` or the session lands) |
+| `DEVICE_LIMIT` | This phone is not one of the user's devices for this agent |
+| `UNAVAILABLE`, `NETWORK` | Graine, or the agent's settings, could not answer: try again — the next call loads the settings again |
+| `INVALID_KEY`, `ORIGIN_REFUSED` | The agent's settings were refused: check the key, and `app://` in its Allowed domains |
+
+Whether the agent remembers anyone at all is `session?.memoryEnabled` (false:
+memory is off for this agent).
+`installId` is a random id made on first launch. What is kept, the settings and
+the prompt lines that make the agent use it: https://www.graine.ai/docs/in-app/memory
+
+## Secure your agent: your app and your users
+
+New in 0.14.4. Two protections, each switched on per agent in the dashboard
+(Agent → Embed & Widgets → Install), each with a report-only stage before it
+refuses anything, and each off until you turn it on. With neither on, nothing
+changes.
+
+### Verified users: identify with a token
+
+Your server proves who the user is with an **identity token**: an HMAC-SHA256
+of the identity value (the trait the agent's *Who is the user?* setting names)
+keyed with the agent's user secret — computed on your server, never in the app,
+so the secret never ships — or the ID token (JWT) of your own sign-in. Hand it
+to `identify`; the SDK sends it only inside the identity, beside the value it
+proves, and never in variables, metadata, logs or a URL.
+
+```kotlin
+// After sign-in (and at every launch): the token your server minted for this user.
+graine.identify(mapOf("user_id" to user.id, "name" to user.firstName), identityToken = session.graineToken)
+
+// Your sign-in renewed it: replace it without identifying anyone else (null clears it).
+graine.setIdentityToken(renewedToken)
+
+// Let the SDK ask for a fresh one: when Graine says it expired, when a request is refused,
+// before a conversation whose JWT has less than a minute left, and when a call rings.
+graine.setIdentityTokenRefresher { api.graineToken() }        // a suspend function: the fresh token, or null
+
+// The same with a callback (and from Java):
+graine.identityTokenRefresher = GraineIdentityTokenRefresher { done ->
+    api.graineToken { token -> done.onToken(token) }          // once, from any thread; null keeps the current one
+}
+
+// Sign-out takes the token with it; another user never gets the last one's.
+graine.identify(null)
+```
+
+The refresher is called on the main thread, at most once every 30 seconds and
+never twice at once. A conversation already open is never cut when a token
+lapses. Graine answers with a user pass that the SDK keeps for an hour and
+sends with the same identity; another user, or sign-out, drops it at once.
+
+### Your apps: prove the app with Play Integrity
+
+Every request already says which app it is — the package name and the SHA-256
+of each certificate it is signed with — so an agent with **Only my apps** on
+turns away any other app. To **require a verified app**, add Play Integrity
+(the SDK only compiles against it, so apps that do not use it never carry it):
+
+```kotlin
+// app/build.gradle.kts
+dependencies {
+    implementation("ai.graine:inapp-android:0.14.4")
+    implementation("com.google.android.play:integrity:1.4.0")
+}
+```
+
+The SDK then proves the app in the background once the agent's settings arrive,
+keeps the app pass Graine gives for 24 hours, and renews it when less than six
+hours remain. Prove it on first launch, so the first conversation never waits:
+
+```kotlin
+class App : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        val graine = GraineInApp.init(this, GraineConfig("https://www.graine.ai", "pk_live_…"))
+        graine.prepareAppVerification { verdict -> Log.i("App", "app verification: ${verdict.word}") }
+    }
+}
+```
+
+Set it up once:
+
+1. **Play Console** → your app → **Test and release** → **App integrity** → link
+   a Google Cloud project to the Play Integrity API.
+2. In that project in the Google Cloud console, **enable the Play Integrity
+   API**, and give Graine the package's Play Integrity credentials in the
+   dashboard when it asks for them. If you linked a Cloud project of your own,
+   enter its project number on the agent too.
+3. Add your app under the agent's **Your apps**: the package name and the
+   SHA-256 fingerprints of its certificates (with or without colons). Read
+   them in **Play Console** → **Test and release** → **App integrity** → **App
+   signing key certificate** (and the **Upload key certificate**, for builds you
+   sign yourself); for a debug build, `./gradlew signingReport` prints the
+   SHA-256 of the debug key.
+
+**Test devices and debug builds.** Emulators, sideloaded debug builds and CI
+cannot pass Play Integrity, so a debuggable build — every build Android Studio
+runs — sends a **debug token** instead and never asks Play Integrity. The SDK
+logs it once per install: *Graine debug token for this install: gdt_… —
+register it under Agent → Embed & Widgets → Install → Development → Debug
+tokens…* Register it there (it expires after 30 days by default). Graine also
+lists **test users** there, accepted without an identity token only from an
+install whose debug token is registered. A phone running a build installed from
+Play (an internal testing track) proves itself like any user's.
+
+```kotlin
+graine.debugToken                                         // this install's token, or null in a release build
+graine.debugTokenMode = GraineDebugTokenMode.ALWAYS       // an internal QA build signed for release
+graine.debugTokenMode = GraineDebugTokenMode.NEVER        // a debug build that proves itself (with "Allow development builds")
+```
+
+### What Graine has proven
+
+```kotlin
+val v = graine.verification                       // v.app: OFF, CHECKING, VERIFIED, TEST_BUILD, DEBUG_TOKEN, UNVERIFIED
+graine.addVerificationListener { v ->             // v.user: OFF, VERIFIED, TEST_USER, UNVERIFIED, INVALID
+    Log.i("App", "app ${v.app.word} ${v.appReason ?: ""}, user ${v.user.word} ${v.userReason ?: ""}")
+}
+lifecycleScope.launch { graine.verificationFlow.collect { render(it) } }   // the same, as a StateFlow
+```
+
+When a protection refuses, the SDK tries what it can first — it proves the app,
+or asks your refresher, and sends the request once more — and then `error.code`
+says why:
+
+| Code | What it means |
+| --- | --- |
+| `APP_NOT_ALLOWED` | This app is not one of the agent's apps (*Only my apps*): add its package and fingerprints under **Your apps**. Final — the chat or call ends with it, and nothing tries again by itself |
+| `APP_NOT_VERIFIED` | The agent requires a verified app and this install has no valid app pass: add Play Integrity, check its setup, or register this build's debug token |
+| `IDENTITY_UNVERIFIED` | The agent requires verified users and this identity is not verified: pass an identity token to `identify`, or set `identityTokenRefresher`. Memories, past sessions and booking are refused; a conversation goes ahead without memory |
+
+## Server tokens
+
+The strongest mode: your server vouches for the signed-in user. It mints a
+short-lived token for one user of one agent — `POST /v2/client-tokens` with
+your secret API key: the `agent_id`, the `user_id` your app passes to
+`identify()`, the `scopes` the app needs (`chat`, `call`, `memory`, `booking`,
+`workflows`) and a `ttl_seconds` of 60–3600 — and the SDK sends it with every
+request to Graine. Once the agent's **Require server tokens** is enforced
+(Embed & Widgets), the publishable key alone opens nothing.
+
+```kotlin
+GraineInApp.init(this, GraineConfig(
+    baseUrl = "https://www.graine.ai",
+    publishableKey = "pk_live_…",
+    tokenProvider = GraineTokenProvider { done ->
+        // Your server mints it for the signed-in user; null when there is none right now.
+        backend.graineToken(onResult = { token -> done(token) }, onError = { done(null) })
+    },
+))
+// Or from a suspending function: tokenProvider = GraineTokenProvider.suspending { backend.graineToken() }
+```
+
+- The SDK asks at start, again shortly before the token expires (in the
+  background, with a little jitter, and after a failure again in 2, 4, 8 …
+  60 seconds), when a call rings, when `identify()` names another user or
+  nobody (the token held is let go of: it spoke for the user before), and
+  when Graine refuses a token — one
+  question at a time, however many requests wait for it. Nothing is asked
+  while the app is in the background; back in front, a token close to its
+  expiry is refreshed. The SDK reads only the token's `iat` and `exp`, and
+  never keeps it on the device.
+- `fetch` is called on a background thread; call `done` once, from any thread.
+  Throwing, or no answer within 15 seconds, counts as null.
+- A token that expires never ends, pauses or reconnects a live chat or call:
+  tokens are checked when a conversation starts. A new conversation waits at
+  most 10 seconds for a fresh one, then goes with the newest it has.
+- Refused for its token (`TOKEN_REQUIRED`, `TOKEN_INVALID`, `TOKEN_EXPIRED`), a
+  request asks for a fresh token and goes once more. `TOKEN_SCOPE` and
+  `KEY_REVOKED` are final. A request's callback hears the code, with
+  `error.reason` saying which part failed; a chat that cannot connect sets
+  `chat.error` (and `chat.failed`) and does not retry by itself; a call that
+  cannot start fails with the code at the start of its error.
+- Without a `tokenProvider` nothing is sent and nothing changes.
+
+| Code | What it means |
+| --- | --- |
+| `TOKEN_REQUIRED` | The agent requires a server token and none came with the request: set `tokenProvider` |
+| `TOKEN_INVALID` | The token could not be checked — `reason`: `malformed`, `signature`, `unknown_key`, `issuer` or `not_yet_valid` |
+| `TOKEN_EXPIRED` | The token expired, and a fresh one did not come in time |
+| `TOKEN_SCOPE` | The token is another agent's (`agent`) or another user's (`user`), or lacks the scope this needs (`scope`) |
+| `KEY_REVOKED` | This publishable key was revoked: update the app with the agent's new key |
+
+React Native and Flutter apps whose own code fetches the tokens push each one to
+the native call engine with `GraineCallsHost.setClientToken(token)` (their
+packages do it) and hear `needClientToken` when one is refused; an agent
+configured with its own `tokenProvider` keeps its own.
 
 ## Chat
 
@@ -517,6 +721,32 @@ window follows the same rule: **Book a call** under the booked calls in its
 Upcoming calls card, or on its own in the card's place when none are booked —
 and none when the design hides the booked-calls card.
 
+**Read it again when the session arrives.** The agent's settings — which trait
+identifies the user, whether Graine rings this phone — load after launch, so
+`bookingAvailable` is false until they have arrived: don't read it once at
+launch. Read it in `onSessionReady` and after `identify()`.
+`bookingUnavailableReason` says why in a word: `not_loaded` (not yet — never a
+final answer), `rings_not_set_up`, `scheduling_off` or `not_identified`.
+
+```kotlin
+graine.addListener(object : GraineListener {
+    override fun onSessionReady(session: SessionConfig) = updateBooking()   // the settings arrived: read again
+})
+
+fun updateBooking() {                                                       // and after identify()
+    bookButton.visibility = if (graine.bookingAvailable) View.VISIBLE else View.GONE
+    bookHint.text = if (graine.bookingUnavailableReason == "not_identified") "Sign in to book a call" else ""
+}
+```
+
+The SDK's sheet and chat window do this themselves: a sheet opened before the
+settings arrive, or after they failed to load, asks for them again and redraws
+when they do. `scheduleCall`, `scheduledCalls` and `cancelScheduledCall` wait
+for the settings too — a call booked or listed right after launch is the
+user's, not only this install's — and when the settings could not be loaded
+they answer with that reason (`UNAVAILABLE`, `NETWORK`…), never a booking rule
+that was never read.
+
 ## Several agents in one app
 
 An app can run several agents, each with its own publishable key, and pick one
@@ -569,6 +799,8 @@ logo's plate — and every Graine SDK must reproduce all of them.
 `contract/design.json` holds every design the dashboard offers, resolved; the
 tests parse each one. `contract/native-calls.json` holds the call engine's test
 vectors, generated by the React Native SDK; the call engine passes every one.
+`contract/client-tokens.json` holds the server tokens' codes, what a token says
+about its own life and when each is refreshed; the token tests run every case.
 
 A real call against your agent, on the JVM, with a WAV file as the customer:
 

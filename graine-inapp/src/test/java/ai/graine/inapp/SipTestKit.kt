@@ -140,9 +140,11 @@ internal class FakeSbc(
     private val realm: String = Trace.REALM,
 ) {
     /** What it does with an INVITE carrying credentials: answer it, ring and wait, refuse it, or say nothing. */
-    enum class Answer { OK, TRYING_ONLY, SILENT, BUSY, UNAVAILABLE }
+    enum class Answer { OK, TRYING_ONLY, SILENT, BUSY, UNAVAILABLE, REQUEST_PENDING }
 
     var inviteAnswer = Answer.OK
+    /** The SDP its 200 carries: production's answer, or one the test writes (with no candidate, say). */
+    var answerSdp: String = Trace.ANSWER
     var registerAnswer = 200
     var challenge = true
     /** Challenge the request with credentials again: the credential is refused. */
@@ -181,6 +183,7 @@ internal class FakeSbc(
                 Answer.TRYING_ONLY, Answer.SILENT -> Unit
                 Answer.BUSY -> out += response(m, 486, tag = true)
                 Answer.UNAVAILABLE -> out += response(m, 503, tag = true)
+                Answer.REQUEST_PENDING -> out += response(m, 491, tag = true)
             }
             else -> out += response(m, 200)
         }
@@ -198,7 +201,7 @@ internal class FakeSbc(
     }
 
     /** The answer to an INVITE, as production's 200 carries it: the trace's SDP, the SBC's Contact, its call id. */
-    fun answerTo(m: SipMessage): String = response(m, 200, tag = true, body = Trace.ANSWER, extra = listOf(
+    fun answerTo(m: SipMessage): String = response(m, 200, tag = true, body = answerSdp, extra = listOf(
         "Contact: <sip:${Trace.SBC}:5060;transport=tcp>", "Content-Type: application/sdp"), after = listOf("X-Call-Sid: 208fd2fd"))
 
     private fun checkDigest(m: SipMessage, auth: String) {

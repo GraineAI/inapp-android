@@ -14,6 +14,11 @@ import java.net.URL
 import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
+import kotlin.coroutines.Continuation
+import kotlin.coroutines.EmptyCoroutineContext
+import kotlin.coroutines.resume
+import kotlin.coroutines.startCoroutine
+import kotlin.coroutines.suspendCoroutine
 
 /** Everything the SDK needs to know up front. */
 data class GraineConfig @JvmOverloads constructor(
@@ -84,6 +89,19 @@ data class GraineConfig @JvmOverloads constructor(
      * changes it while the app runs. New in 0.14.3.
      */
     val chatCloseDelaySeconds: Int = 15,
+    /**
+     * Server tokens (optional — the strongest mode): fetches a fresh token from
+     * YOUR server, which mints it with `POST /v2/client-tokens` and your secret
+     * API key for the signed-in user ([GraineTokenProvider]). Asked at start,
+     * again shortly before the token expires (in the background, with jitter,
+     * and with backoff after a failure), when a call rings and when Graine
+     * refuses a token; every request to Graine then carries the newest one. A
+     * token that expires never ends a live chat or call — only new
+     * conversations wait (at most 10 seconds) for a fresh one. Needed once the
+     * agent's "Require server tokens" is enforced; null, the default, sends
+     * none and changes nothing. New in 0.14.4.
+     */
+    val tokenProvider: GraineTokenProvider? = null,
 ) {
     data class Timing @JvmOverloads constructor(
         val stallMs: Long = 15_000,
@@ -141,6 +159,12 @@ enum class Connectivity { LOADING, READY, RETRYING, FAILED }
 
 /** Everything the SDK reports. Every method is optional; override what you draw. */
 interface GraineListener {
+    /**
+     * The agent's settings arrived. What depends on them — which trait
+     * identifies the user, so [GraineInApp.bookingAvailable],
+     * [GraineInApp.bookingUnavailableReason] and [GraineInApp.memoryEnabled] —
+     * is worth reading again now, rather than once at launch.
+     */
     fun onSessionReady(session: SessionConfig) {}
     fun onCallState(connected: Boolean, connecting: Boolean) {}
     fun onCaption(role: Role, text: String, live: Boolean) {}
@@ -238,7 +262,16 @@ class GraineInApp private constructor(
     /** Who the user is, as this agent's session names them (each agent's dashboard picks its own identifying trait). */
     private val identity = IdentityState { device }
     private val identityWatchers = CopyOnWriteArraySet<(IdentityEnvelope) -> Unit>()
-    internal val api by lazy { EmbedApi(config.baseUrl, config.publishableKey, env.http) }
+
+    /**
+     * This agent's server tokens (ClientTokens.kt): from [GraineConfig.tokenProvider],
+     * or pushed by a calls host (React Native, Flutter); with neither, none are
+     * in play and no request carries one. Every request this agent makes to
+     * Graine asks it for the token it carries.
+     */
+    internal val clientTokens: ClientTokens = env.clientTokens?.invoke(config.tokenProvider) ?: ClientTokens(config.tokenProvider)
+
+    internal val api by lazy { EmbedApi(config.baseUrl, config.publishableKey, env.http, clientTokens) }
     /** The last session, kept on the device: a push that wakes a closed app draws the call in the brand's design. */
     private val sessionCache by lazy { env.sessionCache ?: SessionCache(application) }
     /** This agent's key and base URL, fingerprinted: what its slots on the device are kept under. */
@@ -337,17 +370,18 @@ class GraineInApp private constructor(
      * Something happened that the agent may want to speak up about — on
      * whichever conversation is live (a voice call, or the chat). With none
      * live, nobody is listening and it is dropped. The current screen goes
-     * first, so the agent reads the event against the right one.
+     * first, so the agent reads the event against the right one. [name] and
+     * [detail] are the event's own; in [data], `cooldown_seconds`,
+     * `max_per_session` and `quiet` pace it, and everything else rides under
+     * the event's `data` — a `name` or `detail` key there never replaces them.
      */
     @JvmOverloads
     fun reportEvent(name: String, detail: String? = null, data: Map<String, Any?> = emptyMap()) {
         if (voiceLazy.isInitialized() && voice.connected) { voice.reportEvent(name, detail, data); return }
         if (chatLazy.isInitialized() && chat.connected) {
             currentContextFrame()?.let { frame -> contextWatchers.forEach { it(frame) } }
-            val payload = LinkedHashMap<String, Any?>()
-            detail?.let { payload["detail"] = it }
-            payload.putAll(data)
-            chat.reportEvent(name, payload)
+            // The name and the detail are the call's own; the app's data rides under `data`.
+            chat.reportEvent(name, ChatFrames.eventFields(detail, data))
         }
     }
 
@@ -450,26 +484,50 @@ class GraineInApp private constructor(
      *
      * One user for the whole app: identifying on any agent identifies them for
      * every agent, and null signs them out of every one.
+     *
+     * `identityToken` (new in 0.14.4) proves the identity, for an agent with
+     * "Verified users" on: the HMAC your server computes over the identity
+     * value with the agent's user secret, or the ID token (JWT) of your own
+     * sign-in. It travels only inside the request's identity, beside the value
+     * it proves — never in variables, metadata, the screen's context or a log
+     * line — and is held in memory only. Another user, or null, drops the token
+     * (and the pass Graine gave for it) in the same step; the same user without
+     * a token keeps the one they have. Replace it with [setIdentityToken]; let
+     * the SDK ask for a fresh one with [identityTokenRefresher].
      */
     @JvmOverloads
-    fun identify(traits: Map<String, Any?>?, memory: Boolean? = null) {
+    fun identify(traits: Map<String, Any?>?, memory: Boolean? = null, identityToken: String? = null) {
         val next = traits?.let { LinkedHashMap(it) }
+        // The token and the user pass belong to who they were given with: changed in the same step as the identity.
+        val fields = AppShared.all().let { if (this in it) it else it + this }.map { it.identityField() }
+        proofs.user.identify(next, identityToken, IdentityRules.sameUser(AppShared.traits, next, fields))
         AppShared.traits = next
         var anotherUser = false
         for (g in agentsWith(this)) anotherUser = g.applyIdentity(next, memory) || anotherUser
         // An agent made later starts with this user and the choice made for them; another user's is not theirs.
         if (memory != null || anotherUser || next == null) AppShared.memory = memory
+        if (memory != null) AppShared.memoryFor = next
     }
 
     /** identify(), on this agent: true when it now names someone else (or nobody), whose conversations are not the last user's. */
     private fun applyIdentity(traits: Map<String, Any?>?, memory: Boolean?): Boolean {
         val before = identity.value()
+        // The server token held now was minted for whoever was signed in before this.
+        val tokenBefore = clientTokens.newest
         variables.setIdentity(traits)
         identity.set(traits, memory)
+        warnIfTraitsLackField()
         val after = identity.value()
-        if (before != after) {
-            // Someone else, or nobody: the last user's device binding is theirs, not the next user's.
-            if (before != null) signOut(before)
+        // Someone else as Graine keys users: the same user written another way ("Asha@Example.com", then
+        // "asha@example.com") is no switch — never signed out, the chat never started over.
+        val another = !identity.sameUser(before, after)
+        if (another) {
+            // Someone else, or nobody: the last user's device binding is theirs, not the next user's — released with
+            // their own server token.
+            if (before != null) signOut(before, tokenBefore)
+            // That token speaks for the user before: let go of, and a fresh one asked for — before the chat connects again
+            // for whoever is identified now, so its ticket waits for theirs (ClientTokens.renew).
+            clientTokens.renew()
             // A chat belongs to whoever was identified when its ticket was made (contract/DESIGN.md) — nobody to a
             // user included: the conversation open now is closed, its turns go, a line not yet sent stays, and a
             // chat that is wanted connects again at once as the new identity.
@@ -479,12 +537,13 @@ class GraineInApp private constructor(
         announceIdentity()
         scheduleContext()
         if (after != null && (after != before || memory != null)) registerDevice()
-        return before != after
+        return another
     }
 
     /** Remember the current user's conversations, or stop — the same as identify(the same traits, memory = enabled). Every agent. */
     fun setMemory(enabled: Boolean) {
         AppShared.memory = enabled
+        AppShared.memoryFor = AppShared.traits
         for (g in agentsWith(this)) {
             g.identity.setMemory(enabled)
             g.announceIdentity()
@@ -492,21 +551,189 @@ class GraineInApp private constructor(
         }
     }
 
-    /** Whether the current user's conversations are remembered: their last choice on this install, else on. */
+    // ── your app and your users: what Graine has proven (0.14.4) ────────────
+
+    /** What proves this app and its user, for every agent of the process (EmbedRequest.kt): made by the first agent. */
+    internal val proofs: Proofs get() = AppShared.proofs { env.proofs?.invoke() ?: Proofs.forApp(application, env) }
+
+    /**
+     * Replace the identity token for the user identified now, without
+     * identifying anyone else — a fresh one your server minted, or your
+     * sign-in's renewed ID token. Null clears it. For every agent, as
+     * [identify] is. With nobody identified it is kept for nobody: identify
+     * the user with their token instead.
+     */
+    fun setIdentityToken(token: String?) {
+        proofs.user.setToken(token)
+    }
+
+    /**
+     * How the SDK asks your app for a fresh identity token: when Graine says
+     * the token expired, when a request is refused `identity_unverified`
+     * (the request is then sent once more with the new token), before a
+     * conversation whose JWT has less than a minute left, and when a call
+     * rings. Called on the main thread, at most once every 30 seconds, never
+     * twice at once; answering null — or throwing — keeps the token as it
+     * was. One for the whole app, like [identify]. Null by default: the SDK
+     * then only ever sends the token it was given.
+     */
+    var identityTokenRefresher: GraineIdentityTokenRefresher?
+        get() = proofs.user.refresher
+        set(value) {
+            proofs.user.refresher = value
+        }
+
+    /**
+     * [identityTokenRefresher] as a suspend function, for Kotlin — `{
+     * api.graineToken() }` — started on the main thread when the SDK asks;
+     * its result is the fresh token, null (or a throw) keeps the current one.
+     * Null removes the refresher.
+     */
+    @JvmSynthetic
+    fun setIdentityTokenRefresher(refresher: (suspend () -> String?)?) {
+        identityTokenRefresher = refresher?.let { block ->
+            GraineIdentityTokenRefresher { done ->
+                block.startCoroutine(Continuation(EmptyCoroutineContext) { result -> done.onToken(result.getOrNull()) })
+            }
+        }
+    }
+
+    /**
+     * Prove this app now, for this agent — on first launch, say, so the first
+     * conversation never waits for it — and hear the verdict on the main
+     * thread. Waits for the agent's settings first. Nothing is sent when the
+     * agent does not ask for a verified app ([GraineAppVerdict.OFF]), when a
+     * pass with more than six hours left is held (its verdict), in a debug
+     * build that uses a debug token, or while proofs are waiting after Google
+     * could not be reached (the verdict as it stands). The SDK proves the app
+     * by itself too — after the settings arrive, and when the pass is due —
+     * so calling this is never required.
+     */
+    fun prepareAppVerification(done: GraineAppVerdictCallback) {
+        loadSession { _ -> proofs.app.prepare(config.publishableKey) { verdict -> main.post { done.onVerdict(verdict) } } }
+    }
+
+    /** [prepareAppVerification], suspending until the verdict. */
+    @JvmSynthetic
+    suspend fun prepareAppVerification(): GraineAppVerdict = suspendCoroutine { c -> prepareAppVerification { v -> c.resume(v) } }
+
+    /**
+     * What Graine has proven, for this agent: the app ([GraineVerification.app])
+     * and the signed-in user ([GraineVerification.user]), each with Graine's
+     * reason when it is not proven. Both off until the agent's settings ask
+     * for them. [addVerificationListener] hears it change; with coroutines,
+     * [verificationFlow] is the same as a StateFlow.
+     */
+    val verification: GraineVerification get() = currentVerification()
+
+    private fun currentVerification(): GraineVerification {
+        val p = AppShared.proofsIfMade() ?: return GraineVerification()
+        val key = config.publishableKey
+        val (app, appReason) = p.app.verdict(key)
+        val (user, userReason) = p.user.verdict(key, p.app.security(key)?.checksUsers == true)
+        return GraineVerification(app, appReason, user, userReason)
+    }
+
+    private val verificationListeners = CopyOnWriteArraySet<GraineVerificationListener>()
+    /** The verification last told, on the main thread: nothing proven, as every agent starts. */
+    private var verificationTold = GraineVerification()
+
+    /** Hear [verification] change, on the main thread. */
+    fun addVerificationListener(listener: GraineVerificationListener) { verificationListeners.add(listener) }
+
+    fun removeVerificationListener(listener: GraineVerificationListener) { verificationListeners.remove(listener) }
+
+    /** What the coroutine flow ([verificationFlow]) keeps for this agent, made the first time it is read. Typed loosely: this class never names a coroutine type. */
+    @Volatile internal var verificationFlowHolder: Any? = null
+
+    /** What this agent shows may have changed: told on the main thread when it did. */
+    internal fun verificationChanged() {
+        main.post {
+            val now = currentVerification()
+            if (now == verificationTold) return@post
+            verificationTold = now
+            verificationListeners.forEach { runCatching { it.onVerification(now) } }
+        }
+    }
+
+    /**
+     * Development mode, for every agent of the app: whether this build uses a
+     * debug token instead of proving itself with Play Integrity.
+     * [GraineDebugTokenMode.AUTOMATIC] (the default) uses one in a debuggable
+     * build and never in a release build; [GraineDebugTokenMode.ALWAYS] in any
+     * build (an internal QA build); [GraineDebugTokenMode.NEVER] in none. Set
+     * it before the first request — in Application.onCreate, right after init.
+     */
+    var debugTokenMode: GraineDebugTokenMode
+        get() = proofs.app.debugTokenMode
+        set(value) {
+            proofs.app.debugTokenMode = value
+        }
+
+    /**
+     * This install's debug token while the build uses one ([debugTokenMode]),
+     * else null — a release build never makes one. Made once per install and
+     * logged once, with where to register it on the agent: Agent → Embed &
+     * Widgets → Install → Development → Debug tokens.
+     */
+    val debugToken: String? get() = proofs.app.debugToken()
+
+    /** The trait this agent identifies users by, once its session said; null before. */
+    internal fun identityField(): String? = if (session != null) identity.field() else null
+
+    /** The identity token changed: a call prepared, or a grant kept, under the old token's verdict goes; the next one is kept ready with the new token. */
+    internal fun identityTokenChanged() {
+        runCatching { env.directMint.forgetGrants(config.publishableKey) }
+        AppShared.callsIfMade()?.proofChanged(this)
+        announceIdentity()
+    }
+
+    /** The token and pass that go beside [value] on this agent's requests, as the one door sends them — for the voice page, which sends its own. */
+    internal fun identityProofFor(value: String?): UserProofs? {
+        val v = value ?: return null
+        return runCatching { proofs.user.proofFor(config.publishableKey, v, identityField(), aboutACall = false) }.getOrNull()
+    }
+
+    /**
+     * A call Graine rings has arrived for this agent (§6): the app proof is
+     * refreshed and the app's refresher asked for a fresh token now, in the
+     * background, before the person answers.
+     */
+    internal fun ringArrived() {
+        val p = proofs
+        loadSession { _ -> p.app.ring(config.publishableKey) }
+        if (identity.hasTraits() && p.app.security(config.publishableKey)?.checksUsers != false) p.user.refreshInBackground()
+    }
+
+    /**
+     * Whether the current user's conversations are remembered: their last
+     * choice on this install, else on. The choice is kept under the trait that
+     * identifies the user, which this launch's session names: before it has
+     * arrived only a choice made this launch is known — read it again in
+     * [GraineListener.onSessionReady].
+     */
     val memoryEnabled: Boolean get() = identity.memory()
 
     /**
      * Forget everything the agent remembers about the signed-in user —
-     * allowed only from a device that user is using. [done] hears how many
-     * memories were deleted, or why not (`identity_required` with nobody
-     * signed in, `device_limit` from a device the user is not using).
+     * allowed only from a device that user is using. It waits for the agent's
+     * settings first (they name the trait that identifies the user), so it can
+     * be called right after launch. [done] hears how many memories were
+     * deleted, or why not: `identity_required` when nobody is identified by
+     * the trait this agent identifies users by (the message names it), or
+     * when someone else was identified while the settings were loading —
+     * nothing is forgotten for anyone but the user who asked —
+     * `device_limit` from a device the user is not using, `unavailable` /
+     * `network` / `invalid_key` / `origin_refused` when the agent's settings
+     * could not be loaded (the next call loads them again) or Graine could not
+     * answer.
      */
     @JvmOverloads
-    fun forgetMemory(done: GraineCallback<Int>? = null) {
-        val env = identityEnvelope()
+    fun forgetMemory(done: GraineCallback<Int>? = null): Unit = afterSession({ e -> done?.onResult(null, e) }, forWhoAsked = true) { env ->
         if (env.value == null) {
-            main.post { done?.onResult(null, GraineError(GraineErrorCode.IDENTITY_REQUIRED, "Nobody is signed in: identify() the user first.")) }
-            return
+            val why = identityRequired()
+            main.post { done?.onResult(null, why) }
+            return@afterSession
         }
         request(EmbedApi.FORGET, env.who(org.json.JSONObject())) { r ->
             when (r) {
@@ -523,10 +750,20 @@ class GraineInApp private constructor(
     /**
      * Graine lets go of the conversation it kept for this agent and the
      * signed-in user, so the next chat starts fresh ([GraineChat.newConversation]).
-     * Nobody signed in: nothing was kept, nothing to ask. On the main thread.
+     * Nobody signed in: nothing was kept, nothing to ask. Someone identified:
+     * who they are waits for the session (it names the trait), and a session
+     * that could not be loaded is handed on — nothing was let go of. On the
+     * main thread.
      */
     internal fun letGoOfConversation(done: GraineCallback<Unit>) {
-        val env = identityEnvelope()
+        if (!identity.hasTraits()) {
+            main.post { done.onResult(Unit, null) }
+            return
+        }
+        afterSession({ e -> done.onResult(null, e) }, forWhoAsked = true) { env -> letGoOf(env, done) }
+    }
+
+    private fun letGoOf(env: IdentityEnvelope, done: GraineCallback<Unit>) {
         if (env.value == null) {
             main.post { done.onResult(Unit, null) }
             return
@@ -542,15 +779,24 @@ class GraineInApp private constructor(
     /**
      * What the agent remembers about the signed-in user, newest first —
      * for a privacy screen that shows it (and [forgetMemory] to clear it).
-     * Only from a device that user is using: [done] hears `identity_required`
-     * with nobody signed in, `device_limit` from a device the user is not
-     * using the agent on.
+     * It waits for the agent's settings first (they name the trait that
+     * identifies the user), so a screen opened right after launch gets the
+     * answer, not "nobody is identified". Only from a device that user is
+     * using: [done] hears `identity_required` when nobody is identified by the
+     * trait this agent identifies users by (the message names it),
+     * `device_limit` from a device the user is not using the agent on,
+     * `unavailable` / `network` / `invalid_key` / `origin_refused` when the
+     * agent's settings could not be loaded (the next call loads them again) or
+     * Graine could not answer. `identity_required` too when someone else was
+     * identified while the settings were loading: never another user's
+     * memories. Whether the agent remembers anyone at all is
+     * `session?.memoryEnabled`.
      */
-    fun memories(done: GraineCallback<List<GraineMemory>>) {
-        val env = identityEnvelope()
+    fun memories(done: GraineCallback<List<GraineMemory>>): Unit = afterSession({ e -> done.onResult(null, e) }, forWhoAsked = true) { env ->
         if (env.value == null) {
-            main.post { done.onResult(null, GraineError(GraineErrorCode.IDENTITY_REQUIRED, "Nobody is signed in: identify() the user first.")) }
-            return
+            val why = identityRequired()
+            main.post { done.onResult(null, why) }
+            return@afterSession
         }
         request(EmbedApi.MEMORIES, env.who(org.json.JSONObject())) { r ->
             when (r) {
@@ -569,6 +815,9 @@ class GraineInApp private constructor(
 
     /** What Graine's requests say about who is using the app. Any thread. */
     internal fun identityEnvelope(): IdentityEnvelope = identity.envelope()
+
+    /** Whether [value] is still the user identified now, as Graine keys users. */
+    internal fun stillIdentified(value: String?): Boolean = identity.sameUser(value, identity.value())
 
     internal fun onIdentity(watch: (IdentityEnvelope) -> Unit): () -> Unit {
         identityWatchers.add(watch); return { identityWatchers.remove(watch) }
@@ -642,10 +891,13 @@ class GraineInApp private constructor(
     }
 
     /** Release this device for a user who left it. Best effort: the server also releases a device unused for 30 days. */
-    private fun signOut(value: String) {
+    private fun signOut(value: String, token: String?) {
         val env = IdentityEnvelope(value, runCatching { device.installId() }.getOrNull(), identity.memory(), IdentityRules.timezone())
-        request(EmbedApi.SIGNOUT, env.who(org.json.JSONObject()), retries = HostedOutcomes.RETRY_DELAYS_MS) { }
+        request(EmbedApi.SIGNOUT, env.who(org.json.JSONObject()), retries = HostedOutcomes.RETRY_DELAYS_MS, pinned = Pinned(token)) { }
     }
+
+    /** A request that carries exactly [token]: one made for a user who has left (EmbedApi.postPinned). */
+    internal class Pinned(val token: String?)
 
     /**
      * Prompt variables from the app's own data, while it runs. Merged, not
@@ -1009,25 +1261,47 @@ class GraineInApp private constructor(
      * rings this phone (`calls.hosted`, and `calls.platforms` empty or naming
      * Android), the agent lets users book, and the user is identified with
      * the trait the agent's Identity setting names (otherwise a booking is
-     * refused with `identity_required`). Each agent answers for itself. Read
-     * it again after [identify] and once the session has loaded.
+     * refused with `identity_required`). Each agent answers for itself.
+     *
+     * False until this launch's session has arrived, since it names the trait
+     * that identifies the user — so do not read it once at launch: read it
+     * again in [GraineListener.onSessionReady] and after [identify].
      */
-    val bookingAvailable: Boolean get() = Booking.available(schedulingRules, identity.value() != null)
+    val bookingAvailable: Boolean get() = Booking.available(schedulingRules, identifiedNow() == true)
 
-    /** Why the booking sheet cannot book now, as its line; null when it can. */
-    internal val bookingBlocked: String? get() = Booking.blocked(schedulingRules, identity.value() != null)
+    /** Why the booking sheet cannot book now, as its line; null when it can. Never "sign in" while the session that says so is still to come. */
+    internal val bookingBlocked: String?
+        get() = identifiedNow().let { who -> Booking.blocked(schedulingRules, who == true, identityKnown = who != null) }
 
     /**
      * Why this agent cannot be booked from the app now — the first part of
      * [bookingAvailable]'s rule that fails, as a word: `not_loaded` (its
-     * settings have not loaded yet), `rings_not_set_up` (Graine does not ring
-     * this phone: the workspace's In-app calling, for Android), `scheduling_off`
-     * (the agent does not let users book), `not_identified` (nobody is
-     * identified with the trait the agent's Identity setting names). Null
-     * when it can be booked. For a button of your own that says why.
+     * settings have not loaded yet — this launch's session, which names the
+     * trait that identifies the user, has not arrived, or could not be
+     * loaded), `rings_not_set_up` (Graine does not ring this phone: the
+     * workspace's In-app calling, for Android), `scheduling_off` (the agent
+     * does not let users book), `not_identified` (nobody is identified with
+     * the trait the agent's Identity setting names). Null when it can be
+     * booked. For a button of your own that says why: `not_loaded` is "not
+     * yet", never a final answer — read it again in
+     * [GraineListener.onSessionReady] and after [identify].
      */
     val bookingUnavailableReason: String?
-        get() = Booking.unavailableReason(schedulingRules, identity.value() != null, session != null || cachedSession != null)
+        get() = identifiedNow().let { who ->
+            Booking.unavailableReason(schedulingRules, who == true, session != null || cachedSession != null, identityKnown = who != null)
+        }
+
+    /**
+     * Whether the user is identified with the trait the agent's Identity
+     * setting names: null while that cannot be told yet — identify() was given
+     * someone, and this launch's session, which names the trait, has not
+     * arrived (the one kept on the device does not say).
+     */
+    private fun identifiedNow(): Boolean? = when {
+        session != null -> identity.value() != null
+        identity.hasTraits() -> null
+        else -> false
+    }
 
     /**
      * The times the SDK's booking sheet would offer on the day [day] falls on,
@@ -1098,6 +1372,59 @@ class GraineInApp private constructor(
 
     // ── the session ─────────────────────────────────────────────────────────
 
+    /** Why the last load of the session failed, as the refusal a request that needed it hands on; null once one succeeds. */
+    @Volatile private var sessionFailure: GraineError? = null
+
+    /**
+     * [go] once this launch's session is here — it names the trait that
+     * identifies the user, so who the user is is known only then — with who
+     * the user is now. A session already here goes at once; one still loading
+     * is waited for, bounded by its own timeouts. When it could not be loaded,
+     * [failed] hears its own refusal on the main thread — `unavailable`,
+     * `network`, `invalid_key`, `origin_refused`, the server's sentence kept —
+     * never "nobody is identified": the app may well have identified someone.
+     * The next call loads the session again.
+     *
+     * [forWhoAsked]: the request is for the user identified when it was made
+     * (a memory, a booking, a transcript asked for them) — when the app
+     * identified someone else (or no one) while the session was on its way,
+     * [failed] hears IDENTITY_REQUIRED and nothing is asked: never an answer
+     * about the next user, a booking in their name, or their memories
+     * forgotten. The same user identified again is still them.
+     */
+    internal fun afterSession(failed: (GraineError) -> Unit, forWhoAsked: Boolean = false, go: (IdentityEnvelope) -> Unit) {
+        val asked = identity.traitsNow()
+        loadSession { s ->
+            if (s == null) {
+                val why = sessionRefusal()
+                main.post { failed(why) }
+                return@loadSession
+            }
+            val now = identityEnvelope()
+            val wanted = if (forWhoAsked) identity.valueOf(asked) else null
+            if (wanted != null && !identity.sameUser(wanted, now.value)) {
+                val why = if (now.value == null) identityRequired() else GraineError(GraineErrorCode.IDENTITY_REQUIRED, SOMEONE_ELSE_IDENTIFIED)
+                main.post { failed(why) }
+                return@loadSession
+            }
+            go(now)
+        }
+    }
+
+    /** Why this launch's session is not here: its last load's own refusal. */
+    private fun sessionRefusal(): GraineError = sessionFailure
+        ?: GraineError(GraineErrorCode.UNAVAILABLE, "The agent's settings could not be loaded. Try again in a moment.")
+
+    /** IDENTITY_REQUIRED, in a sentence that names the trait this agent identifies users by. */
+    internal fun identityRequired(): GraineError = GraineError(GraineErrorCode.IDENTITY_REQUIRED, identity.missingIdentityMessage())
+
+    /** One line for the developer when identify() was given traits without the trait this agent identifies users by. */
+    private fun warnIfTraitsLackField() {
+        if (!identity.traitsLackField()) return
+        val who = if (name == DEFAULT) "" else "Agent \"$name\": "
+        android.util.Log.w(TAG, who + identity.missingIdentityMessage())
+    }
+
     /** Fetch the agent's configuration once; later callers share the answer. */
     internal fun loadSession(done: (SessionConfig?) -> Unit) {
         session?.let { done(it); return }
@@ -1108,7 +1435,7 @@ class GraineInApp private constructor(
         }
         io.execute {
             val result = runCatching {
-                val raw = env.fetchSession(config.baseUrl, config.publishableKey)
+                val raw = fetchSessionJson()
                 // Kept for a cold start: the design a push-woken call screen draws, the ring's length.
                 runCatching { sessionCache.save(config.baseUrl, config.publishableKey, raw) }
                 raw to SessionFetch.parse(raw)
@@ -1116,9 +1443,14 @@ class GraineInApp private constructor(
             main.post {
                 val s = result.getOrNull()?.second
                 if (s != null) {
-                    session = s
-                    // Who the user is, as this agent decides: identify() may have come first, and resolves now.
+                    // Who the user is, as this agent decides: identify() may have come first, and resolves now —
+                    // before the session is seen, so nothing reads a session whose trait is not known yet.
                     identity.onSession(s.identity)
+                    session = s
+                    sessionFailure = null
+                    // What the agent asks of this app and its users: the app proven in the background when it asks (§2.1).
+                    runCatching { proofs.app.onSession(config.publishableKey, SecuritySettings.parse(result.getOrNull()?.first?.opt("security"))) }
+                    warnIfTraitsLackField()
                     // The trait that names the user goes only to Graine: out of the variables and the context's `user`.
                     variables.setIdentityField(identity.fieldOrDefault())
                     // The typefaces first: they take a round trip, and everything below draws.
@@ -1139,6 +1471,8 @@ class GraineInApp private constructor(
                     }
                 } else {
                     val msg = result.exceptionOrNull()?.message ?: "Could not load the agent."
+                    // What a request that needed the session hands on, before anyone waiting hears it.
+                    sessionFailure = SessionFetch.refusal(result.exceptionOrNull())
                     android.util.Log.e(TAG, msg)
                     listeners.forEach { it.onError(msg) }
                 }
@@ -1146,6 +1480,31 @@ class GraineInApp private constructor(
                 waiting.forEach { it(s) }
             }
         }
+    }
+
+    /**
+     * The session's answer, as served — with the server token when tokens are in
+     * play (CLIENT-TOKENS.md §2.3): a new connection, so it goes with a usable
+     * token or waits at most 10 s for one; refused for the token, it asks for a
+     * fresh one and is sent once more. On the background thread.
+     */
+    private fun fetchSessionJson(): JSONObject {
+        val tokens = clientTokens
+        val first = if (tokens.inPlay) tokens.forConnection() else null
+        return try {
+            sessionWith(first)
+        } catch (e: SessionRefusedException) {
+            if (ClientTokenRules.code(e.body.toString()) !in ClientTokenRules.REFRESHABLE) throw e
+            val next = tokens.afterRefusal(first) ?: throw e
+            sessionWith(next)
+        }
+    }
+
+    /** One ask of the session route: the platform's with the token, or a test's own (which reads no token). */
+    private fun sessionWith(token: String?): JSONObject {
+        env.fetchSessionWithToken?.let { return it(config.baseUrl, config.publishableKey, token) }
+        return if (env.fetchSession === PlatformSessionFetch) SessionFetch.fetchJson(config.baseUrl, config.publishableKey, token)
+        else env.fetchSession(config.baseUrl, config.publishableKey)
     }
 
     // ── hosted ringing: where this install can be rung ──────────────────────
@@ -1210,16 +1569,20 @@ class GraineInApp private constructor(
      * fall inside its calling hours and limits; [done] hears the booked call,
      * or why not (`scheduling_off`, `too_soon`, `too_far`, `outside_window`,
      * `too_many_pending`…). [reason] is kept with the call for the agent, never
-     * put in the push that rings it.
+     * put in the push that rings it. It waits for the agent's settings first —
+     * its rules, and the trait that names the user, come with them — and when
+     * they could not be loaded, [done] hears why (`unavailable`, `network`…),
+     * not a rule that was never read; `identity_required` when someone else
+     * was identified while they loaded — a call is never booked for a user
+     * who did not ask for it.
      */
     @JvmOverloads
     fun scheduleCall(at: java.util.Date, reason: String? = null, done: GraineCallback<GraineScheduledCall>? = null) {
         val atMs = at.time
-        loadSession { s ->
+        afterSession({ e -> done?.onResult(null, e) }, forWhoAsked = true) { who ->
             // The agent's own rules first, before any booking request: scheduling_off, too_soon, too_far.
-            val rules = s?.schedulingRules ?: schedulingRules
-            Scheduling.check(atMs, System.currentTimeMillis(), rules)?.let { e -> done?.onResult(null, e); return@loadSession }
-            request(EmbedApi.SCHEDULE, Scheduling.scheduleBody(atMs, reason, identity.envelope())) { r ->
+            Scheduling.check(atMs, System.currentTimeMillis(), schedulingRules)?.let { e -> done?.onResult(null, e); return@afterSession }
+            request(EmbedApi.SCHEDULE, Scheduling.scheduleBody(atMs, reason, who)) { r ->
                 when (r) {
                     is EmbedReply.Ok -> {
                         // The chat's Upcoming calls card shows it at once.
@@ -1234,9 +1597,14 @@ class GraineInApp private constructor(
         }
     }
 
-    /** The calls booked for the signed-in user (or this install) that are still to come, soonest first. */
-    fun scheduledCalls(done: GraineCallback<List<GraineScheduledCall>>) {
-        request(EmbedApi.LIST, identity.envelope().who(JSONObject())) { r ->
+    /**
+     * The calls booked for the signed-in user (or this install) that are
+     * still to come, soonest first. Waits for the agent's settings (they name
+     * the trait that identifies the user, so the list is the user's, not only
+     * this install's); when they could not be loaded, [done] hears why.
+     */
+    fun scheduledCalls(done: GraineCallback<List<GraineScheduledCall>>): Unit = afterSession({ e -> done.onResult(null, e) }) { who ->
+        request(EmbedApi.LIST, who.who(JSONObject())) { r ->
             when (r) {
                 is EmbedReply.Ok -> done.onResult(Scheduling.list(r.body), null)
                 is EmbedReply.Failed -> done.onResult(null, r.error)
@@ -1263,8 +1631,9 @@ class GraineInApp private constructor(
                 done.onResult(null, null)
                 return@post
             }
-            if (!bookingAvailable) {
-                android.util.Log.w(TAG, "The booking sheet opened while this agent cannot be booked; it says why. Check bookingAvailable before offering it.")
+            // Not loaded yet is not "cannot be booked": the sheet asks for the session again and redraws when it arrives.
+            bookingUnavailableReason?.takeIf { it != Booking.NOT_LOADED }?.let { why ->
+                android.util.Log.w(TAG, "The booking sheet opened while this agent cannot be booked ($why); it says why. Check bookingAvailable before offering it.")
             }
             val sheet = GraineBookingDialog(activity, this, reason, GraineCallback { call, error ->
                 bookingSheet = null
@@ -1278,14 +1647,98 @@ class GraineInApp private constructor(
     /** The booking sheet on screen, so a second tap does not stack another. Main thread. */
     private var bookingSheet: GraineBookingDialog? = null
 
-    /** Cancel a booked call — only one booked for this user or install. [done] hears the call's status afterwards (cancelled). */
+    /**
+     * Cancel a booked call — only one booked for this user or install. [done]
+     * hears the call's status afterwards (cancelled). Waits for the agent's
+     * settings, as [scheduledCalls] does.
+     */
     @JvmOverloads
     fun cancelScheduledCall(id: String, done: GraineCallback<GraineCallStatus>? = null) {
         if (id.isBlank()) { main.post { done?.onResult(null, GraineError(GraineErrorCode.INVALID_REQUEST, "No call id.")) }; return }
-        request(EmbedApi.CANCEL, identity.envelope().who(JSONObject()).put("callId", id)) { r ->
+        afterSession({ e -> done?.onResult(null, e) }) { who -> cancelBooked(id, who, done) }
+    }
+
+    private fun cancelBooked(id: String, who: IdentityEnvelope, done: GraineCallback<GraineCallStatus>?) {
+        request(EmbedApi.CANCEL, who.who(JSONObject()).put("callId", id)) { r ->
             when (r) {
                 is EmbedReply.Ok -> done?.onResult(Scheduling.cancelled(r.body), null)
                 is EmbedReply.Failed -> done?.onResult(null, r.error)
+            }
+        }
+    }
+
+    // ── workflows the app starts (0.14.4) ───────────────────────────────────
+
+    /**
+     * Start one of your outreach workflows for the user this app signed in —
+     * a welcome call after sign-up, a follow-up after an order — with no
+     * server of your own. The workflow must have "Your app can start this" on
+     * (its Connect tab); [workflow] is its exact name or its id (`owf_…`).
+     *
+     * The run is for the identified user — [identify] with the agent's
+     * identity trait first — never for anyone [data] names. [data]: the
+     * contact fields the workflow allows — text (200 characters), numbers,
+     * yes/no; at most 12, the first 12 in the map's order. Anything else is
+     * left out, never refused.
+     *
+     * [idempotencyKey]: two calls with the same key start one run. Without
+     * one the SDK makes one for the call, and asks once more with it when a
+     * request got no answer.
+     *
+     * [done] hears the run — `alreadyRunning` when the user already had one
+     * of this workflow under way (that run, never a second) — or why not:
+     * `invalid_request` (no workflow, a key that is not one) and
+     * `identity_required` (nobody identified, or someone else identified
+     * while the agent's settings loaded: nothing is asked) from the device; `not_allowed`, `not_verified`, `rate_limited`
+     * ([GraineError.retryAfterSeconds]), `unavailable`, `invalid_request` (a
+     * field the workflow needs that your app may not send) from Graine;
+     * `network` when no answer came twice; the session's own refusal when it
+     * could not be loaded. On the main thread.
+     */
+    @JvmOverloads
+    fun startWorkflow(
+        workflow: String,
+        data: Map<String, Any?> = emptyMap(),
+        idempotencyKey: String? = null,
+        done: GraineCallback<GraineWorkflowRun>? = null,
+    ) {
+        val name = Workflows.name(workflow)
+        if (name == null) {
+            main.post { done?.onResult(null, GraineError(GraineErrorCode.INVALID_REQUEST, Workflows.NAME_MESSAGE)) }
+            return
+        }
+        if (idempotencyKey != null && !Workflows.isIdempotencyKey(idempotencyKey)) {
+            main.post { done?.onResult(null, GraineError(GraineErrorCode.INVALID_REQUEST, Workflows.KEY_MESSAGE)) }
+            return
+        }
+        val key = idempotencyKey ?: Workflows.newKey()
+        // Read once, now: a map the app changes afterwards changes nothing that is sent.
+        val fields = Workflows.data(data)
+        // For the user identified when it was asked: one replaced while the session loaded never has a run started for them.
+        afterSession({ e -> done?.onResult(null, e) }, forWhoAsked = true) { env ->
+            if (env.value == null) {
+                val why = identityRequired()
+                main.post { done?.onResult(null, why) }
+                return@afterSession
+            }
+            val body = env.who(JSONObject()).put("workflow", name).put("data", fields).put("idempotencyKey", key)
+            askToStart(body, retried = false, done = done)
+        }
+    }
+
+    private fun askToStart(body: JSONObject, retried: Boolean, done: GraineCallback<GraineWorkflowRun>?) {
+        request(EmbedApi.START_WORKFLOW, body) { r ->
+            when (r) {
+                is EmbedReply.Ok -> {
+                    val run = Workflows.run(r.body)
+                    if (run != null) done?.onResult(run, null)
+                    else done?.onResult(null, GraineError(GraineErrorCode.Unknown("unreadable_answer"), "The workflow was started, but its run id did not come back."))
+                }
+                // No answer: the start may have been made or not. The same key again is answered with
+                // the run it made, or makes it now — never two. A refusal is Graine's answer: never asked again.
+                is EmbedReply.Failed ->
+                    if (!retried && r.error.code == GraineErrorCode.NETWORK) main.postDelayed({ askToStart(body, true, done) }, Workflows.RETRY_MS)
+                    else done?.onResult(null, r.error)
             }
         }
     }
@@ -1295,14 +1748,14 @@ class GraineInApp private constructor(
      * With [retries], a request that got no answer is tried again after each
      * wait — never one the server refused.
      */
-    internal fun request(path: String, body: JSONObject, retries: List<Long> = emptyList(), done: (EmbedReply) -> Unit) {
+    internal fun request(path: String, body: JSONObject, retries: List<Long> = emptyList(), pinned: Pinned? = null, done: (EmbedReply) -> Unit) {
         io.execute {
-            val reply = api.post(path, body)
+            val reply = if (pinned != null) api.postPinned(path, body, pinned.token) else api.post(path, body)
             val failed = reply as? EmbedReply.Failed
-            if (failed != null && retries.isNotEmpty() && HostedOutcomes.retryable(failed.error)) {
+            if (failed != null && retries.isNotEmpty() && HostedOutcomes.retryable(failed)) {
                 // A rate limit's Retry-After is honoured: never sooner than the server asked.
                 val wait = maxOf(retries.first(), failed.retryAfterMs ?: 0L)
-                main.postDelayed({ request(path, body, retries.drop(1), done) }, wait)
+                main.postDelayed({ request(path, body, retries.drop(1), pinned, done) }, wait)
                 return@execute
             }
             main.post { done(reply) }
@@ -1367,6 +1820,10 @@ class GraineInApp private constructor(
     companion object {
         internal const val TAG = "Graine"
 
+        /** IDENTITY_REQUIRED's sentence for a request whose user was replaced while the session loaded. The same words as the iOS SDK's. */
+        internal const val SOMEONE_ELSE_IDENTIFIED = "Someone else was identified while the agent's settings were loading, so nothing was asked " +
+            "for the customer identified before. Ask again for the customer identified now."
+
         /** The name of the agent init() makes when it is given none, and get() returns. */
         const val DEFAULT = "default"
 
@@ -1415,29 +1872,71 @@ class GraineInApp private constructor(
         /** A native call takes the line: every agent's web view call ends first. */
         internal fun endWebViewCalls() = AppShared.all().forEach { it.endWebViewCall() }
 
+        /** Some agent's web view call still holds the phone's audio (GraineVoice.holdsAudio): a native call's audio waits for it. */
+        internal fun webViewCallHoldsAudio(): Boolean = AppShared.all().any { it.voiceLazy.isInitialized() && it.voice.holdsAudio }
+
         /** FCM's new token: kept, and registered by every agent with its own key, so each agent's workspace can ring this install. */
         internal fun tokenChanged(token: String) = AppShared.all().forEach { it.pushTokenChanged(token) }
 
         /** A native call went live (it holds every chat) or ended (each chat the customer is in comes back). */
         internal fun nativeCallChanged(live: Boolean) = AppShared.all().forEach { g -> if (g.chatLazy.isInitialized()) g.chat.nativeCall(live) }
+
+        /**
+         * THE CALLS HOST'S TOKEN (CLIENT-TOKENS.md §2.4): React Native's or
+         * Flutter's own token manager pushed its newest (null: none). Every agent
+         * sends it from now on — and every agent made later — except one the app
+         * configured with a provider of its own, which keeps its own tokens.
+         */
+        internal fun pushClientToken(token: String?) {
+            AppShared.pushedToken = AppShared.Pushed(token)
+            AppShared.all().forEach { it.clientTokens.push(token) }
+        }
+
+        /**
+         * How a calls host asks its JavaScript or Dart manager for a token — its
+         * `needClientToken` event — when one of an agent's requests was refused
+         * for its token: every agent, and every agent made later. Any thread.
+         */
+        internal fun askHostForTokens(ask: (() -> Unit)?) {
+            AppShared.tokenAsk = ask
+            AppShared.all().forEach { it.clientTokens.onNeed = ask }
+        }
     }
 
     /** Just made: who the user already is, as the other agents know it; the app's lifecycle; the session; the push token. */
     private fun started() {
         AppShared.traits?.let { t ->
             variables.setIdentity(t)
-            identity.set(t, AppShared.memory)
+            // The choice is the user's it was made for: before a session names the trait, a switch could not be seen.
+            identity.set(t, AppShared.memory, madeFor = AppShared.memoryFor)
         }
         // The call engine's log follows the agents: any one of them in debug turns it on.
         if (config.debug) CallLog.enabled = true
         watchLifecycle()
         // Back in the foreground: the next call's grant is checked — nothing is sent while it holds (RtcDirect.kt).
         foregroundWatchers.add { inFront -> if (inFront) warmCalls(identityEnvelope()) }
+        // This app's proofs: this agent's key, the pass kept for it read back, and renewed when the app comes back.
+        val p = proofs
+        p.app.register(config.publishableKey, config.baseUrl, env.http)
+        foregroundWatchers.add { inFront -> if (inFront) p.app.foreground() }
+        // Server tokens: a calls host's, when it bridges one; then the first token is asked for, before the session —
+        // a new connection, which waits for it. Nothing is asked while the app is in the background.
+        AppShared.tokenAsk?.let { clientTokens.onNeed = it }
+        AppShared.pushedToken?.let { clientTokens.push(it.token) }
+        clientTokens.start()
+        foregroundWatchers.add { inFront -> clientTokens.setForeground(inFront) }
         loadSession { }
         // With Firebase in the app, this install's push token reaches the SDK by itself — once a process.
         FirebasePush.start(application, config.debug)
     }
 }
+
+/**
+ * The session route refused: its status and body, with the sentence the app
+ * has always been told (the message, as before). An IllegalStateException, as
+ * the refusal always was.
+ */
+internal class SessionRefusedException(val status: Int, val body: JSONObject, message: String) : IllegalStateException(message)
 
 /**
  * `POST {baseUrl}/api/embed/session` — the agent's configuration, as every
@@ -1447,10 +1946,64 @@ class GraineInApp private constructor(
 internal object SessionFetch {
     fun fetch(baseUrl: String, publishableKey: String): SessionConfig = parse(fetchJson(baseUrl, publishableKey))
 
-    /** The session's answer as served, for [parse] and for the copy kept on the device. */
-    fun fetchJson(baseUrl: String, publishableKey: String): JSONObject {
-        val url = URL("${baseUrl.trimEnd('/')}/api/embed/session")
-        val conn = (url.openConnection() as HttpURLConnection).apply {
+    /**
+     * Why the session could not be loaded, as the refusal a request that
+     * needed it hands the app: the route's own code — or its status read as
+     * every request's is ([EmbedApi.errorFor]), Graine's `reason` with it —
+     * with the sentence the app was told; [GraineErrorCode.NETWORK] when no
+     * answer came back.
+     */
+    fun refusal(e: Throwable?): GraineError = when (e) {
+        is SessionRefusedException -> EmbedApi.errorFor(e.status, e.body).copy(message = e.message ?: "Could not load the agent.")
+        is java.io.IOException -> GraineError(GraineErrorCode.NETWORK, "Graine could not be reached. Check the connection and try again.")
+        else -> GraineError(GraineErrorCode.UNAVAILABLE, e?.message?.takeIf { it.isNotBlank() } ?: "Could not load the agent.")
+    }
+
+    /**
+     * The session's request: the key, and the server token when one is given —
+     * and, added by the one door every request goes through, the app's declaration.
+     */
+    fun body(publishableKey: String, clientToken: String? = null): JSONObject =
+        JSONObject().put("publishableKey", publishableKey).also { b -> clientToken?.let { b.put(ClientTokenRules.FIELD, it) } }
+
+    /**
+     * The session's answer as served, for [parse] and for the copy kept on the
+     * device. [clientToken]: the server token the request carries
+     * (CLIENT-TOKENS.md §2.2 — the agent waits for it and asks again when it is
+     * refused); null sends none. [post] sends it: the platform's HTTP.
+     */
+    @JvmOverloads
+    fun fetchJson(
+        baseUrl: String,
+        publishableKey: String,
+        clientToken: String? = null,
+        post: (url: String, json: String) -> HttpReply = ::postSession,
+    ): JSONObject {
+        val url = "${baseUrl.trimEnd('/')}/api/embed/session"
+        // Through the one door: the app's declaration (EmbedRequest.kt).
+        val reply = EmbedRequest.send(url, body(publishableKey, clientToken)) { json -> post(url, json) }
+        val code = reply.code
+        val data = runCatching { JSONObject(reply.body) }.getOrElse { JSONObject() }
+        // Refused for the server token or the publishable key: Graine's own sentence, never the allowed-domains one.
+        ClientTokenRules.refusal(code, reply.body)?.let { throw SessionRefusedException(code, data, it.message) }
+        when {
+            code in 200..299 -> Unit
+            code == 403 && data.optString("code") == GraineErrorCode.APP_NOT_ALLOWED.wire ->
+                throw SessionRefusedException(code, data,
+                    "This agent accepts only the apps listed under its Your apps settings, and this app is not one of them. " +
+                        "(server said: ${data.optString("error", "app not allowed")})")
+            code == 403 -> throw SessionRefusedException(code, data,
+                "This agent does not accept connections from a mobile app yet. Add \"app://\" to its " +
+                    "Allowed domains in the dashboard, under Embed & Widgets. (server said: ${data.optString("error", "forbidden")})")
+            code == 401 -> throw SessionRefusedException(code, data, "Publishable key was rejected. Check it against Embed & Widgets in the dashboard.")
+            else -> throw SessionRefusedException(code, data, data.optString("error").ifEmpty { "Embed rejected ($code)" })
+        }
+        return data
+    }
+
+    /** The session's POST: no Origin header, the session's own timeouts. Throws on a network error. */
+    private fun postSession(url: String, json: String): HttpReply {
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 10_000
             readTimeout = 15_000
@@ -1458,20 +2011,11 @@ internal object SessionFetch {
             setRequestProperty("Content-Type", "application/json")
         }
         try {
-            conn.outputStream.use { it.write(JSONObject().put("publishableKey", publishableKey).toString().toByteArray()) }
+            conn.outputStream.use { it.write(json.toByteArray(Charsets.UTF_8)) }
             val code = conn.responseCode
             val body = (if (code in 200..299) conn.inputStream else conn.errorStream)
                 ?.bufferedReader()?.use(BufferedReader::readText).orEmpty()
-            val data = runCatching { JSONObject(body) }.getOrElse { JSONObject() }
-            when (code) {
-                in 200..299 -> Unit
-                403 -> throw IllegalStateException(
-                    "This agent does not accept connections from a mobile app yet. Add \"app://\" to its " +
-                        "Allowed domains in the dashboard, under Embed & Widgets. (server said: ${data.optString("error", "forbidden")})")
-                401 -> throw IllegalStateException("Publishable key was rejected. Check it against Embed & Widgets in the dashboard.")
-                else -> throw IllegalStateException(data.optString("error").ifEmpty { "Embed rejected ($code)" })
-            }
-            return data
+            return HttpReply(code, body, conn.getHeaderField("Retry-After")?.trim()?.toLongOrNull())
         } finally {
             conn.disconnect()
         }

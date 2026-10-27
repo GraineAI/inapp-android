@@ -219,6 +219,17 @@ class ChatTest {
         assertEquals("checkout", socket.frames().last().getJSONObject("context").getString("screen"))
     }
 
+    @Test fun anEventCarryingANumberJsonCannotHoldStillReachesTheAgent() {
+        val s = open()
+        s.reportEvent("weighed", mapOf("detail" to "Weighed in", "bmi" to Double.NaN, "cooldown_seconds" to 0))
+        sched.drain()
+        val ev = socket.frames().last()
+        assertEquals("app_event", ev.getString("type"))
+        assertEquals("weighed", ev.getJSONObject("event").getString("name"))
+        assertTrue("null, as JSON has no NaN — not an event lost on the session's thread", ev.getJSONObject("event").isNull("bmi"))
+        assertEquals(0, ev.getJSONObject("event").getInt("cooldown_seconds"))
+    }
+
     @Test fun closingSaysStopThenCloses() {
         val s = open()
         s.close(); sched.drain()

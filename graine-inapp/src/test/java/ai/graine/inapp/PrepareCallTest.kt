@@ -732,6 +732,121 @@ class PrepareCallTest {
         g.calls.end(); pump()
     }
 
+    // ── the ring lasts as long as the call rings ────────────────────────────
+
+    /**
+     * A ring Graine sends rings for the agent's ring time (45 s unless the
+     * dashboard says otherwise), not the app's 30 s: its notification — the
+     * sound, the full-screen screen, Answer and Decline — must ring exactly as
+     * long, or it is gone while the call can still be answered and is not yet missed.
+     */
+    @Test fun aHostedRingsNotificationRingsForAsLongAsTheCallRings() {
+        val g = started()
+        val outcomes = outcomesOf(g)
+        ring(g, "sc_ring_long")
+        assertEquals("the agent's ring time, not the app's", 45_000L, g.calls.ringingTimeoutMs())
+        clock.advance(45_000L - 1)
+        assertEquals(GraineCallState.RINGING, g.calls.state)
+        clock.advance(1)
+        assertEquals("missed at that moment, as the notification goes", GraineCallOutcome.Kind.MISSED, outcomes.last().kind)
+        // A ring from the app's own server: the app's ring time, for the call and its notification alike.
+        assertTrue(g.calls.handlePush(mapOf("type" to "agent_call", "call_id" to "own_ring_1")))
+        pump()
+        assertEquals(GraineCallState.RINGING, g.calls.state)
+        assertEquals(30_000L, g.calls.ringingTimeoutMs())
+        g.calls.decline(); pump()
+    }
+
+    // ── talk, then call: the voice bar's call lets go of the audio first ────
+
+    /**
+     * The customer is in the voice bar's call (the web view's) and places a
+     * native call. The web view's call is told to end — and until its page says
+     * it has, it still holds the phone's audio: its microphone, and the audio
+     * mode the web view set and puts back as it closes. The native call's route
+     * and its dial wait for that, so neither lands under the closing web call.
+     */
+    @Test fun aCallPlacedDuringTheVoiceBarsCallWaitsForItToLetGoOfTheAudio() {
+        val g = started()
+        inFront(g)
+        prepare(g)
+        g.voice.handle(PageMessage.Call(connected = true, connecting = false))
+        g.calls.startCall(activity, "help", vars, agent = g.name)!!
+        pump()
+        assertTrue("no route while the web view's call holds the audio", phone.acquired.isEmpty())
+        assertEquals("and nothing dialled", 0, invites())
+        assertEquals(GraineCallState.CONNECTING, g.calls.state)
+        // The page hung up: the audio is free.
+        g.voice.handle(PageMessage.Call(connected = false, connecting = false))
+        g.voice.handle(PageMessage.Ended)
+        pump()
+        assertEquals("the route, once", 1, phone.acquired.size)
+        assertTrue("then the dial", invites() > 0)
+        g.calls.end(); pump()
+    }
+
+    /** A page that never says it ended is ended by the voice bar's own watchdog; the native call goes on then, and only then. */
+    @Test fun aVoiceBarCallThatNeverConfirmsItsEndHoldsTheNativeCallOnlyUntilItsWatchdog() {
+        val g = started()
+        inFront(g)
+        prepare(g)
+        g.voice.handle(PageMessage.Call(connected = true, connecting = false))
+        g.calls.startCall(activity, "help", vars, agent = g.name)!!
+        pump()
+        clock.advance(g.config.timing.endWatchdogMs - 1); pump()
+        assertEquals("still waiting for the web view's call", 0, invites())
+        clock.advance(1); pump()
+        assertEquals(1, phone.acquired.size)
+        assertTrue(invites() > 0)
+        g.calls.end(); pump()
+    }
+
+    /** However long the voice bar's own watchdog is set to wait, the native call waits five seconds at most. */
+    @Test fun theNativeCallWaitsForTheVoiceBarsCallFiveSecondsAtMost() {
+        sessions["pk_a"] = session()
+        val g = GraineInApp.make(app, GraineConfig(web, "pk_a", timing = GraineConfig.Timing(endWatchdogMs = 30_000)), GraineInApp.DEFAULT) { env() }
+        pump()
+        inFront(g)
+        prepare(g)
+        g.voice.handle(PageMessage.Call(connected = true, connecting = false))
+        g.calls.startCall(activity, "help", vars, agent = g.name)!!
+        pump()
+        clock.advance(GraineCalls.WEB_CALL_RELEASE_MS - 1); pump()
+        assertEquals(0, invites())
+        clock.advance(1); pump()
+        assertEquals(1, phone.acquired.size)
+        assertTrue(invites() > 0)
+        g.calls.end(); pump()
+    }
+
+    @Test fun aRingAnsweredDuringTheVoiceBarsCallWaitsForItToLetGoOfTheAudio() {
+        val g = started()
+        inFront(g)
+        g.voice.handle(PageMessage.Call(connected = true, connecting = false))
+        ring(g, "sc_ring_talk")
+        g.calls.answer()
+        pump()
+        assertTrue(phone.acquired.isEmpty())
+        assertEquals(0, invites())
+        g.voice.handle(PageMessage.Ended)
+        pump()
+        assertEquals(1, phone.acquired.size)
+        assertTrue(invites() > 0)
+        g.calls.end(); pump()
+    }
+
+    @Test fun withNoVoiceBarCallTheNativeCallWaitsForNothing() {
+        val g = started()
+        inFront(g)
+        prepare(g)
+        g.voice.handle(PageMessage.Call(connected = false, connecting = false))
+        g.calls.startCall(activity, "help", vars, agent = g.name)!!
+        pump()
+        assertEquals(1, phone.acquired.size)
+        assertTrue(invites() > 0)
+        g.calls.end(); pump()
+    }
+
     // ── the call's audio always starts, and the SDK never ends a call that works ──
 
     /** A call placed at the tap in the app in front, connected: its audio is flowing. */
@@ -799,6 +914,33 @@ class PrepareCallTest {
         assertTrue(outcomes.isEmpty())
         g.calls.end(); pump()
         assertEquals(GraineCallOutcome.Kind.ENDED, outcomes.single().kind)
+    }
+
+    /**
+     * A call placed right after another — an app that redials as the last one
+     * goes idle, the phone locked — waits for its own service. The last call's
+     * service, stopped as that call ended, is destroyed after the next call
+     * began: that is no loss to the next call, which must not fail for it.
+     */
+    @Test fun theLastCallsServiceGoingAwayNeverFailsTheNextCall() {
+        val g = started()
+        val outcomes = outcomesOf(g)
+        val first = connectedAtTheTap(g)
+        g.calls.serviceStarted(first); pump()
+        g.calls.end(); pump()
+        phone.locked = true
+        prepare(g)
+        g.calls.startCall(activity, "help", vars, agent = g.name)!!
+        pump()
+        val before = invites()
+        outcomes.clear()
+        // The first call's service: its onDestroy, after the stop its call's end asked for.
+        g.calls.serviceStopped(first); pump()
+        assertEquals("the next call goes on waiting for its own service", GraineCallState.CONNECTING, g.calls.state)
+        assertTrue("and nothing was reported for it", outcomes.isEmpty())
+        g.calls.serviceStarted(GraineCallService()); pump()
+        assertTrue("its own service is up: the dial", invites() > before)
+        g.calls.end(); pump()
     }
 
     @Test fun aCallWaitingForItsServiceStartsWithoutItWhenTheAppIsInFrontAndFailsWhenItCannotRecord() {

@@ -102,6 +102,36 @@ internal object IdentityRules {
         return domain.indices.any { i -> domain[i] == '.' && i > 0 && i < domain.length - 1 }
     }
 
+    /**
+     * The sentence for a request that needs the user and has none, naming the
+     * trait this agent identifies users by — the usual mistake is identifying
+     * them by another one (`user_id` sent, `patient_id` expected). [field] is
+     * that trait (null before the session said); [identified] whether
+     * identify() was given traits at all. The same words as the iOS SDK's.
+     */
+    fun missingIdentityMessage(field: String?, identified: Boolean): String = when {
+        field == null -> "Nobody is identified: call identify() with the customer's identifier first."
+        !identified -> "Nobody is identified: call identify() with the customer's \"$field\" first."
+        else -> "identify() was given no usable \"$field\" — the trait this agent identifies customers by " +
+            "(Who is the user? in the agent's memory settings). Until it is, conversations are anonymous and nothing is remembered."
+    }
+
+    /**
+     * Whether two identity values name one user as Graine keys users: the
+     * same normalised value under [field] (identity-vectors.json) —
+     * "Asha@Example.com" and "asha@example.com", "+91 98765 43210" and
+     * "9876543210". Nobody is nobody's same user; with no field yet, only the
+     * same text. Every "is this someone else?" the SDK decides goes through
+     * it: a sign-out, the chat starting over, a memory choice, a request that
+     * waited for the session.
+     */
+    fun sameUser(field: String?, a: String?, b: String?): Boolean {
+        if (a == b) return true
+        if (field == null || a == null || b == null) return false
+        val key = normalisedValue(field, a) ?: return false
+        return key == normalisedValue(field, b)
+    }
+
     /** The key in `traits` that holds `field`: the exact one first, else the same name in other capitals or spaces. */
     fun keyFor(traits: Map<String, Any?>?, field: String?): String? {
         if (traits == null || field == null) return null
@@ -142,6 +172,24 @@ internal object IdentityRules {
 
     /** A short one-way name for anything that must be compared without being kept. */
     fun fingerprint(value: String): String = sha16(value)
+
+    /**
+     * Whether [after] names the user [before] named (APP-IDENTITY.md §1.3):
+     * the same value under every trait an agent identifies users by
+     * ([fields], one per agent: null for an agent whose session has not said
+     * yet). While any agent has not said, every trait that could be one is
+     * compared — another value anywhere is another user. Nobody on either side
+     * is never the same user.
+     */
+    fun sameUser(before: Map<String, Any?>?, after: Map<String, Any?>?, fields: List<String?>): Boolean {
+        if (before == null || after == null) return false
+        val named = fields.filterNotNull().toMutableSet()
+        if (fields.isEmpty() || fields.any { it == null }) {
+            named += DEFAULT_FIELD
+            (before.keys + after.keys).mapNotNullTo(named) { field(it) }
+        }
+        return named.all { f -> pick(before, f) == pick(after, f) }
+    }
 }
 
 /**
@@ -237,6 +285,16 @@ internal class DeviceStore(private val file: File?) {
         get() = get(KEY_TOKEN)
         set(v) = put(KEY_TOKEN, v?.takeIf { it.isNotBlank() })
 
+    /** This install's debug token (development mode, APP-IDENTITY.md §3.6), kept with the install id; null until one is made. */
+    var debugToken: String?
+        get() = get(KEY_DEBUG_TOKEN)
+        set(v) = put(KEY_DEBUG_TOKEN, v?.takeIf { it.isNotBlank() })
+
+    /** The debug token's line has been logged: once per install. */
+    var debugTokenLogged: Boolean
+        get() = get(KEY_DEBUG_TOKEN_LOGGED) == "1"
+        set(v) = put(KEY_DEBUG_TOKEN_LOGGED, if (v) "1" else null)
+
     /** The last memory choice made for this user (filed under [IdentityRules.memoryKey]) on this install; null when none was. */
     @Synchronized
     fun memoryFor(field: String, value: String): Boolean? {
@@ -291,6 +349,8 @@ internal class DeviceStore(private val file: File?) {
         private const val KEY_TOKEN = "fcmToken"
         private const val KEY_MEMORY = "memory"
         private const val KEY_REGISTERED = "registered"
+        private const val KEY_DEBUG_TOKEN = "debugToken"
+        private const val KEY_DEBUG_TOKEN_LOGGED = "debugTokenLogged"
         const val MEMORY_CHOICES = 32
 
         @Volatile private var shared: DeviceStore? = null
@@ -325,24 +385,44 @@ internal class IdentityState(private val store: () -> DeviceStore) {
     @Volatile private var field: String? = null
     /** The memory choice the app made for the current user, this launch. */
     @Volatile private var explicit: Boolean? = null
+    /** The traits [explicit] was chosen for: whom they name can be read only once the session names the field. */
+    @Volatile private var explicitFor: Map<String, Any?>? = null
 
-    /** identify(): the traits, and the memory choice when the app made one. */
-    fun set(next: Map<String, Any?>?, memory: Boolean?) {
+    /**
+     * identify(): the traits, and the memory choice when the app made one —
+     * for [madeFor], the traits it was made for (another agent heard it, for
+     * the user identified then): a choice for someone else is not this user's.
+     */
+    fun set(next: Map<String, Any?>?, memory: Boolean?, madeFor: Map<String, Any?>? = next) {
         val before = value()
         traits = next?.let { LinkedHashMap(it) }
+        val named = field
+        val forThisUser = named == null || IdentityRules.sameUser(named, IdentityRules.pick(madeFor, named), value())
         // Another user: their own kept choice applies, not the last user's.
-        if (memory != null) explicit = memory else if (value() != before) explicit = null
+        if (memory != null && forThisUser) {
+            explicit = memory
+            explicitFor = madeFor?.let { LinkedHashMap(it) }
+        } else if (!IdentityRules.sameUser(named, value(), before)) {
+            explicit = null
+        }
         remember()
     }
 
     /** The session named the field (null: it says nothing, so the default). A choice already made follows the user. */
     fun onSession(identity: SessionIdentity?) {
-        field = identity?.field ?: IdentityRules.DEFAULT_FIELD
+        val named = identity?.field ?: IdentityRules.DEFAULT_FIELD
+        field = named
+        // A choice made before the session named the trait is the user's it was made for: one who signed out before
+        // the session, and the next user on the phone, never gives that user their choice.
+        if (explicit != null && !IdentityRules.sameUser(named, IdentityRules.pick(explicitFor, named), value())) explicit = null
         remember()
     }
 
     /** The trait that names the user — kept out of the variables and `context.user`. `user_id` until the session says. */
     fun fieldOrDefault(): String = field ?: IdentityRules.DEFAULT_FIELD
+
+    /** The trait the session named; null before it arrived. */
+    fun field(): String? = field
 
     /** The raw value of the configured field, or null: no identity (or no session yet). */
     fun value(): String? = field?.let { IdentityRules.pick(traits, it) }
@@ -357,6 +437,7 @@ internal class IdentityState(private val store: () -> DeviceStore) {
 
     fun setMemory(enabled: Boolean) {
         explicit = enabled
+        explicitFor = traits
         remember()
     }
 
@@ -369,4 +450,22 @@ internal class IdentityState(private val store: () -> DeviceStore) {
 
     fun envelope(): IdentityEnvelope =
         IdentityEnvelope(value(), runCatching { store().installId() }.getOrNull(), memory(), IdentityRules.timezone())
+
+    /** Whether [a] and [b] name one user as Graine keys them, under the trait the session named ([IdentityRules.sameUser]). */
+    fun sameUser(a: String?, b: String?): Boolean = IdentityRules.sameUser(field, a, b)
+
+    /** The traits identify() was last given, as given: what a request keeps of who asked for it. */
+    fun traitsNow(): Map<String, Any?>? = traits
+
+    /** The value [asked] hold for the trait the session named — who a request made before the session was asking for. Null before the session, or when they hold none. */
+    fun valueOf(asked: Map<String, Any?>?): String? = field?.let { IdentityRules.pick(asked, it) }
+
+    /** identify() was given someone — traits, whether or not they carry the agent's trait; false after sign-out. */
+    fun hasTraits(): Boolean = traits != null
+
+    /** The session named the trait, the app identified someone, and the traits carry no usable one. */
+    fun traitsLackField(): Boolean = field != null && traits != null && value() == null
+
+    /** Why a request that needs the user has none, naming the trait this agent identifies users by. */
+    fun missingIdentityMessage(): String = IdentityRules.missingIdentityMessage(field, traits != null)
 }

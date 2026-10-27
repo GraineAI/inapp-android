@@ -48,14 +48,20 @@ import java.util.concurrent.FutureTask
  * Permissions and setup: [callPermissions], [requestCallPermissions],
  * [openCallSettings] and [callSetupProblems], as JSON-safe maps.
  *
+ * Server tokens: a wrapper whose own token manager (JavaScript, Dart) holds
+ * the app's server tokens pushes each new one with [setClientToken], and
+ * hears `needClientToken` when a request of the SDK's was refused for its
+ * token.
+ *
  * Events: `state` (the snapshot, at most once per turn of the main loop),
- * `outcome`, `incoming` and `action` (`voipToken` is iOS's). Main thread: a
+ * `outcome`, `incoming`, `action` and `needClientToken` (`voipToken` is
+ * iOS's). Main thread: a
  * call from another thread hops there first (`configure`, `restore`,
  * `snapshot`, `handlePush`, `startCall`, `addSink` and
  * `needsMicrophonePermission` wait for their answer), and events are sent on it.
  */
 object GraineCallsHost {
-    /** Receives every event: its name (`state`, `outcome`, `incoming`, `action`) and its payload. Main thread. */
+    /** Receives every event: its name (`state`, `outcome`, `incoming`, `action`, `needClientToken`) and its payload. Main thread. */
     fun interface Sink {
         fun onEvent(event: String, payload: Map<String, Any?>)
     }
@@ -249,6 +255,21 @@ object GraineCallsHost {
     /** The runtime variables become exactly this map: a key the last map set and this one leaves out is removed. */
     @JvmStatic
     fun setVariables(values: Map<*, *>?) = onMain { core.setVariables(values) }
+
+    /**
+     * The server token the wrapper's own token manager holds — on every change;
+     * null when it has none. Every request the SDK makes to Graine carries it
+     * from then on (calls' credentials and tickets, device registration, call
+     * outcomes, …). When one is refused for its token, the sinks hear
+     * `needClientToken` (an empty payload): fetch a fresh token (one question at
+     * a time) and call this again; the request waits at most 5 seconds for it,
+     * then goes once more. Before `configure` it is held and applied then. An
+     * agent the app configured natively with its own
+     * [GraineConfig.tokenProvider] keeps its own tokens and ignores this.
+     * New in 0.14.4.
+     */
+    @JvmStatic
+    fun setClientToken(token: String?) = onMain { core.setClientToken(token) }
 
     /** The screen, as `{screen, title?, journey?, fields?, error?, data?, availableActions?}`; null, or no screen name, for none. */
     @JvmStatic
@@ -482,6 +503,11 @@ object GraineCallsHost {
         }
 
         override fun setScreen(screen: GraineScreen?) { graine?.setScreen(screen) }
+
+        // Server tokens are the app's: every agent sends the one pushed, and asks the wrapper for another when refused.
+        override fun setClientToken(token: String?) = GraineInApp.pushClientToken(token)
+
+        override fun askForClientTokens(ask: () -> Unit) = GraineInApp.askHostForTokens(ask)
 
         /** Unregistering each action from every agent it was registered on. */
         private val unregisters = HashMap<String, MutableList<() -> Unit>>()

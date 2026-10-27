@@ -31,6 +31,10 @@ internal object AppShared {
 
     fun find(name: String): GraineInApp? = synchronized(agents) { agents[key(name)] }
 
+    /** The server tokens of the agent whose publishable key this is: what a request made for that key carries (CLIENT-TOKENS.md §2.2). */
+    fun tokensFor(publishableKey: String): ClientTokens? =
+        synchronized(agents) { agents.values.firstOrNull { it.config.publishableKey == publishableKey } }?.clientTokens
+
     /** Every configured agent, in the order they were made. */
     fun all(): List<GraineInApp> = synchronized(agents) { agents.values.toList() }
 
@@ -46,6 +50,8 @@ internal object AppShared {
     @Volatile var traits: Map<String, Any?>? = null
     /** The memory choice made for the current user this launch; null leaves the choice kept on the device. */
     @Volatile var memory: Boolean? = null
+    /** The traits [memory] was chosen for: an agent made later takes it on only for the user they name. */
+    @Volatile var memoryFor: Map<String, Any?>? = null
 
     // ── the screen ─────────────────────────────────────────────────────────
 
@@ -64,6 +70,16 @@ internal object AppShared {
             while (recentEvents.size > 10) recentEvents.removeFirst()
         }
     }
+
+    // ── a calls host's server tokens (CLIENT-TOKENS.md §2.4) ───────────────
+
+    /** A token a calls host pushed: [token] null is "none" — still a push, which puts tokens in play. */
+    class Pushed(val token: String?)
+
+    /** The last token the calls host pushed; null before it pushed any. An agent made later starts with it. */
+    @Volatile var pushedToken: Pushed? = null
+    /** How the calls host asks its JavaScript or Dart manager for a token; null with no host. An agent made later is given it. */
+    @Volatile var tokenAsk: (() -> Unit)? = null
 
     // ── the native call engine ─────────────────────────────────────────────
 
@@ -85,16 +101,43 @@ internal object AppShared {
         return all().firstOrNull { id in it.knownAgentIds() }
     }
 
+    // ── what Graine has proven: this app and this user ─────────────────────
+
+    @Volatile private var proofs: Proofs? = null
+
+    /** The process's proofs (EmbedRequest.kt), made by the first agent with [make]. */
+    fun proofs(make: () -> Proofs): Proofs = proofs ?: synchronized(this) { proofs ?: make().also { proofs = it } }
+
+    /** The proofs if an agent made them: before any agent, requests carry nothing of them. */
+    fun proofsIfMade(): Proofs? = proofs
+
+    /** What the agents with [publishableKey] (null: every agent) show of their verification may have changed. */
+    fun verificationChanged(publishableKey: String?) {
+        for (g in all()) if (publishableKey == null || g.config.publishableKey == publishableKey) g.verificationChanged()
+    }
+
+    /** The identity token changed: what each agent prepared or kept with the old one goes. */
+    fun identityTokenChanged() {
+        for (g in all()) g.identityTokenChanged()
+    }
+
+    /** The trait the agent behind [publishableKey] identifies users by; null before its session (or with no such agent). */
+    fun identityFieldFor(publishableKey: String): String? =
+        all().firstOrNull { it.config.publishableKey == publishableKey }?.identityField()
+
     /** Forget every agent and everything they shared: between tests, which make agents of their own. */
     fun reset() {
         synchronized(agents) { agents.clear() }
         traits = null
         memory = null
+        memoryFor = null
         screen = null
         screenSince = System.currentTimeMillis()
         lastTapAt = Long.MIN_VALUE / 2
         synchronized(recentEvents) { recentEvents.clear() }
-        synchronized(this) { calls = null }
+        synchronized(this) { calls = null; proofs = null }
+        pushedToken = null
+        tokenAsk = null
     }
 }
 
@@ -124,7 +167,8 @@ internal class AgentEnv(
     /** Blocking work: requests and the session. Null: the agent's own background thread. */
     val io: Executor? = null,
     val http: HttpPost = PlatformHttp,
-    val fetchSession: (baseUrl: String, publishableKey: String) -> JSONObject = { b, k -> SessionFetch.fetchJson(b, k) },
+    /** The session route. The platform's own carries the server token; a test's fake here reads none. */
+    val fetchSession: (baseUrl: String, publishableKey: String) -> JSONObject = PlatformSessionFetch,
     /** The chat's socket, its clock and where its ticket is minted. Null: the platform's. */
     val openSocket: ((String, List<String>, CallSocketListener) -> CallSocket)? = null,
     val scheduler: CallScheduler? = null,
@@ -139,4 +183,17 @@ internal class AgentEnv(
     val rtcEnv: ((GraineInApp) -> RtcEnv)? = null,
     /** The phone under a native call — its lock screen, audio route, microphone and speaker. Null: the phone's own; a fake in a test. */
     val callPhone: CallPhone? = null,
+    /** What proves this app and its user (EmbedRequest.kt), made by the process's first agent. Null: the app's own; fakes in a test. */
+    val proofs: (() -> Proofs)? = null,
+    /**
+     * The session route with the server token it carries (CLIENT-TOKENS.md
+     * §2.2), asked in place of [fetchSession]: a test that watches the token.
+     * Null: the platform's own route, or [fetchSession] when a test faked it.
+     */
+    val fetchSessionWithToken: ((baseUrl: String, publishableKey: String, clientToken: String?) -> JSONObject)? = null,
+    /** This agent's server tokens, from the app's provider. Null: the platform's clocks and threads; a test's own here. */
+    val clientTokens: ((GraineTokenProvider?) -> ClientTokens)? = null,
 )
+
+/** The platform's session route, as [AgentEnv.fetchSession] defaults to it: the agent then asks it with the server token. */
+internal val PlatformSessionFetch: (baseUrl: String, publishableKey: String) -> JSONObject = { b, k -> SessionFetch.fetchJson(b, k) }

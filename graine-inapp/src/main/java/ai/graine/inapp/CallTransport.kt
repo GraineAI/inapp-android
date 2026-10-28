@@ -167,7 +167,8 @@ internal class CallTransports(
         }
         // A ring: its own grant, wanted now, so the mint at the answer can go to the gateway (RtcDirect.kt).
         if (c.direction == GraineCall.Direction.INCOMING) runCatching { agent.warmRing(c.callId) }
-        // What the mint will carry: the call's variables, the app's, who the user is, and the call's id.
+        // What the mint will carry: the call's variables, the app's, who the user is, and the call's id — and whether
+        // Graine rang it: a ring's mint never waits for a token the user was identified without.
         val kept = agent.cachedSession
         val request = RtcCallRequest(
             baseUrl = agent.config.baseUrl,
@@ -176,6 +177,7 @@ internal class CallTransports(
             identity = runCatching { agent.identityEnvelope() }.getOrNull(),
             callId = c.callId,
             wsHost = agent.session?.wsHost ?: kept?.wsHost,
+            rang = c.direction == GraineCall.Direction.INCOMING,
         )
         val rtc = RtcCallSession(request, env(agent))
         plan.prepared = rtc
@@ -296,7 +298,10 @@ internal class CallTransports(
      * younger than four minutes, still registered — whose id the call takes,
      * and whose session its plan takes, so the dial is the INVITE. Else null,
      * and what was prepared goes: the tap prepares, as it always did. Every
-     * other agent's prepared call goes too — one call at a time. Main thread.
+     * other agent's prepared call goes too — one call at a time. Not one
+     * prepared without the user's identity token while the app's refresher may
+     * bring it now ([GraineInApp.missingTokenDue]): the tap prepares again and
+     * waits for the token there, so the call goes with it. Main thread.
      */
     fun takePrepared(agent: GraineInApp, reason: String?, variables: Map<String, String>): String? {
         val p = preparedCalls.remove(agent)
@@ -304,7 +309,7 @@ internal class CallTransports(
         if (p == null) return null
         p.expiry?.invoke()
         p.expiry = null
-        if (p.lost || p.key != keyFor(agent, reason, variables) || clock() - p.preparedAt >= PREPARED_MAX_AGE_MS) {
+        if (p.lost || p.key != keyFor(agent, reason, variables) || clock() - p.preparedAt >= PREPARED_MAX_AGE_MS || agent.missingTokenDue()) {
             p.session.hangUp()
             return null
         }

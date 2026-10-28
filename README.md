@@ -17,7 +17,7 @@ Integration guide: https://www.graine.ai/docs/in-app/android
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    implementation("ai.graine:inapp-android:0.14.4")
+    implementation("ai.graine:inapp-android:0.14.6")
 }
 ```
 
@@ -279,8 +279,8 @@ ring, the call screen or the outcomes.
 
 ```kotlin
 dependencies {
-    implementation("ai.graine:inapp-android:0.14.4")
-    implementation("ai.graine:inapp-android-rtc:0.14.4")   // same version as the SDK
+    implementation("ai.graine:inapp-android:0.14.6")
+    implementation("ai.graine:inapp-android-rtc:0.14.6")   // same version as the SDK
 }
 ```
 
@@ -376,7 +376,8 @@ graine.identify(mapOf("user_id" to user.id, "name" to user.firstName), identityT
 graine.setIdentityToken(renewedToken)
 
 // Let the SDK ask for a fresh one: when Graine says it expired, when a request is refused,
-// before a conversation whose JWT has less than a minute left, and when a call rings.
+// before a conversation whose JWT has less than a minute left, when a call rings — and, for a
+// user identified without a token, before their first conversation (waiting up to 10 seconds).
 graine.setIdentityTokenRefresher { api.graineToken() }        // a suspend function: the fresh token, or null
 
 // The same with a callback (and from Java):
@@ -389,8 +390,14 @@ graine.identify(null)
 ```
 
 The refresher is called on the main thread, at most once every 30 seconds and
-never twice at once. A conversation already open is never cut when a token
-lapses. Graine answers with a user pass that the SDK keeps for an hour and
+never twice at once. When the user was identified without a token and the agent
+checks its users, a conversation — the chat, the voice bar, a call your app
+places — the user's memories, past sessions, booked calls, workflows and a new
+conversation, and this device's registration for the calls Graine rings wait up
+to 10 seconds for its answer and go out with the token it gives; a registration
+that went without one is made again when the token arrives, so the user is rung
+on this device. Answering a call that rings never waits. A conversation already
+open is never cut when a token lapses. Graine answers with a user pass that the SDK keeps for an hour and
 sends with the same identity; another user, or sign-out, drops it at once.
 
 ### Your apps: prove the app with Play Integrity
@@ -403,7 +410,7 @@ turns away any other app. To **require a verified app**, add Play Integrity
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    implementation("ai.graine:inapp-android:0.14.4")
+    implementation("ai.graine:inapp-android:0.14.6")
     implementation("com.google.android.play:integrity:1.4.0")
 }
 ```

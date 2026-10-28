@@ -980,6 +980,8 @@ class GraineCalls internal constructor(
                 callId = c.callId,
                 // The tap, on the session's own clock: where the analytics rows' setup and total begin.
                 tapAt = tap?.takeIf { it.first == c.callId }?.second,
+                // A ring the person answered never waits for an identity token; a call the app placed does.
+                rang = c.direction == GraineCall.Direction.INCOMING,
             ),
             CallSessionDeps(
                 scheduler = scheduler,

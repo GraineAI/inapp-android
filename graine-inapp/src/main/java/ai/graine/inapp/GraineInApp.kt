@@ -494,6 +494,13 @@ class GraineInApp private constructor(
      * (and the pass Graine gave for it) in the same step; the same user without
      * a token keeps the one they have. Replace it with [setIdentityToken]; let
      * the SDK ask for a fresh one with [identityTokenRefresher].
+     *
+     * Identified without a token, with an [identityTokenRefresher] set and an
+     * agent that checks its users (Verified users on report or enforce), the
+     * SDK asks your refresher before the user's first conversation and waits
+     * up to 10 seconds for its answer, so the conversation goes out with the
+     * token rather than anonymously (new in 0.14.6). Passing the token here,
+     * when you have it, saves that wait.
      */
     @JvmOverloads
     fun identify(traits: Map<String, Any?>?, memory: Boolean? = null, identityToken: String? = null) {
@@ -522,6 +529,8 @@ class GraineInApp private constructor(
         // "asha@example.com") is no switch — never signed out, the chat never started over.
         val another = !identity.sameUser(before, after)
         if (another) {
+            // The last user's registration, waiting to be made again with their token, is theirs: never made for anyone else.
+            registeredWithoutToken = null
             // Someone else, or nobody: the last user's device binding is theirs, not the next user's — released with
             // their own server token.
             if (before != null) signOut(before, tokenBefore)
@@ -576,6 +585,18 @@ class GraineInApp private constructor(
      * twice at once; answering null — or throwing — keeps the token as it
      * was. One for the whole app, like [identify]. Null by default: the SDK
      * then only ever sends the token it was given.
+     *
+     * When the user was identified without a token and the agent checks its
+     * users (Verified users on report or enforce), the SDK also asks it before
+     * a conversation starts — the chat, the voice bar, a call your app places —
+     * before the user's memories, past sessions, booked calls, workflows and a
+     * new conversation, and before this device is registered for the calls
+     * Graine rings, and waits up to 10 seconds for your answer: the token you
+     * answer goes out with that request; null, a throw, or no answer within
+     * 10 seconds lets it go without one, as before. A registration that went
+     * without a token is made again once a token for the same user arrives, so
+     * they are rung on this device (new in 0.14.6). Answering a call that rings
+     * never waits for it.
      */
     var identityTokenRefresher: GraineIdentityTokenRefresher?
         get() = proofs.user.refresher
@@ -585,7 +606,8 @@ class GraineInApp private constructor(
 
     /**
      * [identityTokenRefresher] as a suspend function, for Kotlin — `{
-     * api.graineToken() }` — started on the main thread when the SDK asks;
+     * api.graineToken() }` — started on the main thread when the SDK asks
+     * (and waited for as [identityTokenRefresher] says);
      * its result is the fresh token, null (or a throw) keeps the current one.
      * Null removes the refresher.
      */
@@ -686,6 +708,8 @@ class GraineInApp private constructor(
         runCatching { env.directMint.forgetGrants(config.publishableKey) }
         AppShared.callsIfMade()?.proofChanged(this)
         announceIdentity()
+        // A registration of this install that went out without the token is made again with it ([registeredWithoutToken]).
+        main.post { registerAgainWithToken() }
     }
 
     /** The token and pass that go beside [value] on this agent's requests, as the one door sends them — for the voice page, which sends its own. */
@@ -703,6 +727,41 @@ class GraineInApp private constructor(
         val p = proofs
         loadSession { _ -> p.app.ring(config.publishableKey) }
         if (identity.hasTraits() && p.app.security(config.publishableKey)?.checksUsers != false) p.user.refreshInBackground()
+    }
+
+    /**
+     * Whether a conversation this agent starts now would first wait for the
+     * signed-in user's identity token — identified without one, an agent that
+     * checks its users, a refresher the app set and may be asked
+     * (UserProof.missingTokenDue): a call prepared ahead of the tap without it
+     * is then set up again at the tap. Any thread.
+     */
+    internal fun missingTokenDue(): Boolean =
+        runCatching { AppShared.proofsIfMade()?.missingTokenDue(config.publishableKey, identity.value()) }.getOrNull() == true
+
+    /**
+     * [then], on the main thread, once the signed-in user's identity token is
+     * in — for the voice bar, whose page starts its conversation with requests
+     * of its own: at once, unless the user was identified without a token, the
+     * agent checks its users and the app set a refresher
+     * (UserProof.askForMissingToken); then once the refresher answers, or after
+     * at most [UserProof.NO_TOKEN_WAIT_MS]. A token that came back has reached
+     * the page by then: the identity that carries it is posted to the main
+     * thread before the refresh lets anyone go ([identityTokenChanged]). The
+     * wait runs where a conversation's ticket does, never on the main thread.
+     */
+    internal fun afterMissingToken(then: () -> Unit) {
+        val p = AppShared.proofsIfMade()
+        val wait = p?.let { runCatching { it.askForMissingToken(config.publishableKey, identity.value()) }.getOrNull() }
+        if (p == null || wait == null) {
+            then()
+            return
+        }
+        val off: (() -> Unit) -> Unit = env.ticketIo ?: { work -> Thread({ work() }, "graine-identity-token").apply { isDaemon = true }.start() }
+        off {
+            runCatching { p.awaitAsked(wait) }
+            main.post { then() }
+        }
     }
 
     /**
@@ -1513,13 +1572,25 @@ class GraineInApp private constructor(
     @Volatile private var registering: String? = null
 
     /**
+     * The user whose registration of this install went out without their
+     * identity token, to an agent that checks its users — which registers the
+     * install alone, without its link to them, so they are not rung here —
+     * until a token for that same user arrives ([registerAgainWithToken]).
+     * Null otherwise; another user, or nobody, clears it. Main thread.
+     */
+    @Volatile private var registeredWithoutToken: String? = null
+
+    /**
      * Register this install's push token with Graine, when the workspace has
      * Graine ring its users (`calls.hosted`) and a token reached the SDK (from
      * Firebase by itself, or [GraineCalls.onNewToken]): on every new token ([force]), whenever what
      * it says changes (another user, a new zone, a new app version), and
      * otherwise at most once a day ([DeviceRegistration]). Best effort: the
      * next launch tries again. Every agent registers the one install with its
-     * own key, so each agent's workspace can ring it.
+     * own key, so each agent's workspace can ring it. Like a conversation, a
+     * registration for a user identified without their identity token waits
+     * for the app's refresher, at most 10 seconds (EmbedRequest.kt); one that
+     * went out without the token is made again once it arrives.
      */
     internal fun registerDevice(force: Boolean = false) {
         val token = runCatching { device.pushToken }.getOrNull() ?: return
@@ -1533,7 +1604,8 @@ class GraineInApp private constructor(
             val last = runCatching { device.lastRegistration(owner) ?: if (name == DEFAULT) device.lastRegistration() else null }.getOrNull()
             if (!force && !DeviceRegistration.due(last, fp, System.currentTimeMillis())) return@loadSession
             registering = fp
-            request(EmbedApi.DEVICES, DeviceRegistration.body(token, application.packageName, version, GraineVersion.NAME, who)) { r ->
+            val body = DeviceRegistration.body(token, application.packageName, version, GraineVersion.NAME, who)
+            request(EmbedApi.DEVICES, body) { r ->
                 registering = null
                 when (r) {
                     is EmbedReply.Ok -> {
@@ -1541,12 +1613,45 @@ class GraineInApp private constructor(
                         if (DeviceRegistration.reason(r.body) == GraineErrorCode.DEVICE_LIMIT.wire) {
                             android.util.Log.w(TAG, "This user is already on as many devices as the agent allows: this one is registered, but not rung for them.")
                         }
+                        registeredFor(who.value, body)
                     }
                     is EmbedReply.Failed ->
                         android.util.Log.w(TAG, "This device could not be registered for calls (${r.error.code}); it is tried again later.")
                 }
             }
         }
+    }
+
+    /**
+     * A registration for user [value] was taken. When it went out without
+     * their identity token — [body] as the one door sent it, which puts the
+     * token inside its identity when it has one (EmbedRequest.kt) — to an agent
+     * that checks its users, it is made again once a token for that same user
+     * arrives: at once, if one already has. A previous user's registration,
+     * answered late, changes nothing. Main thread.
+     */
+    private fun registeredFor(value: String?, body: JSONObject) {
+        if (value == null || !stillIdentified(value)) return
+        val sentToken = body.optJSONObject("identity")?.has("token") == true
+        val checksUsers = runCatching { proofs.app.security(config.publishableKey)?.checksUsers }.getOrNull() == true
+        registeredWithoutToken = if (!sentToken && checksUsers) value else null
+        registerAgainWithToken()
+    }
+
+    /**
+     * The registration that went out without the identity token is made
+     * again — once — when it was the user identified now, and a token is held
+     * for them now. Never for a user who has left. Main thread.
+     */
+    private fun registerAgainWithToken() {
+        val value = registeredWithoutToken ?: return
+        if (!stillIdentified(value)) {
+            registeredWithoutToken = null
+            return
+        }
+        if (identityProofFor(identity.value())?.token == null) return
+        registeredWithoutToken = null
+        registerDevice(force = true)
     }
 
     /** A new push token (the SDK's messaging service, the app's, or the one read at start): kept, and registered when Graine rings this app. */

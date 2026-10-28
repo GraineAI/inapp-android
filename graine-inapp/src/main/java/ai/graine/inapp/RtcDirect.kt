@@ -293,10 +293,11 @@ internal class RtcDirectMint(
         var signsNone = false
         try {
             // Through the one door (the app's declaration and proofs, the user's token and pass), and an rtc-session
-            // request like the mint's, so it carries the agent's server token the same way.
+            // request like the mint's, so it carries the agent's server token the same way — and, for the next call the
+            // app places, waits there for a token the user was identified without; a ringing call's own grant never does.
             val url = baseUrl.trimEnd('/') + RtcMint.PATH
             val agentTokens = runCatching { tokens(ask.publishableKey) }.getOrNull()
-            val reply = EmbedRequest.send(url, grantBody(ask), tokens = agentTokens, newConnection = true) { json -> http.post(url, json, WEB_TIMEOUT_MS) }
+            val reply = EmbedRequest.send(url, grantBody(ask), tokens = agentTokens, newConnection = true, forARing = !forNext) { json -> http.post(url, json, WEB_TIMEOUT_MS) }
             if (reply.code == 200) {
                 offer = RtcGrantOffer.of(reply.body)
                 if (offer == null) {

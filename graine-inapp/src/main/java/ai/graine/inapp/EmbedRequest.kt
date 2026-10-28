@@ -2,6 +2,7 @@ package ai.graine.inapp
 
 import android.app.Application
 import org.json.JSONObject
+import java.util.concurrent.CountDownLatch
 
 /*
  * THE ONE DOOR EVERY REQUEST TO GRAINE GOES THROUGH (APP-IDENTITY.md §1, §2).
@@ -18,6 +19,12 @@ import org.json.JSONObject
  *     only those given for exactly that value;
  *   · before a conversation (ticket, rtc-session): a JWT about to lapse is
  *     refreshed, and under "enforce" a proof on its way is waited for;
+ *   · before a conversation, and before a request that carries the user and
+ *     needs them proven (memories, past sessions, booked calls, a workflow, a
+ *     new conversation, this install's registration for calls): a user
+ *     identified without an identity token has the app's refresher asked and
+ *     waited for, at most 10 s, when the agent checks its users — never for a
+ *     call Graine rang, which the person is answering;
  *   · the answer's `verification` kept (passes, verdicts);
  *   · refused `app_not_verified`: the app proven, and the request sent once
  *     more; refused `identity_unverified`: the app's refresher asked, and the
@@ -26,17 +33,38 @@ import org.json.JSONObject
  * Blocking, never on the main thread — every caller is already off it.
  */
 internal object EmbedRequest {
-    /** What a request is, for the door: the session, the start of a conversation, the app's own proofs, or anything else. */
-    enum class Route { SESSION, CONVERSATION, APP_VERIFY, OTHER }
+    /**
+     * What a request is, for the door: the session, the start of a
+     * conversation, a request that carries the signed-in user and needs them
+     * proven ([USER_PATHS]), the app's own proofs, or anything else.
+     */
+    enum class Route { SESSION, CONVERSATION, USER, APP_VERIFY, OTHER }
 
     const val SESSION_PATH = "/api/embed/session"
     const val TICKET_PATH = "/api/embed/ticket"
+
+    /**
+     * The requests that carry the signed-in user and need them proven —
+     * their memories and forgetting them, past sessions and a transcript,
+     * booked calls (the list, a booking, a cancellation), a workflow the app
+     * starts for them, a new conversation, and this install's registration for
+     * the calls Graine rings (without the token, under Verified users, the
+     * install is registered alone and not rung for them) — which, like a
+     * conversation, wait for a token the user was identified without
+     * (UserProof.askForMissingToken).
+     */
+    private val USER_PATHS = listOf(
+        EmbedApi.MEMORIES, EmbedApi.FORGET, EmbedApi.PAST_SESSIONS, EmbedApi.SESSION_TRANSCRIPT,
+        EmbedApi.LIST, EmbedApi.SCHEDULE, EmbedApi.CANCEL, EmbedApi.START_WORKFLOW,
+        EmbedApi.NEW_CONVERSATION, EmbedApi.DEVICES,
+    )
 
     fun route(url: String): Route {
         val path = url.substringBefore('?').trimEnd('/')
         return when {
             path.endsWith(SESSION_PATH) -> Route.SESSION
             path.endsWith(TICKET_PATH) || path.endsWith(RtcMint.PATH) -> Route.CONVERSATION
+            USER_PATHS.any { path.endsWith(it) } -> Route.USER
             path.endsWith(AppProofs.VERIFY_PATH) || path.endsWith(AppProofs.CHALLENGE_PATH) -> Route.APP_VERIFY
             else -> Route.OTHER
         }
@@ -65,6 +93,9 @@ internal object EmbedRequest {
      * session, a ticket or a call's credential, which wait for a usable token.
      * Graine checks the token before the app and the user, so a refusal a fresh
      * token lifts is answered in there, before the door reads the answer.
+     * [forARing]: the request is for a call Graine rang — its credential, its
+     * grant, its ticket — which the person is answering, so it never waits for
+     * a token the user was identified without.
      * Throws what [post] throws.
      */
     fun send(
@@ -73,11 +104,12 @@ internal object EmbedRequest {
         anyAppPass: Boolean = false,
         tokens: ClientTokens? = null,
         newConnection: Boolean = false,
+        forARing: Boolean = false,
         post: (String) -> HttpReply,
     ): HttpReply {
         val carried = withToken(tokens, newConnection, post)
         val proofs = AppShared.proofsIfMade() ?: return carried(body.toString())
-        return proofs.send(url, body, anyAppPass, carried)
+        return proofs.send(url, body, anyAppPass, forARing, carried)
     }
 
     /** [post], carrying [tokens]' newest token on every body it sends; null tokens: [post] as it is. */
@@ -96,6 +128,8 @@ internal class Proofs(
     private val fieldFor: (publishableKey: String) -> String?,
     /** How long a request waits for the app's refresher. */
     private val refreshWaitMs: Long = UserProof.REFRESH_WAIT_MS,
+    /** How long a request waits for the app's refresher when the user was identified without a token ([UserProof.NO_TOKEN_WAIT_MS]). */
+    private val noTokenWaitMs: Long = UserProof.NO_TOKEN_WAIT_MS,
 ) {
     /** What a request carried: the identity value, the user it was for, and the app pass. */
     class Sent(val value: String?, val generation: Long, val appPass: String?)
@@ -104,9 +138,21 @@ internal class Proofs(
         app.owner = this
     }
 
-    fun send(url: String, body: JSONObject, anyAppPass: Boolean, post: (String) -> HttpReply): HttpReply {
+    /**
+     * Send [body] to [url] with [post], with what the proofs put on it and
+     * read off its answer — [forARing]: a request for a call Graine rang,
+     * which never waits for a token the user was identified without
+     * (EmbedRequest.send).
+     */
+    fun send(url: String, body: JSONObject, anyAppPass: Boolean, forARing: Boolean = false, post: (String) -> HttpReply): HttpReply {
         val route = EmbedRequest.route(url)
         val key = (body.opt("publishableKey") as? String).orEmpty()
+        // A user identified without a token, an agent that checks its users, an app with a refresher: the refresher asked
+        // and waited for before a conversation — or a request that carries the user and needs them proven — goes, so it
+        // carries the token (UserProof.askForMissingToken). Never for a call Graine rang: the person is answering it.
+        if (!forARing && (route == EmbedRequest.Route.CONVERSATION || route == EmbedRequest.Route.USER)) {
+            awaitMissingToken(key, identityValue(body))
+        }
         if (route == EmbedRequest.Route.CONVERSATION) {
             user.beforeConversation(identityValue(body), fieldFor(key), refreshWaitMs)
             app.beforeConversation(key)
@@ -178,6 +224,32 @@ internal class Proofs(
 
     private fun identityValue(body: JSONObject): String? =
         ((body.opt("identity") as? JSONObject)?.opt("value") as? String)?.takeIf { it.isNotEmpty() }
+
+    // ── the token not yet held, for what does not start at this door ────────
+
+    /** [key]'s agent checks its users — Verified users on report or enforce — as its session said; false before the session. */
+    private fun checksUsers(key: String): Boolean = app.security(key)?.checksUsers == true
+
+    /**
+     * [UserProof.awaitMissingToken] for user [value] of [key]'s agent, at
+     * most [noTokenWaitMs]: what [send] does before a conversation, for one
+     * that may begin without a request through this door — a WebRTC call
+     * minted at the telephony gateway with a grant fetched earlier. A token
+     * that comes back lets go of every grant kept under the old verdict before
+     * this returns (GraineInApp.identityTokenChanged), so the call mints with
+     * it. Never on the main thread.
+     */
+    fun awaitMissingToken(key: String, value: String?) = user.awaitMissingToken(value, fieldFor(key), checksUsers(key), noTokenWaitMs)
+
+    /** [UserProof.askForMissingToken] for user [value] of [key]'s agent: the latch to wait on (with [awaitAsked]), or null. Never blocks. */
+    fun askForMissingToken(key: String, value: String?): CountDownLatch? =
+        user.askForMissingToken(value, fieldFor(key), checksUsers(key))
+
+    /** Wait for what [askForMissingToken] handed back, at most [noTokenWaitMs]. Never on the main thread. */
+    fun awaitAsked(wait: CountDownLatch) = user.await(wait, noTokenWaitMs)
+
+    /** Whether a conversation with [key]'s agent for user [value] would wait for a token now ([UserProof.missingTokenDue]). */
+    fun missingTokenDue(key: String, value: String?): Boolean = user.missingTokenDue(value, fieldFor(key), checksUsers(key))
 
     companion object {
         /**

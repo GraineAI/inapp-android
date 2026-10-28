@@ -33,6 +33,15 @@ import java.util.concurrent.TimeUnit
  * front, the call's foreground service, the call screen — on WebRTC, then
  * calls.end(). `answer` (no network, no call): the server's own answer set on
  * a fresh peer. `-e base` points at another server; the default is Graine's.
+ *
+ * `ring`: a call the agent places to the user, as an app receives and answers
+ * it — calls.handlePush with an `agent_call` push (what the app's messaging
+ * service hands over), the ring, calls.answer() from an activity in front after
+ * `-e answerAfterMs` (3000), then the call held `-e holdMs` (9000). With
+ * `-e dropAtMs N` the network goes away N ms after the call is active
+ * (airplane mode, for `-e dropForMs`, default 5000) and comes back. The
+ * weak-network lab (scripts/lab/booked-call-lab.mjs) shapes the emulator's
+ * link around it; every step the SDK logs is on this run's clock.
  */
 class RtcLiveRunner : Instrumentation() {
     private var arguments: Bundle = Bundle()
@@ -62,7 +71,8 @@ class RtcLiveRunner : Instrumentation() {
                     "fallback" -> fallback(base, key)
                     "answer" -> answer()
                     "app" -> app(base, key)
-                    else -> error("no scenario \"$scenario\" (call, fallback, answer, app)")
+                    "ring" -> ring(base, key)
+                    else -> error("no scenario \"$scenario\" (call, fallback, answer, app, ring)")
                 }
             }
         } catch (t: Throwable) {
@@ -261,6 +271,121 @@ class RtcLiveRunner : Instrumentation() {
         ok = check("captions reached the app", captions.isNotEmpty(), captions.size.toString()) && ok
         ok = check("under 20 s", hangAt - start < 20_000, "${hangAt - start} ms to the hang-up") && ok
         return ok
+    }
+
+    // ── ring: a call the agent places to the user, received and answered as an app does ──
+
+    private fun ring(base: String, key: String): Boolean {
+        val answerAfter = arguments.getString("answerAfterMs")?.toLongOrNull() ?: 3_000L
+        val hold = arguments.getString("holdMs")?.toLongOrNull() ?: 9_000L
+        val dropAt = arguments.getString("dropAtMs")?.toLongOrNull()
+        val dropFor = arguments.getString("dropForMs")?.toLongOrNull() ?: 5_000L
+        val application = context.applicationContext as android.app.Application
+        lateinit var graine: GraineInApp
+        runOnMainSync {
+            graine = GraineInApp.init(application, GraineConfig(baseUrl = base, publishableKey = key, debug = true))
+            graine.calls.configure(GraineCallsConfig(displayName = "Live test", callTransport = GraineCallTransport.WEBRTC))
+        }
+        // The SDK's own steps — the mint, the registration, the INVITE, ICE, the agent's voice — on this run's clock.
+        CallLog.enabled = true
+        val logcat = CallLog.sink
+        CallLog.sink = { m, e -> line("sdk: ${m.take(220)}"); logcat?.invoke(m, e) }
+        val loaded = SystemClock.elapsedRealtime() + 10_000
+        while (graine.session == null && SystemClock.elapsedRealtime() < loaded) Thread.sleep(100)
+        line("session ${if (graine.session != null) "loaded" else "not loaded"}")
+
+        val ringing = CountDownLatch(1)
+        val active = CountDownLatch(1)
+        val over = CountDownLatch(1)
+        var activeAt = 0L
+        var heardAt = 0L
+        var dropEndAt = 0L
+        var heardAfterDropAt = 0L
+        var endedEarlyAt = 0L
+        var outcome: GraineCallOutcome? = null
+        val recovering = Collections.synchronizedList(ArrayList<String>())
+        val captions = Collections.synchronizedList(ArrayList<String>())
+        val listener = object : GraineCallListener {
+            override fun onIncomingCall(call: GraineCall) { line("ringing (${call.direction.name.lowercase()})"); ringing.countDown() }
+            override fun onCallState(state: GraineCallState, call: GraineCall?) {
+                line("state ${state.name.lowercase()}")
+                if (state == GraineCallState.ACTIVE && activeAt == 0L) { activeAt = t(); active.countDown() }
+                if (state == GraineCallState.ENDED && endedEarlyAt == 0L) endedEarlyAt = t()
+                if (state == GraineCallState.IDLE) over.countDown()
+            }
+            override fun onCallCaption(role: Role, text: String, live: Boolean) {
+                if (!live && text.isNotBlank()) { captions += "${role.name.lowercase()}: ${text.take(60)}"; line("caption ${role.name.lowercase()}: ${text.take(70)}") }
+            }
+            // The agent heard on the device — the level the call screen draws, on either transport.
+            override fun onAgentLevel(level: Float) {
+                if (level <= 0.01f) return
+                if (heardAt == 0L) { heardAt = t(); line("agent heard (level ${"%.2f".format(level)})") }
+                if (dropEndAt > 0 && heardAfterDropAt == 0L && t() > dropEndAt) { heardAfterDropAt = t(); line("agent heard again after the drop") }
+            }
+            override fun onCallReconnecting(on: Boolean) { recovering += "${if (on) "on" else "off"}@${t()}"; line("reconnecting ${if (on) "on" else "off"}") }
+            override fun onCallOutcome(callId: String, o: GraineCallOutcome) {
+                line("outcome ${o.wire} ${o.reason.orEmpty()}")
+                if (o.kind != GraineCallOutcome.Kind.ANSWERED) outcome = o
+            }
+        }
+        runOnMainSync { graine.calls.addListener(listener) }
+        // The app in front, as when the user answers from the app's own ring screen.
+        val activity = startActivitySync(android.content.Intent(context, RtcLiveActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+        val callId = "call_netlab_" + UUID.randomUUID().toString().replace("-", "").take(12)
+        val pushAt = t()
+        val taken = graine.calls.handlePush(mapOf("type" to "agent_call", "call_id" to callId, "reason" to "weak_network_lab", "caller_name" to "Weak-network lab"))
+        line("push handed over: ${if (taken) "a Graine call" else "not ours"}")
+        ringing.await(5, TimeUnit.SECONDS)
+        // The user looks at the ring; meanwhile the ring's own WebRTC leg is prepared (mint, registration).
+        Thread.sleep(answerAfter)
+        val answerAt = t()
+        line("answer (${answerAt - pushAt} ms after the push)")
+        runOnMainSync { graine.calls.answer() }
+        active.await(25, TimeUnit.SECONDS)
+        val transport = graine.calls.transport
+        val why = graine.calls.transportFallbackReason
+        line("active ${if (activeAt > 0) "${activeAt - answerAt} ms after the answer" else "never"}; transport $transport${why?.let { " ($it)" } ?: ""}")
+
+        var dropStartAt = 0L
+        if (activeAt > 0 && dropAt != null) {
+            Thread.sleep(dropAt)
+            dropStartAt = t()
+            line("drop: the network goes away for $dropFor ms (airplane mode)")
+            shell("cmd connectivity airplane-mode enable")
+            Thread.sleep(dropFor)
+            shell("cmd connectivity airplane-mode disable")
+            dropEndAt = t()
+            line("drop: the network is back")
+        }
+        if (activeAt > 0) {
+            val until = maxOf(activeAt, dropEndAt) + hold
+            while (t() < until && over.count > 0) Thread.sleep(100)
+        }
+        val hangAt = t()
+        val endedBeforeHangUp = endedEarlyAt in 1 until hangAt
+        runOnMainSync { graine.calls.end() }
+        over.await(6, TimeUnit.SECONDS)
+        Thread.sleep(2_000)
+        runCatching { activity.finish() }
+        if (dropStartAt > 0) runCatching { shell("cmd connectivity airplane-mode disable") }
+
+        val ms = { at: Long -> if (at > 0) "${at - answerAt} ms" else "never" }
+        line("SUMMARY answer→active ${ms(activeAt)}; answer→agent heard ${ms(heardAt)}; transport $transport${why?.let { " ($it)" } ?: ""}; " +
+            "reconnecting ${recovering.joinToString().ifEmpty { "never" }}; heard after the drop ${if (heardAfterDropAt > 0) "${heardAfterDropAt - dropEndAt} ms after it" else "no"}; " +
+            "ended before the hang-up ${if (endedBeforeHangUp) "yes, ${endedEarlyAt - answerAt} ms after the answer" else "no"}; outcome ${outcome?.wire} ${outcome?.reason.orEmpty()}")
+        line("captions: ${captions.take(3).joinToString(" | ").ifEmpty { "none" }}")
+        var ok = true
+        ok = check("the ring rang", taken && ringing.count == 0L) && ok
+        ok = check("the answered call connected", activeAt > 0) && ok
+        ok = check("the agent was heard", heardAt > 0, ms(heardAt)) && ok
+        if (dropStartAt == 0L) ok = check("ended by this side", !endedBeforeHangUp, outcome?.wire.orEmpty()) && ok
+        return ok
+    }
+
+    /** A shell command as the shell user (airplane mode for the drop), waited for. */
+    private fun shell(cmd: String): String {
+        val pfd = uiAutomation.executeShellCommand(cmd)
+        return try { java.io.FileInputStream(pfd.fileDescriptor).bufferedReader().use { it.readText() } } finally { runCatching { pfd.close() } }
     }
 
     // ── answer: the SBC's answer applied to a fresh peer, offline ──

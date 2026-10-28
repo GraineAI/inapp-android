@@ -363,7 +363,7 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
         webView = null; host = null; engineContext = null
         activityRef = WeakReference(null)
         progress.clear()
-        ready = false; startedCall = false; pendingStart = false
+        ready = false; startedCall = false; pendingStart = false; starting = null
         // The engine is gone, and its call: what was said goes with it.
         if (captions.isNotEmpty()) { captions = emptyList(); captionsChanged() }
         setCall(connected = false, connecting = false)
@@ -411,6 +411,7 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
     /** Hang up. Guaranteed: if the page never confirms, the call is torn down after a bounded wait. */
     fun end() {
         pendingStart = false
+        starting = null
         post(Protocol.out(Protocol.Out.END_CALL))
         graine.main.removeCallbacks(endWatchdog)
         graine.main.postDelayed(endWatchdog, graine.config.timing.endWatchdogMs)
@@ -488,12 +489,24 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
         }
     }
 
+    /** The start waiting for the user's identity token ([beginCall]); null once it went, or was called off. Main thread. */
+    private var starting: Any? = null
+
     private fun beginCall() {
         startedCall = true
         endNotified = true
         // A new call: the last one's unanswered component must not come back over it.
         graine.clearPendingWidget()
-        post(Protocol.out(Protocol.Out.START_CALL))
+        // Identified without an identity token, with an agent that checks its users: the app's refresher first — at most
+        // 10 seconds — so the page starts the call with the user's token (GraineInApp.afterMissingToken). Hung up, detached
+        // or started again meanwhile: this start is no longer the call's.
+        val attempt = Any()
+        starting = attempt
+        graine.afterMissingToken {
+            if (starting !== attempt) return@afterMissingToken
+            starting = null
+            post(Protocol.out(Protocol.Out.START_CALL))
+        }
     }
 
     /** Deliver one message into the page. WebView calls are main-thread only; hop there if needed. */

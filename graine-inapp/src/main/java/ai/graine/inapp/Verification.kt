@@ -157,7 +157,9 @@ fun interface GraineIdentityTokenCallback {
  * ([GraineInApp.identityTokenRefresher]): fetch one for the signed-in user
  * from your server (or your sign-in's SDK), then call [done] with it — or
  * with null to keep the current one. Called on the main thread, at most once
- * every 30 seconds and never twice at once.
+ * every 30 seconds and never twice at once. When the user was identified
+ * without a token, a conversation about to start waits for [done] — up to 10
+ * seconds — so answer as soon as you can (new in 0.14.6).
  */
 fun interface GraineIdentityTokenRefresher {
     fun refresh(done: GraineIdentityTokenCallback)

@@ -181,7 +181,12 @@ class ClientTokensContractTest {
         assertEquals(sdk.getLong("newConnectionWaitSeconds") * 1000, ClientTokenRules.CONNECTION_WAIT_MS)
         assertEquals(sdk.getLong("forcedRefreshMinIntervalSeconds") * 1000, ClientTokenRules.FORCED_MIN_INTERVAL_MS)
         assertEquals(sdk.getLong("minSecondsBetweenBackgroundRefreshes") * 1000, ClientTokenRules.BACKGROUND_MIN_INTERVAL_MS)
-        assertEquals(contract.getString("sdkVersion"), GraineVersion.NAME)
+        // The version server tokens arrived in (CLIENT-TOKENS.md), as iOS's and the multiplatform library's tests pin it:
+        // this SDK implements the contract from then on (0.14.6 moved on, the contract did not).
+        assertEquals("0.14.4", contract.getString("sdkVersion"))
+        val parts = { v: String -> v.split(".").map(String::toInt) }
+        val newer = parts(GraineVersion.NAME).zip(parts("0.14.4")).map { (a, b) -> a.compareTo(b) }.firstOrNull { it != 0 } ?: 0
+        assertTrue("this SDK is at least the contract's version", newer >= 0)
         // The calls host's event, and the page's message, as the contract names them (CLIENT-TOKENS.md §2.2, §2.4).
         assertEquals("needClientToken", CallsHostEvent.NEED_CLIENT_TOKEN)
         assertNotEquals(Protocol.Out.CLIENT_TOKEN, Protocol.In.NEED_CLIENT_TOKEN)

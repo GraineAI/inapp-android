@@ -147,7 +147,13 @@
     "minTtlSeconds": 60,
     "maxTtlSeconds": 3600,
     "defaultTtlSeconds": 3600,
-    "maxUserIdLength": 256
+    "maxUserIdLength": 256,
+    "refusals": {
+      "$comment": "What the mint answers instead of a token, beside validation (400/422) and the key's own refusals (401/403/429). error is the /v2 envelope's integer code. A switched-off agent still gets tokens: the agent status gate refuses its conversations.",
+      "unknown_agent": { "status": 404, "error": 1200 },
+      "agent_deleted": { "status": 409, "error": 1203 },
+      "not_configured": { "status": 503, "error": 1501 }
+    }
   },
   "token": {
     "alg": "EdDSA",

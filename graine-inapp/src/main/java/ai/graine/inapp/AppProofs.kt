@@ -699,7 +699,7 @@ internal class AppProofs(
         val tokens = AppShared.tokensFor(s.key)
         return try {
             val door = owner
-            if (door != null) door.send(url, body, anyPass, EmbedRequest.withToken(tokens, newConnection = false) { json -> http.post(url, json) })
+            if (door != null) door.send(url, body, anyPass, post = EmbedRequest.withToken(tokens, newConnection = false) { json -> http.post(url, json) })
             else EmbedRequest.send(url, body, anyAppPass = anyPass, tokens = tokens) { json -> http.post(url, json) }
         } catch (e: Exception) {
             null

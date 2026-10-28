@@ -182,6 +182,11 @@ class PrepareCallTest {
         direct = agent.env.directMint,
     )
 
+    /** What proves the app and the user, when a test makes its own ([ownProofs]); null: the app's. */
+    private var proofs: Proofs? = null
+    /** What the agent's session asks of its users (`security.user.verify`); null: nothing. */
+    private var userVerify: String? = null
+
     private fun env() = AgentEnv(
         main = main,
         io = Executor { it.run() },
@@ -195,12 +200,37 @@ class PrepareCallTest {
         directMint = direct,
         rtcEnv = { agent -> rtcEnv(agent) },
         callPhone = phone,
+        proofs = proofs?.let { p -> { p } },
     )
 
     private fun session(audioTransport: String? = null) = JSONObject(
         """{"agentId":"agent-a","webcallAgentId":"web-a","appearance":{"title":"A"},"identity":{"field":"user_id"},
-            "calls":{"hosted":true,"platforms":["android"]${audioTransport?.let { ",\"audioTransport\":\"$it\"" } ?: ""}}}""",
+            "calls":{"hosted":true,"platforms":["android"]${audioTransport?.let { ",\"audioTransport\":\"$it\"" } ?: ""}}
+            ${userVerify?.let { ",\"security\":{\"user\":{\"verify\":\"$it\"}}" } ?: ""}}""",
     )
+
+    /** Proofs of the test's own: the app's refresher answered on the asking thread, and [waitMs] the most any request waits for it. */
+    private fun ownProofs(waitMs: Long = 300) {
+        proofs = Proofs(
+            AppProofs({ AppProofsTest.DECLARED }, AppPassStore.memory(), { device }, { false }, { null }, clock, clock = { now }),
+            UserProof(clock = { now }, tokenChanged = { AppShared.identityTokenChanged() }),
+            fieldFor = { key -> AppShared.identityFieldFor(key) },
+            refreshWaitMs = waitMs,
+            noTokenWaitMs = waitMs,
+        )
+    }
+
+    /** The app's refresher: every ask counted, answered at once with [next] — or held, never answered. */
+    private class TokenRefresher(private val next: () -> String? = { null }) : GraineIdentityTokenRefresher {
+        var calls = 0
+        var hold = false
+        override fun refresh(done: GraineIdentityTokenCallback) {
+            calls++
+            if (!hold) done.onToken(next())
+        }
+    }
+
+    private val asha = mapOf("user_id" to "user-123", "name" to "Asha")
 
     @Before fun fresh() {
         AppShared.reset()
@@ -609,6 +639,99 @@ class PrepareCallTest {
         prepare(g)
         assertNull("nor beside a call", g.calls.preparedFor(g))
         assertEquals(listOf("sc_ring_2", id), mints.map { it.getString("callId") })
+    }
+
+    // ── the user's identity token, when the app fetches it for itself (0.14.6) ──
+
+    /** How long [block] took, in milliseconds of real time (the waits for a refresher are real waits). */
+    private fun timed(block: () -> Unit): Long {
+        val t0 = System.nanoTime()
+        block()
+        return (System.nanoTime() - t0) / 1_000_000
+    }
+
+    @Test fun aCallPreparedWithoutTheUsersTokenIsSetUpAgainAtTheTapWithIt() {
+        ownProofs()
+        userVerify = "report"
+        val g = started()
+        g.identify(asha); pump()
+        // Prepared before the app set its refresher: minted without the user's token.
+        prepare(g)
+        val p = g.calls.preparedFor(g)!!
+        assertFalse(mints.single().getJSONObject("identity").has("token"))
+        val r = TokenRefresher { "tok-fresh" }
+        g.identityTokenRefresher = r
+        inFront(g)
+        val id = g.calls.startCall(activity, "help", vars, agent = g.name)!!
+        pump()
+        assertNotEquals("never the call prepared without the token", p.callId, id)
+        assertTrue("which is let go", released(sipSockets[0]))
+        assertEquals("the refresher asked at the tap", 1, r.calls)
+        assertEquals(2, mints.size)
+        assertEquals("the call goes with the token", "tok-fresh", mints[1].getJSONObject("identity").getString("token"))
+        assertEquals(id, mints[1].getString("callId"))
+        peers.last().candidate("srflx"); pump()
+        assertTrue("and is dialled", invites() > 0)
+        g.calls.end(); pump()
+    }
+
+    @Test fun aPlacedCallWhoseGrantCameBeforeTheTokenMintsThroughTheWebRouteWithIt() {
+        ownProofs()
+        userVerify = "report"
+        offerGrants = true
+        val g = started()
+        g.identify(asha); pump()
+        // The next call's grant, fetched before the app set its refresher: signed without the user's token.
+        val early = grantAsks.last()
+        assertEquals("user-123", early.getJSONObject("identity").getString("value"))
+        assertFalse(early.getJSONObject("identity").has("token"))
+        val r = TokenRefresher { "tok-fresh" }
+        g.identityTokenRefresher = r
+        inFront(g)
+        val id = g.calls.startCall(activity, "help", vars, agent = g.name)!!
+        pump()
+        assertEquals("the call takes the id its grant was asked for", early.getString("callId"), id)
+        assertEquals("the refresher asked at the tap", 1, r.calls)
+        assertTrue("the grant signed without the token is never used", directMints.isEmpty())
+        val mint = mints.single()
+        assertEquals("minted through the web route, with the token", "tok-fresh", mint.getJSONObject("identity").getString("token"))
+        assertEquals(id, mint.getString("callId"))
+        peers.last().candidate("srflx"); pump()
+        assertTrue("and dialled", invites() > 0)
+        assertEquals("the next call's grant is asked again, with the token", "tok-fresh", grantAsks.last().getJSONObject("identity").getString("token"))
+        g.calls.end(); pump()
+    }
+
+    @Test fun aRingIsMintedAndAnsweredWithoutWaitingForTheRefresherAndAPlacedCallWaits() {
+        ownProofs(waitMs = 300)
+        userVerify = "report"
+        val g = started()
+        g.identify(asha); pump()
+        inFront(g)
+        // The ring arrives before the app has set its refresher: nothing asks it as the phone rings.
+        assertTrue(g.calls.handlePush(mapOf("type" to "agent_call", "call_id" to "sc_ring_tok", "hosted" to "1")))
+        val r = TokenRefresher().apply { hold = true }
+        g.identityTokenRefresher = r
+        pump()
+        peers.last().candidate("srflx")
+        pump()
+        assertEquals(GraineCallState.RINGING, g.calls.state)
+        assertEquals("the ring's call is minted as it rings", "sc_ring_tok", mints.last().getString("callId"))
+        assertEquals("without asking the refresher", 0, r.calls)
+        // The user's name changes while it rings: the call is minted again at the answer — which still waits for nothing.
+        g.identify(asha + ("name" to "Asha R")); pump()
+        val took = timed { g.calls.answer(); pump() }
+        assertEquals("answering asks nobody", 0, r.calls)
+        assertTrue("and waits for nothing: $took ms", took < 250)
+        assertEquals("minted again for the answer", 2, mints.count { it.getString("callId") == "sc_ring_tok" })
+        peers.last().candidate("srflx"); pump()
+        assertTrue("and dialled", invites() > 0)
+        g.calls.end(); pump()
+        // A call the app places does wait for it.
+        val placed = timed { g.calls.startCall(activity, "help", vars, agent = g.name)!!; pump() }
+        assertEquals("placing a call asks", 1, r.calls)
+        assertTrue("and waits, at most the cap: $placed ms", placed >= 250)
+        g.calls.end(); pump()
     }
 
     // ── the tap's wait: at once in the app in front, else with the service ──

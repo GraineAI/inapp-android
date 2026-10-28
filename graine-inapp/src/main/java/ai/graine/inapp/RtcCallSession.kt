@@ -13,6 +13,12 @@ internal class RtcCallRequest(
     /** The call's id, as the ticket carries it — for a call Graine rang, its graine_call_id. */
     val callId: String?,
     val wsHost: String?,
+    /**
+     * A call Graine rang — minted as it rings, answered by the person — not
+     * one the app placed: its mint never waits for an identity token the user
+     * was identified without (UserProof.askForMissingToken).
+     */
+    val rang: Boolean = false,
 ) {
     /** The mint's body without its session id: a prepared call is used only if this is unchanged. */
     val mintKey: String get() = RtcMint.body(publishableKey, "", variables, identity, callId).toString()
@@ -25,6 +31,7 @@ internal class RtcCallRequest(
             identity = config.identity,
             callId = config.callId,
             wsHost = config.wsHost,
+            rang = config.rang,
         )
     }
 }
@@ -350,6 +357,18 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
         env.io {
             if (released) return@io
             /*
+             * A CALL THE APP PLACES GOES WITH THE USER'S TOKEN. Identified without
+             * one, with an agent that checks its users and an app that set a
+             * refresher, the refresher is asked and waited for — at most 10 s —
+             * before anything is minted (UserProof.askForMissingToken): a grant
+             * fetched earlier carries the verdict it was signed under, and a token
+             * that comes back lets go of it first (GraineInApp.identityTokenChanged),
+             * so this call mints through the web route, with the token. Never for
+             * a call Graine rang: the person is answering it.
+             */
+            if (!request.rang) runCatching { AppShared.proofsIfMade()?.awaitMissingToken(request.publishableKey, request.identity?.value) }
+            if (released) return@io
+            /*
              * THE GATEWAY FIRST, THE WEB ROUTE SECOND (RtcDirect.kt). With a grant
              * asked for exactly this call in hand, the credential — or a gate's
              * refusal — comes from the telephony gateway beside the SBC, in a
@@ -370,7 +389,7 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
                 try {
                     // Through the one door: the app's declaration and proofs, the user's token and pass — and inside it the
                     // agent's server token (EmbedRequest.kt, ClientTokenWire).
-                    reply = EmbedRequest.send(url, body, tokens = env.tokens, newConnection = true) { json -> env.http.post(url, json) }
+                    reply = EmbedRequest.send(url, body, tokens = env.tokens, newConnection = true, forARing = request.rang) { json -> env.http.post(url, json) }
                     error = null
                     break
                 } catch (e: Exception) {

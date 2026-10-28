@@ -117,6 +117,13 @@ internal data class CallSessionConfig(
      * from it, a WebRTC attempt before the WebSocket included.
      */
     val tapAt: Long? = null,
+    /**
+     * A call Graine rang, which the person answered — not one the app placed:
+     * its ticket and its credential never wait for an identity token the user
+     * was identified without (UserProof.askForMissingToken), so answering
+     * never waits for the app's refresher.
+     */
+    val rang: Boolean = false,
 )
 
 /** What a session reports, on its scheduler thread. */
@@ -349,7 +356,8 @@ internal class VoiceCallSession(
         config.identity?.into(body)
         config.callId?.let { body.put("callId", it) }
         val url = "${config.baseUrl.trimEnd('/')}/api/embed/ticket"
-        val reply = EmbedRequest.send(url, body, tokens = deps.tokens, newConnection = true) { json -> deps.http.post(url, json) }
+        // A call the app places waits there for a token the user was identified without; a ring being answered never does.
+        val reply = EmbedRequest.send(url, body, tokens = deps.tokens, newConnection = true, forARing = config.rang) { json -> deps.http.post(url, json) }
         if (reply.code !in 200..299) {
             refused = EmbedRequest.appRefusal(reply) ?: ClientTokenRules.refusal(reply.code, reply.body)
             CallLog.debug(refused?.let { "the ticket was refused (${it.code.wire})" } ?: "no ticket (HTTP ${reply.code}); using the direct socket")

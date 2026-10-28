@@ -22,6 +22,19 @@ import java.util.concurrent.atomic.AtomicBoolean
  * when a route refuses `identity_unverified` (the request is then sent once
  * more), before a conversation whose JWT has less than a minute left, and
  * when a call rings — at most once every 30 seconds, never twice at once.
+ *
+ * THE TOKEN NOT YET HELD (0.14.6). A user identified WITHOUT a token, an
+ * agent that checks its users (Verified users on report or enforce) and an
+ * app that set a refresher: before a conversation starts, and before a
+ * request that carries the user and needs them proven (memories, past
+ * sessions, booked calls, a workflow, a new conversation, the install's
+ * registration for calls), the refresher is asked — or the refresh on its way
+ * joined — and waited for, at most [NO_TOKEN_WAIT_MS], so the first
+ * conversation of an app that fetches its token for itself goes out with it
+ * instead of anonymously. Never for a call Graine rang: the person is
+ * answering it. The 30 seconds are per user: another user, or nobody, starts
+ * them again, and lets go of the last user's refresh, whose answer is never
+ * theirs.
  */
 
 /** A user pass as kept: opaque, and when it lapses on the device's wall clock. */
@@ -176,12 +189,67 @@ internal class UserProof(
     fun beforeConversation(value: String?, field: String?, waitMs: Long) {
         val (inFlight, t) = synchronized(lock) { refreshing to tokenFor(value, field) }
         if (inFlight != null) {
-            // A refresher that did not answer in time is not waited for again by the next conversation; its late answer still counts.
-            if (!inFlight.await(waitMs, TimeUnit.MILLISECONDS)) synchronized(lock) { if (refreshing === inFlight) refreshing = null }
+            await(inFlight, waitMs)
             return
         }
         val exp = t?.let { Jwt.expiresAt(it) } ?: return
         if (exp * 1000L - clock() < JWT_REFRESH_BELOW_MS) refreshNow(waitMs)
+    }
+
+    /**
+     * THE TOKEN NOT YET HELD. Before a conversation, or a request that carries
+     * the user and needs them proven, carrying [value] ([field] names the trait
+     * that is the value): when [value] is the user identified now, no identity
+     * token is held for them, the app set a refresher and the agent checks its
+     * users ([checksUsers]), the refresher is asked — or the refresh on its
+     * way joined, never a second at once — and the latch to wait on handed
+     * back. Null when there is nothing to wait for: nobody identified (or
+     * [value] is not them), a token held, no refresher, an agent that does not
+     * check its users, or a refresher asked less than 30 seconds ago that
+     * brought none. Waits for nothing itself.
+     */
+    fun askForMissingToken(value: String?, field: String?, checksUsers: Boolean): CountDownLatch? {
+        if (!checksUsers) return null
+        val r = refresher ?: return null
+        val claim = synchronized(lock) {
+            if (!missingFor(value, field)) return null
+            claim(join = true)
+        } ?: return null
+        if (claim.mine) ask(r, claim)
+        return claim.latch
+    }
+
+    /**
+     * [askForMissingToken], then wait at most [waitMs] for it. A token that
+     * comes back is held — as setIdentityToken holds one, what was prepared
+     * without it let go — before this returns, so the request that waited goes
+     * out with it; null, a throw or the wait running out lets it go as it is.
+     * Never on the main thread.
+     */
+    fun awaitMissingToken(value: String?, field: String?, checksUsers: Boolean, waitMs: Long) {
+        val wait = askForMissingToken(value, field, checksUsers) ?: return
+        await(wait, waitMs)
+    }
+
+    /** Whether [askForMissingToken] would have a refresh to wait on now — asking nobody. */
+    fun missingTokenDue(value: String?, field: String?, checksUsers: Boolean): Boolean {
+        if (!checksUsers || refresher == null) return false
+        return synchronized(lock) {
+            missingFor(value, field) && (refreshing != null || clock() - refreshStartedAt >= REFRESH_MIN_INTERVAL_MS)
+        }
+    }
+
+    /** [value] is the user identified now, and no token is held for them. Under [lock]. */
+    private fun missingFor(value: String?, field: String?): Boolean =
+        token == null && value != null && field != null && IdentityRules.pick(traits, field) == value
+
+    /**
+     * Wait at most [waitMs] for the refresh [inFlight]. One that did not
+     * answer in time is not waited for again by the next request; its late
+     * answer still counts. Never on the main thread.
+     */
+    fun await(inFlight: CountDownLatch, waitMs: Long) {
+        if (!inFlight.await(waitMs, TimeUnit.MILLISECONDS)) synchronized(lock) { if (refreshing === inFlight) refreshing = null }
     }
 
     /** Ask the refresher now and wait up to [waitMs] for it (one on its way is joined): true when the token changed. Never on the main thread. */
@@ -205,31 +273,44 @@ internal class UserProof(
      */
     private fun start(): CountDownLatch? {
         val r = refresher ?: return null
-        val latch: CountDownLatch
-        val asked: Long
-        synchronized(lock) {
-            val now = clock()
-            refreshing?.let { inFlight ->
-                // A refresher that never answered is given up on, so the next can be asked.
-                if (now - refreshStartedAt < REFRESH_GIVE_UP_MS) return null
-                inFlight.countDown()
-            }
-            if (now - refreshStartedAt < REFRESH_MIN_INTERVAL_MS) return null
-            refreshStartedAt = now
-            latch = CountDownLatch(1)
-            refreshing = latch
-            asked = generation
+        val claim = synchronized(lock) { claim(join = false) } ?: return null
+        ask(r, claim)
+        return claim.latch
+    }
+
+    /** A refresh to wait on: its latch, the user it was asked for, and whether whoever claimed it is the one to call the refresher. */
+    private class Claim(val latch: CountDownLatch, val asked: Long, val mine: Boolean)
+
+    /**
+     * The refresh on its way — joined when [join], else nothing is started
+     * beside it — or a new one, unless the refresher was called less than 30
+     * seconds ago. Null when there is nothing to wait on. Under [lock].
+     */
+    private fun claim(join: Boolean): Claim? {
+        val now = clock()
+        refreshing?.let { inFlight ->
+            // A refresher that never answered is given up on, so the next can be asked.
+            if (now - refreshStartedAt < REFRESH_GIVE_UP_MS) return if (join) Claim(inFlight, generation, mine = false) else null
+            inFlight.countDown()
         }
+        if (now - refreshStartedAt < REFRESH_MIN_INTERVAL_MS) return null
+        refreshStartedAt = now
+        val latch = CountDownLatch(1)
+        refreshing = latch
+        return Claim(latch, generation, mine = true)
+    }
+
+    /** Call the refresher for [claim], on [callOn]: answered once, a throw counting as null. */
+    private fun ask(r: GraineIdentityTokenRefresher, claim: Claim) {
         val answered = AtomicBoolean(false)
         callOn(Runnable {
             try {
-                r.refresh { token -> if (answered.compareAndSet(false, true)) refreshed(latch, asked, token) }
+                r.refresh { token -> if (answered.compareAndSet(false, true)) refreshed(claim.latch, claim.asked, token) }
             } catch (t: Throwable) {
                 // A refresher that throws leaves the token as it was.
-                if (answered.compareAndSet(false, true)) refreshed(latch, asked, null)
+                if (answered.compareAndSet(false, true)) refreshed(claim.latch, claim.asked, null)
             }
         })
-        return latch
     }
 
     private fun refreshed(latch: CountDownLatch, asked: Long, token: String?) {
@@ -239,8 +320,13 @@ internal class UserProof(
             // Null keeps the token; another user since the ask keeps theirs.
             if (t == null || asked != generation || traits == null || t == this.token) false else { this.token = t; true }
         }
-        latch.countDown()
-        if (moved) tokenChanged()
+        // Held as setIdentityToken holds a token — grants and prepared calls made under the old verdict let go, the voice
+        // page handed the new one — BEFORE whoever waits on the refresh goes on: what it sends next is made with the token.
+        try {
+            if (moved) tokenChanged()
+        } finally {
+            latch.countDown()
+        }
     }
 
     private fun slot(key: String, value: String): String = key + "\n" + value
@@ -256,6 +342,15 @@ internal class UserProof(
         const val REFRESH_GIVE_UP_MS = 60_000L
         /** How long a request waits for the refresher's answer. */
         const val REFRESH_WAIT_MS = 10_000L
+        /**
+         * How long a conversation — or a request that carries the user and
+         * needs them proven — waits for the app's refresher when the user was
+         * identified without an identity token and the agent checks its users
+         * ([askForMissingToken]). Past it the request goes out as it would
+         * have, without one: a slow refresher delays the first conversation by
+         * at most this, never stops it. 10 s, the same on every Graine SDK.
+         */
+        const val NO_TOKEN_WAIT_MS = 10_000L
     }
 }
 

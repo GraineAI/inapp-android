@@ -643,7 +643,10 @@ class GraineCalls internal constructor(
      * is let go when the app goes to the background, when the signed-in
      * customer changes ([GraineInApp.identify], sign-out, their memory choice,
      * the phone's time zone), after four minutes, when calls stop using WebRTC,
-     * or when a call rings in.
+     * or when a call rings in. While the customer's identity token is on its
+     * way ([GraineInApp.identityTokenRefresher], for an agent that checks its
+     * users), the call is prepared once the token arrives, with it — or once
+     * the refresher answers null or 10 seconds pass.
      *
      * For calls over WebRTC (with `ai.graine:inapp-android-rtc`); otherwise,
      * before the agent's settings have loaded, or while a call is ringing or

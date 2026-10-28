@@ -35,6 +35,10 @@ import java.util.concurrent.atomic.AtomicBoolean
  * answering it. The 30 seconds are per user: another user, or nobody, starts
  * them again, and lets go of the last user's refresh, whose answer is never
  * theirs.
+ *
+ * WHAT NOBODY WAITS ON (0.14.7) — the next call's grant, a call prepared
+ * ahead of the tap — asks the same refresher without waiting: it is told when
+ * that refresh ends, and goes then, with the token or as it is.
  */
 
 /** A user pass as kept: opaque, and when it lapses on the device's wall clock. */
@@ -67,6 +71,8 @@ internal class UserProof(
     @Volatile var refresher: GraineIdentityTokenRefresher? = null
     private var refreshStartedAt = Long.MIN_VALUE / 2
     private var refreshing: CountDownLatch? = null
+    /** Who asked to be told when a refresh ends, by its latch ([askForMissingToken] with `settled`). Under [lock]. */
+    private val toTell = HashMap<CountDownLatch, MutableList<(Boolean) -> Unit>>()
 
     /** A token the app gave, as the SDK keeps it: blank is none, longer than the limit is refused (and never sent). */
     fun accept(token: String?): String? {
@@ -89,6 +95,7 @@ internal class UserProof(
         val tokenMoved: Boolean
         val userMoved = next == null || !sameUser
         var dropped: CountDownLatch? = null
+        var droppedTell: List<(Boolean) -> Unit>? = null
         synchronized(lock) {
             if (userMoved) {
                 generation++
@@ -100,6 +107,7 @@ internal class UserProof(
                 this.token = now
                 // The last user's refresh is theirs: its answer is dropped, and the new user's is not held back by it.
                 dropped = refreshing
+                droppedTell = refreshing?.let { toTell.remove(it) }
                 refreshing = null
                 refreshStartedAt = Long.MIN_VALUE / 2
             } else {
@@ -108,7 +116,7 @@ internal class UserProof(
                 if (t != null) this.token = t
             }
         }
-        dropped?.countDown()
+        dropped?.let { ended(it, droppedTell, brought = false) }
         // Another user is the identity's own change, which lets go of what the last one had by itself: only the same user's new token is news here.
         if (tokenMoved && !userMoved) tokenChanged()
         if (userMoved) changed()
@@ -183,13 +191,15 @@ internal class UserProof(
 
     /**
      * Before a ticket or rtc-session carrying [value]: a refresh on its way is
-     * waited for, and a JWT with less than a minute left is refreshed first —
-     * each at most [waitMs]. Never on the main thread.
+     * waited for — unless [waitForInFlight] is false (the next call's grant,
+     * which the agent has already held back for it) — and a JWT with less
+     * than a minute left is refreshed first — each at most [waitMs]. Never on
+     * the main thread.
      */
-    fun beforeConversation(value: String?, field: String?, waitMs: Long) {
+    fun beforeConversation(value: String?, field: String?, waitMs: Long, waitForInFlight: Boolean = true) {
         val (inFlight, t) = synchronized(lock) { refreshing to tokenFor(value, field) }
         if (inFlight != null) {
-            await(inFlight, waitMs)
+            if (waitForInFlight) await(inFlight, waitMs)
             return
         }
         val exp = t?.let { Jwt.expiresAt(it) } ?: return
@@ -217,6 +227,29 @@ internal class UserProof(
         } ?: return null
         if (claim.mine) ask(r, claim)
         return claim.latch
+    }
+
+    /**
+     * [askForMissingToken], for what nobody waits on — the next call's grant,
+     * a call prepared ahead of the tap: the refresher asked, or the refresh on
+     * its way joined (never a second at once, the 30 seconds kept), and
+     * [settled] told once that refresh ends, on the thread that ends it — true
+     * when it brought a token, held by then (what was prepared without it let
+     * go first, [tokenChanged]); false for null, a throw or another user
+     * meanwhile. False — and [settled] never told — when there is nothing to
+     * wait for. Never blocks; and as nothing waits on the refresh, one that
+     * outlives a caller's own window is not one that ran out a wait: a
+     * conversation starting then still waits for it.
+     */
+    fun askForMissingToken(value: String?, field: String?, checksUsers: Boolean, settled: (brought: Boolean) -> Unit): Boolean {
+        if (!checksUsers) return false
+        val r = refresher ?: return false
+        val claim = synchronized(lock) {
+            if (!missingFor(value, field)) return false
+            claim(join = true)?.also { toTell.getOrPut(it.latch) { ArrayList() } += settled }
+        } ?: return false
+        if (claim.mine) ask(r, claim)
+        return true
     }
 
     /**
@@ -296,6 +329,9 @@ internal class UserProof(
         if (now - refreshStartedAt < REFRESH_MIN_INTERVAL_MS) return null
         refreshStartedAt = now
         val latch = CountDownLatch(1)
+        // Whoever asked to be told about a refresh no longer on its way — given up on, or one a wait ran out on that never
+        // answered — went on at its own window long ago (GraineInApp.holdForMissingToken): nobody is kept for it.
+        toTell.clear()
         refreshing = latch
         return Claim(latch, generation, mine = true)
     }
@@ -315,8 +351,11 @@ internal class UserProof(
 
     private fun refreshed(latch: CountDownLatch, asked: Long, token: String?) {
         val t = accept(token)
+        var told: List<(Boolean) -> Unit>? = null
         val moved = synchronized(lock) {
             if (refreshing === latch) refreshing = null
+            // Who asked to be told is taken in the same step: nobody can join it from here on.
+            told = toTell.remove(latch)
             // Null keeps the token; another user since the ask keeps theirs.
             if (t == null || asked != generation || traits == null || t == this.token) false else { this.token = t; true }
         }
@@ -325,8 +364,14 @@ internal class UserProof(
         try {
             if (moved) tokenChanged()
         } finally {
-            latch.countDown()
+            ended(latch, told, moved)
         }
+    }
+
+    /** [latch]'s refresh is over: whoever waits on it goes on, and those who asked to be told ([told]) hear whether it [brought] a token. */
+    private fun ended(latch: CountDownLatch, told: List<(Boolean) -> Unit>?, brought: Boolean) {
+        latch.countDown()
+        told?.forEach { runCatching { it(brought) } }
     }
 
     private fun slot(key: String, value: String): String = key + "\n" + value

@@ -217,16 +217,36 @@ internal class RtcDirectMint(
      * hand is past half its life or within 30 s of lapsing: otherwise nothing is
      * sent, however often the app comes back — but the probe of a route whose
      * answer never came. Grants another user's requests brought are forgotten
-     * first. Resting: nothing is sent. Never blocks.
+     * first. Resting: nothing is sent. Never blocks. The agent asks only once
+     * the user's identity token is in, or will not come
+     * (GraineInApp.warmNextCall): the request waits for no refresh.
      */
     fun warm(baseUrl: String, publishableKey: String, identity: IdentityEnvelope?) = warmNext(baseUrl, publishableKey, identity, fromApp = true)
+
+    /**
+     * Whether [warm] would ask the web route for [identity]'s next-call grant
+     * now: none in hand for them that holds, none on its way, not resting, not
+     * paused, and a key the web route signs grants for. Sends nothing and
+     * changes nothing — the agent asks before holding the grant back for the
+     * user's token (GraineInApp.warmNextCall): nothing that would not go is
+     * held back, and nobody's refresher is asked for it.
+     */
+    fun wouldAsk(publishableKey: String, identity: IdentityEnvelope?): Boolean = synchronized(lock) {
+        val now = clock()
+        if (restUntil?.let { now < it } == true) return@synchronized false
+        if (publishableKey in unoffered || (quietUntil[publishableKey] ?: 0L) > now) return@synchronized false
+        if (fetching[publishableKey]?.identity == identity) return@synchronized false
+        val h = next[publishableKey]?.takeIf { it.identity == identity }?.let { held[it] }
+        h == null || needsGrant(h, now)
+    }
 
     /**
      * [warm], from the app ([fromApp]: [identity] is who the user is now, and
      * another user's grants go) or from behind a call's mint — whose request
      * may be older than the user: a call a push prepared before the session
      * said who the user is. That one renews the next call's grant only for the
-     * user it was asked for, and forgets nobody's.
+     * user it was asked for, and forgets nobody's — and waits in the door, as
+     * before, for a token the user was identified without.
      */
     private fun warmNext(baseUrl: String, publishableKey: String, identity: IdentityEnvelope?, fromApp: Boolean) {
         val now = clock()
@@ -249,7 +269,7 @@ internal class RtcDirectMint(
             }
         }
         launch(probeNow)
-        if (ask != null) background { fetch(baseUrl, ask, forNext = true) }
+        if (ask != null) background { fetch(baseUrl, ask, forNext = true, tokenAsked = fromApp) }
     }
 
     /**
@@ -285,19 +305,22 @@ internal class RtcDirectMint(
      * route has the gateway probed. A refusal (a 429, or a setting such as an
      * agent without `app://`) pauses this key's grant requests for a while; an
      * answer saying the web route signs none for the key stops them, until one
-     * of its answers brings a grant after all.
+     * of its answers brings a grant after all. [tokenAsked]: the agent held it
+     * back for the user's token already (GraineInApp.warmNextCall).
      */
-    private fun fetch(baseUrl: String, ask: GrantKey, forNext: Boolean) {
+    private fun fetch(baseUrl: String, ask: GrantKey, forNext: Boolean, tokenAsked: Boolean = false) {
         var offer: RtcGrantOffer? = null
         var waitMs: Long? = null
         var signsNone = false
         try {
             // Through the one door (the app's declaration and proofs, the user's token and pass), and an rtc-session
-            // request like the mint's, so it carries the agent's server token the same way — and, for the next call the
-            // app places, waits there for a token the user was identified without; a ringing call's own grant never does.
+            // request like the mint's, so it carries the agent's server token the same way. The next call's grant the
+            // agent asks for waits there for nothing: the agent held it back until the user's token came, or would not
+            // (GraineInApp.warmNextCall). One renewed behind a call's mint waits there for a token the user was identified
+            // without, as before; a ringing call's own grant never does.
             val url = baseUrl.trimEnd('/') + RtcMint.PATH
             val agentTokens = runCatching { tokens(ask.publishableKey) }.getOrNull()
-            val reply = EmbedRequest.send(url, grantBody(ask), tokens = agentTokens, newConnection = true, forARing = !forNext) { json -> http.post(url, json, WEB_TIMEOUT_MS) }
+            val reply = EmbedRequest.send(url, grantBody(ask), tokens = agentTokens, newConnection = true, forARing = !forNext, tokenAsked = tokenAsked) { json -> http.post(url, json, WEB_TIMEOUT_MS) }
             if (reply.code == 200) {
                 offer = RtcGrantOffer.of(reply.body)
                 if (offer == null) {

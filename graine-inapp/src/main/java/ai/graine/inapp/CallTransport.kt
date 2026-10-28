@@ -257,17 +257,20 @@ internal class CallTransports(
      * candidates, the registration — so its tap is the INVITE. Nothing at all
      * when a call prepared for exactly this is in hand, younger than four
      * minutes and still registered; otherwise that one goes and this one is
-     * prepared. Nothing either before the session, or for calls that do not go
-     * over WebRTC (no module, the app's or the dashboard's WebSocket). Main
-     * thread; no call or ring is live (the caller asked).
+     * prepared — once the user's identity token, when it is on its way, has
+     * come or will not ([holdForToken]; [tokenAsked]: that is settled).
+     * Nothing either before the session, or for calls that do not go over
+     * WebRTC (no module, the app's or the dashboard's WebSocket). Main thread;
+     * no call or ring is live (the caller asked).
      */
-    fun prepare(agent: GraineInApp, reason: String?, variables: Map<String, String>) {
+    fun prepare(agent: GraineInApp, reason: String?, variables: Map<String, String>, tokenAsked: Boolean = false) {
         if (agent.session == null || !webRtcFor(agent)) return
         val key = keyFor(agent, reason, variables)
         preparedCalls[agent]?.let { held ->
             if (held.key == key && !held.lost && clock() - held.preparedAt < PREPARED_MAX_AGE_MS) return
             release(held)
         }
+        if (!tokenAsked && holdForToken(agent, key, reason, variables)) return
         // The id the warm grant was asked for, when there is one: this mint then goes to the gateway (RtcDirect.kt).
         val callId = agent.nextCallId() ?: CallIds.next()
         val kept = agent.cachedSession
@@ -290,6 +293,57 @@ internal class CallTransports(
                 mainAfter(0) { if (preparedCalls[agent] === p) release(p) }
             }
         })
+    }
+
+    /** A call [prepare] was asked for while the user's identity token was on its way: what to prepare, and for whom ([PrepareKey.identity]). */
+    private class TokenHold(var key: PrepareKey, var reason: String?, var variables: Map<String, String>)
+
+    /** Each agent's call held back for its user's token: at most one. Main thread. */
+    private val tokenHolds = HashMap<GraineInApp, TokenHold>()
+
+    /**
+     * A CALL PREPARED AHEAD OF THE TAP WAITS FOR THE TOKEN TOO, as the next
+     * call's grant does: with the user's identity token on its way
+     * ([GraineInApp.missingTokenDue]) nothing is prepared yet — the app's
+     * refresher is asked, or the refresh on its way joined, without anyone
+     * waiting ([GraineInApp.holdForMissingToken]) — and the call is prepared
+     * once that ask ends: with the token it brought, or as it is when it
+     * brought none or 10 seconds went by. Prepared before it, it would mint
+     * without the token, and the token coming would let it go. True when it is
+     * held. Asked again meanwhile for the same user: the ask on its way
+     * prepares what was asked for last. Main thread.
+     */
+    private fun holdForToken(agent: GraineInApp, key: PrepareKey, reason: String?, variables: Map<String, String>): Boolean {
+        if (!agent.missingTokenDue()) {
+            tokenHolds.remove(agent)
+            return false
+        }
+        tokenHolds[agent]?.takeIf { it.key.identity == key.identity }?.let { waiting ->
+            waiting.key = key
+            waiting.reason = reason
+            waiting.variables = variables
+            return true
+        }
+        val hold = TokenHold(key, reason, variables)
+        tokenHolds[agent] = hold
+        if (agent.holdForMissingToken { tokenSettled(hold) }) return true
+        tokenHolds.remove(agent)
+        return false
+    }
+
+    /**
+     * [hold]'s ask for the token ended: its call prepared now, with what is
+     * held — unless it was let go, or meanwhile a call or a ring is under way,
+     * the app went to the background, or who is calling changed in any field
+     * (nobody is about to tap this one: the app asks again when its screen
+     * shows). Main thread.
+     */
+    private fun tokenSettled(hold: TokenHold) {
+        val agent = hold.key.agent
+        if (tokenHolds[agent] !== hold) return
+        tokenHolds.remove(agent)
+        if (currentCall != null || !agent.foreground || agent.identityEnvelope() != hold.key.identity) return
+        prepare(agent, hold.reason, hold.variables, tokenAsked = true)
     }
 
     /**
@@ -322,8 +376,14 @@ internal class CallTransports(
         adopted.remove(callId)?.session?.hangUp()
     }
 
+    /** Nobody is about to tap (a ring, the background, a tap): every prepared call goes, and every call held back for its user's token. Main thread. */
+    fun releasePrepared() {
+        tokenHolds.clear()
+        releasePrepared { true }
+    }
+
     /** Let go of every prepared call [which] picks: nothing more is sent for it, and nothing was dialled or billed. Main thread. */
-    fun releasePrepared(which: (PreparedCall) -> Boolean = { true }) {
+    fun releasePrepared(which: (PreparedCall) -> Boolean) {
         for (p in preparedCalls.values.filter(which)) release(p)
     }
 

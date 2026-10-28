@@ -11,6 +11,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -148,6 +149,11 @@ class RtcDirectWarmUpTest {
         dir.deleteRecursively()
     }
 
+    /** What proves the app and the user, when a test makes its own ([ownProofs]); null: the app's. */
+    private var proofs: Proofs? = null
+    /** What the agent's session asks of its users (`security.user.verify`); null: nothing. */
+    private var userVerify: String? = null
+
     private fun env() = AgentEnv(
         main = main,
         io = Executor { it.run() },
@@ -160,12 +166,49 @@ class RtcDirectWarmUpTest {
         fonts = false,
         directMint = RtcDirectMint(http = hosts, clock = { now }, background = { work -> queued += work }, timers = ManualScheduler()),
         rtcEnv = { agent -> rtcEnv(agent) },
+        proofs = proofs?.let { p -> { p } },
     )
 
     private fun session(audioTransport: String? = null) = JSONObject(
         """{"agentId":"agent-kmp","webcallAgentId":"web-kmp","appearance":{"title":"KMP"},"identity":{"field":"user_id"},
-            "calls":{"hosted":true,"platforms":["android"]${audioTransport?.let { ",\"audioTransport\":\"$it\"" } ?: ""}}}""",
+            "calls":{"hosted":true,"platforms":["android"]${audioTransport?.let { ",\"audioTransport\":\"$it\"" } ?: ""}}
+            ${userVerify?.let { ",\"security\":{\"user\":{\"verify\":\"$it\"}}" } ?: ""}}""",
     )
+
+    /**
+     * Proofs of the test's own: the app's refresher answered on the asking
+     * thread; [waitMs] the most a request waits for it when the user was
+     * identified without a token (and the window what nobody waits on holds
+     * back for it), on the test's clock for the hold, real for a request.
+     */
+    private fun ownProofs(waitMs: Long = 300) {
+        proofs = Proofs(
+            AppProofs({ AppProofsTest.DECLARED }, AppPassStore.memory(), { device }, { false }, { null }, clock, clock = { now }),
+            UserProof(clock = { now }, tokenChanged = { AppShared.identityTokenChanged() }),
+            fieldFor = { key -> AppShared.identityFieldFor(key) },
+            refreshWaitMs = 50,
+            noTokenWaitMs = waitMs,
+        )
+    }
+
+    /** The app's refresher: every ask counted, answered at once with [next] — or held for the test to answer. */
+    private class Refresher(private val next: () -> String? = { null }) : GraineIdentityTokenRefresher {
+        var calls = 0
+        var hold = false
+        var held: GraineIdentityTokenCallback? = null
+        override fun refresh(done: GraineIdentityTokenCallback) {
+            calls++
+            if (hold) held = done else done.onToken(next())
+        }
+    }
+
+    /** The grant requests that named user [value]: the next call's (its id the app's own, `call_…`), or the call [callId]'s. */
+    private fun grantsFor(value: String, callId: String? = null): List<JSONObject> = grantAsks.filter {
+        it.optJSONObject("identity")?.optString("value") == value &&
+            (if (callId == null) it.optString("callId").startsWith("call_") else it.optString("callId") == callId)
+    }
+
+    private fun tokenOf(body: JSONObject): String? = body.optJSONObject("identity")?.optString("token")?.takeIf { it.isNotEmpty() }
 
     private fun settle() {
         clock.advance(0)
@@ -337,5 +380,129 @@ class RtcDirectWarmUpTest {
         g.identify(mapOf("user_id" to "u-42")); settle()
         assertTrue(grantAsks.isEmpty())
         assertEquals(0, probes)
+    }
+
+    // ── the user's identity token, while the app is still fetching it (0.14.7) ──
+
+    /**
+     * Identified without a token, for an agent that checks its users, with a
+     * refresher: no grant for the user until the token comes — whatever asks
+     * meanwhile, one refresh — then exactly one, with it. A grant without it
+     * is a request the agent's Security log notes as anonymous.
+     */
+    @Test fun theNextCallsGrantWaitsForTheUsersTokenThenGoesOnceWithIt() {
+        ownProofs()
+        userVerify = "report"
+        val g = started()
+        val r = Refresher().apply { hold = true }
+        g.identityTokenRefresher = r
+        g.identify(mapOf("user_id" to "u-42")); settle()
+        // More reasons to warm while it is on its way: back in the foreground, another memory choice.
+        g.foregroundWatchers.forEach { it(true) }; settle()
+        g.setMemory(false); settle()
+        assertTrue("nothing goes for the user without the token", grantsFor("u-42").isEmpty())
+        assertEquals("one refresh, joined by every warm-up", 1, r.calls)
+        r.held!!.onToken("tok-fresh"); settle()
+        val sent = grantsFor("u-42")
+        assertEquals("exactly one", 1, sent.size)
+        assertEquals("with the token", "tok-fresh", tokenOf(sent.single()))
+        assertFalse("for who the user is now", sent.single().getBoolean("memory"))
+        assertEquals(1, r.calls)
+    }
+
+    /** The refresher answers null: one grant, as it is, at once — no ten seconds — and coming back asks the refresher nothing more. */
+    @Test fun aRefresherWithNoTokenLetsTheGrantGoOnceAsItIs() {
+        ownProofs()
+        userVerify = "report"
+        val g = started()
+        val r = Refresher { null }
+        g.identityTokenRefresher = r
+        g.identify(mapOf("user_id" to "u-42")); settle()
+        val sent = grantsFor("u-42")
+        assertEquals("one, once the refresh ended", 1, sent.size)
+        assertNull("nothing to carry: as it is", tokenOf(sent.single()))
+        assertEquals(1, r.calls)
+        g.foregroundWatchers.forEach { it(true) }; settle()
+        assertEquals("the grant in hand holds: nothing sent", 1, grantsFor("u-42").size)
+        assertEquals("at most once every 30 seconds", 1, r.calls)
+    }
+
+    /**
+     * The refresher hangs: one grant, as it is, once the 10 seconds go by.
+     * Nobody waited, so a conversation starting then would still wait for the
+     * refresh; its late token sends the grant again, with it.
+     */
+    @Test fun aSlowRefresherLetsTheGrantGoAfterTenSeconds() {
+        ownProofs(waitMs = 10_000)
+        userVerify = "enforce"
+        val g = started()
+        val r = Refresher().apply { hold = true }
+        g.identityTokenRefresher = r
+        g.identify(mapOf("user_id" to "u-42")); settle()
+        clock.advance(9_999); settle()
+        assertTrue(grantsFor("u-42").isEmpty())
+        clock.advance(1); settle()
+        assertEquals("ten seconds: it goes as it is", 1, grantsFor("u-42").size)
+        assertNull(tokenOf(grantsFor("u-42").single()))
+        assertEquals(1, r.calls)
+        assertTrue("not a wait that ran out: a conversation would still wait for it", proofs!!.missingTokenDue("pk_kmp", "u-42"))
+        r.held!!.onToken("tok-late"); settle()
+        assertEquals("the grant again, with the token", 2, grantsFor("u-42").size)
+        assertEquals("tok-late", tokenOf(grantsFor("u-42").last()))
+        assertEquals("never two refreshes", 1, r.calls)
+    }
+
+    /** Nothing to wait for — an agent that does not check its users: the grant goes at once, as before, and nobody's refresher is asked. */
+    @Test fun withNothingToWaitForTheGrantGoesAsBefore() {
+        ownProofs()
+        userVerify = "off"
+        val r = Refresher().apply { hold = true }
+        proofs!!.user.refresher = r
+        val g = started()
+        g.identify(mapOf("user_id" to "u-42")); settle()
+        assertEquals("an agent that does not check its users: at once", 1, grantsFor("u-42").size)
+        assertNull(tokenOf(grantsFor("u-42").single()))
+        assertEquals(0, r.calls)
+    }
+
+    /** Nobody identified, a token held, no refresher: the grant goes at once, as before. */
+    @Test fun nobodyIdentifiedATokenHeldOrNoRefresherWarmsAsBefore() {
+        ownProofs()
+        userVerify = "enforce"
+        val r = Refresher().apply { hold = true }
+        proofs!!.user.refresher = r
+        val g = started()
+        assertEquals("nobody identified: at once", 1, grantAsks.size)
+        assertFalse(grantAsks.single().has("identity"))
+        // A token held.
+        g.identify(mapOf("user_id" to "u-7"), identityToken = "tok-held"); settle()
+        assertEquals(1, grantsFor("u-7").size)
+        assertEquals("tok-held", tokenOf(grantsFor("u-7").single()))
+        // No refresher: nothing to ask, so nothing to wait for.
+        g.identityTokenRefresher = null
+        g.identify(mapOf("user_id" to "u-42")); settle()
+        assertEquals(1, grantsFor("u-42").size)
+        assertNull(tokenOf(grantsFor("u-42").single()))
+        assertEquals(0, r.calls)
+    }
+
+    /** A ring's own grant never waits for the token: asked for apart while the next call's grant still waits, and the ring asks the refresher nothing. */
+    @Test fun aRingsGrantNeverWaitsForTheToken() {
+        ownProofs()
+        userVerify = "report"
+        val g = started()
+        val r = Refresher().apply { hold = true }
+        g.identityTokenRefresher = r
+        g.identify(mapOf("user_id" to "u-42")); settle()
+        assertEquals(1, r.calls)
+        webMint = { HttpReply(200, credential().toString()) }
+        assertTrue(g.calls.handlePush(ring("sc_ring_tok")))
+        settle()
+        val ask = grantsFor("u-42", callId = "sc_ring_tok")
+        assertEquals("the ring's own grant, asked for apart", 1, ask.size)
+        assertNull(tokenOf(ask.single()))
+        assertTrue("the next call's grant still waits", grantsFor("u-42").isEmpty())
+        assertEquals("the ring asked nothing more", 1, r.calls)
+        g.calls.decline(); settle()
     }
 }

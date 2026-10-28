@@ -14,6 +14,7 @@ import java.net.URL
 import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.coroutines.resume
@@ -595,8 +596,12 @@ class GraineInApp private constructor(
      * answer goes out with that request; null, a throw, or no answer within
      * 10 seconds lets it go without one, as before. A registration that went
      * without a token is made again once a token for the same user arrives, so
-     * they are rung on this device (new in 0.14.6). Answering a call that rings
-     * never waits for it.
+     * they are rung on this device (new in 0.14.6). With `inapp-android-rtc` in
+     * the app, what calls fetch ahead of the tap — the next call's credential,
+     * and the call [GraineCalls.prepareCall] gets ready — asks for it as well,
+     * without holding anything up: fetched once your token arrives, or as it
+     * is once your refresher answers null or 10 seconds pass (new in 0.14.7).
+     * Answering a call that rings never waits for it.
      */
     var identityTokenRefresher: GraineIdentityTokenRefresher?
         get() = proofs.user.refresher
@@ -765,6 +770,41 @@ class GraineInApp private constructor(
     }
 
     /**
+     * THE TOKEN NOT YET HELD, FOR WHAT NOBODY WAITS ON (0.14.7) — the next
+     * call's grant, a call prepared ahead of the tap. Each carries the user;
+     * sent while the user was identified without their identity token, the
+     * agent checks its users and the app set a refresher that may be asked
+     * (UserProof.askForMissingToken), it would go without it — a request the
+     * agent's Security log notes as anonymous, made stale by the token moments
+     * later. So it is held back: the refresher is asked, or the refresh on its
+     * way joined, and nothing waits on it. [then] is told once, on the main
+     * thread: when that refresh ends (true when it brought the token — held
+     * by then, [identityTokenChanged] heard), or when the 10 seconds a
+     * conversation would wait have gone by (false), whichever comes first. A
+     * refresh that outlives them is not one that ran out a wait: a
+     * conversation starting then still waits for it. False — and [then] is
+     * never told — when nothing is worth holding back for. Never blocks; any
+     * thread.
+     */
+    internal fun holdForMissingToken(then: (brought: Boolean) -> Unit): Boolean {
+        val p = AppShared.proofsIfMade() ?: return false
+        val told = AtomicBoolean(false)
+        val window = Runnable { if (told.compareAndSet(false, true)) then(false) }
+        val asked = runCatching {
+            p.askForMissingToken(config.publishableKey, identity.value()) { brought ->
+                main.post {
+                    if (told.compareAndSet(false, true)) {
+                        main.removeCallbacks(window)
+                        then(brought)
+                    }
+                }
+            }
+        }.getOrDefault(false)
+        if (asked) main.postDelayed(window, p.noTokenWaitMs)
+        return asked
+    }
+
+    /**
      * Whether the current user's conversations are remembered: their last
      * choice on this install, else on. The choice is kept under the trait that
      * identifies the user, which this launch's session names: before it has
@@ -905,14 +945,60 @@ class GraineInApp private constructor(
      * grant carries who the user is, as a ticket does, and neither is asked for
      * before it says — and never for calls that go over the WebSocket. Nothing
      * waits on it and nothing fails without it: a call with no grant mints
-     * through the web route, as it always did. Never the microphone.
+     * through the web route, as it always did. Never the microphone. And not
+     * while the user's identity token is on its way ([warmNextCall]); a
+     * ringing call's grant never waits for it.
      */
     private fun warmCalls(who: IdentityEnvelope) {
         if (!callsMayMintDirect()) return
-        runCatching { env.directMint.warm(config.baseUrl, config.publishableKey, who) }
+        warmNextCall(who)
         runCatching { AppShared.callsIfMade()?.ringingCallOf(this) }.getOrNull()?.let { callId ->
             runCatching { env.directMint.warmCall(config.baseUrl, config.publishableKey, who, callId) }
         }
+    }
+
+    /** The next call's grant held back for a user's token, while the ask for it is on its way ([warmNextCall]). */
+    private class GrantHold(val value: String?)
+
+    /** The hold the next call's grant is under, if any. Under [grantHoldLock]. */
+    private var grantHold: GrantHold? = null
+    private val grantHoldLock = Any()
+
+    /**
+     * THE NEXT CALL'S GRANT WAITS FOR THE TOKEN THE APP IS STILL FETCHING. With
+     * the user's identity token on its way ([missingTokenDue]) and a grant
+     * request about to go for them (RtcDirectMint.wouldAsk), nothing is sent
+     * yet ([holdForMissingToken]): the token, when it comes, asks for the grant
+     * with it ([identityTokenChanged] announces the identity again); a refresh
+     * that ends without one, or the 10 seconds going by, asks for it as it is,
+     * so the first tap stays fast. Asked again meanwhile for the same user (the
+     * foreground, their memory choice), the hold on its way answers that too.
+     * Nothing due, or nothing that would go: [RtcDirectMint.warm] now, as
+     * always. Any thread.
+     */
+    private fun warmNextCall(who: IdentityEnvelope) {
+        if (missingTokenDue() && runCatching { env.directMint.wouldAsk(config.publishableKey, who) }.getOrDefault(false)) {
+            val mine = GrantHold(who.value)
+            val joined = synchronized(grantHoldLock) {
+                if (grantHold?.value == who.value) true else { grantHold = mine; false }
+            }
+            if (joined) return
+            if (holdForMissingToken { brought -> grantHoldOver(mine, brought) }) return
+        }
+        synchronized(grantHoldLock) { grantHold = null }
+        runCatching { env.directMint.warm(config.baseUrl, config.publishableKey, who) }
+    }
+
+    /** The hold [hold] ended — [brought] the token, or not, or its 10 seconds went by. Main thread. */
+    private fun grantHoldOver(hold: GrantHold, brought: Boolean) {
+        synchronized(grantHoldLock) {
+            if (grantHold !== hold) return
+            grantHold = null
+        }
+        // The token came: identityTokenChanged has asked for the grant with it. Someone else, or nobody, since: that change did.
+        if (brought || !stillIdentified(hold.value) || identityProofFor(hold.value)?.token != null) return
+        if (!callsMayMintDirect()) return
+        runCatching { env.directMint.warm(config.baseUrl, config.publishableKey, identityEnvelope()) }
     }
 
     /**

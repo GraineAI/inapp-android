@@ -24,7 +24,9 @@ import java.util.concurrent.CountDownLatch
  *     new conversation, this install's registration for calls): a user
  *     identified without an identity token has the app's refresher asked and
  *     waited for, at most 10 s, when the agent checks its users — never for a
- *     call Graine rang, which the person is answering;
+ *     call Graine rang, which the person is answering, nor for the next
+ *     call's grant the agent asks for, which it holds back for that token
+ *     itself;
  *   · the answer's `verification` kept (passes, verdicts);
  *   · refused `app_not_verified`: the app proven, and the request sent once
  *     more; refused `identity_unverified`: the app's refresher asked, and the
@@ -96,6 +98,10 @@ internal object EmbedRequest {
      * [forARing]: the request is for a call Graine rang — its credential, its
      * grant, its ticket — which the person is answering, so it never waits for
      * a token the user was identified without.
+     * [tokenAsked]: whoever sends it has already asked for that token and is
+     * done holding back for it — the next call's grant, which the agent sends
+     * once the token came or will not (GraineInApp.warmNextCall) — so it waits
+     * for no refresh here.
      * Throws what [post] throws.
      */
     fun send(
@@ -105,11 +111,12 @@ internal object EmbedRequest {
         tokens: ClientTokens? = null,
         newConnection: Boolean = false,
         forARing: Boolean = false,
+        tokenAsked: Boolean = false,
         post: (String) -> HttpReply,
     ): HttpReply {
         val carried = withToken(tokens, newConnection, post)
         val proofs = AppShared.proofsIfMade() ?: return carried(body.toString())
-        return proofs.send(url, body, anyAppPass, forARing, carried)
+        return proofs.send(url, body, anyAppPass, forARing, tokenAsked, carried)
     }
 
     /** [post], carrying [tokens]' newest token on every body it sends; null tokens: [post] as it is. */
@@ -128,8 +135,12 @@ internal class Proofs(
     private val fieldFor: (publishableKey: String) -> String?,
     /** How long a request waits for the app's refresher. */
     private val refreshWaitMs: Long = UserProof.REFRESH_WAIT_MS,
-    /** How long a request waits for the app's refresher when the user was identified without a token ([UserProof.NO_TOKEN_WAIT_MS]). */
-    private val noTokenWaitMs: Long = UserProof.NO_TOKEN_WAIT_MS,
+    /**
+     * How long a request waits for the app's refresher when the user was
+     * identified without a token ([UserProof.NO_TOKEN_WAIT_MS]) — and how long
+     * what nobody waits on holds back for it (GraineInApp.holdForMissingToken).
+     */
+    val noTokenWaitMs: Long = UserProof.NO_TOKEN_WAIT_MS,
 ) {
     /** What a request carried: the identity value, the user it was for, and the app pass. */
     class Sent(val value: String?, val generation: Long, val appPass: String?)
@@ -141,20 +152,28 @@ internal class Proofs(
     /**
      * Send [body] to [url] with [post], with what the proofs put on it and
      * read off its answer — [forARing]: a request for a call Graine rang,
-     * which never waits for a token the user was identified without
-     * (EmbedRequest.send).
+     * which never waits for a token the user was identified without;
+     * [tokenAsked]: one whose sender already held back for that token, which
+     * waits for no refresh (EmbedRequest.send).
      */
-    fun send(url: String, body: JSONObject, anyAppPass: Boolean, forARing: Boolean = false, post: (String) -> HttpReply): HttpReply {
+    fun send(
+        url: String,
+        body: JSONObject,
+        anyAppPass: Boolean,
+        forARing: Boolean = false,
+        tokenAsked: Boolean = false,
+        post: (String) -> HttpReply,
+    ): HttpReply {
         val route = EmbedRequest.route(url)
         val key = (body.opt("publishableKey") as? String).orEmpty()
         // A user identified without a token, an agent that checks its users, an app with a refresher: the refresher asked
         // and waited for before a conversation — or a request that carries the user and needs them proven — goes, so it
         // carries the token (UserProof.askForMissingToken). Never for a call Graine rang: the person is answering it.
-        if (!forARing && (route == EmbedRequest.Route.CONVERSATION || route == EmbedRequest.Route.USER)) {
+        if (!forARing && !tokenAsked && (route == EmbedRequest.Route.CONVERSATION || route == EmbedRequest.Route.USER)) {
             awaitMissingToken(key, identityValue(body))
         }
         if (route == EmbedRequest.Route.CONVERSATION) {
-            user.beforeConversation(identityValue(body), fieldFor(key), refreshWaitMs)
+            user.beforeConversation(identityValue(body), fieldFor(key), refreshWaitMs, waitForInFlight = !tokenAsked)
             app.beforeConversation(key)
         }
         var sent = stamp(body, key, anyAppPass)
@@ -244,6 +263,10 @@ internal class Proofs(
     /** [UserProof.askForMissingToken] for user [value] of [key]'s agent: the latch to wait on (with [awaitAsked]), or null. Never blocks. */
     fun askForMissingToken(key: String, value: String?): CountDownLatch? =
         user.askForMissingToken(value, fieldFor(key), checksUsers(key))
+
+    /** The same, for what nobody waits on: [settled] told when that refresh ends; false when nothing was asked (UserProof). Never blocks. */
+    fun askForMissingToken(key: String, value: String?, settled: (brought: Boolean) -> Unit): Boolean =
+        user.askForMissingToken(value, fieldFor(key), checksUsers(key), settled)
 
     /** Wait for what [askForMissingToken] handed back, at most [noTokenWaitMs]. Never on the main thread. */
     fun awaitAsked(wait: CountDownLatch) = user.await(wait, noTokenWaitMs)

@@ -220,13 +220,14 @@ class PrepareCallTest {
         )
     }
 
-    /** The app's refresher: every ask counted, answered at once with [next] — or held, never answered. */
+    /** The app's refresher: every ask counted, answered at once with [next] — or held, for the test to answer ([held]) or never. */
     private class TokenRefresher(private val next: () -> String? = { null }) : GraineIdentityTokenRefresher {
         var calls = 0
         var hold = false
+        var held: GraineIdentityTokenCallback? = null
         override fun refresh(done: GraineIdentityTokenCallback) {
             calls++
-            if (!hold) done.onToken(next())
+            if (hold) held = done else done.onToken(next())
         }
     }
 
@@ -732,6 +733,136 @@ class PrepareCallTest {
         assertEquals("placing a call asks", 1, r.calls)
         assertTrue("and waits, at most the cap: $placed ms", placed >= 250)
         g.calls.end(); pump()
+    }
+
+    // ── a call prepared while the app is still fetching the user's token (0.14.7) ──
+
+    /** The token the mint [m] carried, or null. */
+    private fun tokenOf(m: JSONObject): String? = m.optJSONObject("identity")?.optString("token")?.takeIf { it.isNotEmpty() }
+
+    /**
+     * prepareCall while the user's token is on its way: nothing is minted
+     * until it comes — asked again meanwhile, one refresh — then one call,
+     * with it, which the tap dials. Minted without it, the token coming would
+     * let it go and the tap would prepare again.
+     */
+    @Test fun aCallPreparedWhileTheTokenIsOnItsWayIsPreparedOnceItComesWithIt() {
+        ownProofs()
+        userVerify = "report"
+        val g = started()
+        val r = TokenRefresher().apply { hold = true }
+        g.identityTokenRefresher = r
+        g.identify(asha); pump()
+        prepare(g, reason = "billing")
+        prepare(g)
+        assertTrue("nothing minted without the token", mints.isEmpty())
+        assertNull(g.calls.preparedFor(g))
+        assertEquals("one refresh", 1, r.calls)
+        r.held!!.onToken("tok-fresh"); pump()
+        peers.last().candidate("srflx"); pump()
+        val p = g.calls.preparedFor(g)
+        assertNotNull("prepared once the token came", p)
+        assertEquals("exactly one", 1, mints.size)
+        assertEquals("with the token", "tok-fresh", tokenOf(mints.single()))
+        assertEquals("what was asked for last", "help", mints.single().getJSONObject("variables").getString("call_reason"))
+        inFront(g)
+        val id = g.calls.startCall(activity, "help", vars, agent = g.name)!!
+        pump()
+        assertEquals("the tap dials it", p!!.callId, id)
+        assertEquals("no second mint", 1, mints.size)
+        assertTrue(invites() > 0)
+        assertEquals(1, r.calls)
+        g.calls.end(); pump()
+    }
+
+    /** The refresher answers null: prepared once, as it is, as soon as it answered. */
+    @Test fun aCallPreparedWhileTheTokenIsOnItsWayGoesAsItIsWhenTheRefresherHasNone() {
+        ownProofs()
+        userVerify = "report"
+        val g = started()
+        val r = TokenRefresher { null }
+        g.identityTokenRefresher = r
+        g.identify(asha); pump()
+        prepare(g)
+        assertNotNull(g.calls.preparedFor(g))
+        assertEquals(1, mints.size)
+        assertNull("nothing to carry: as it is", tokenOf(mints.single()))
+        assertEquals(1, r.calls)
+    }
+
+    /** The refresher hangs: prepared once, as it is, after the 10 seconds — its own mint then goes without it, as a call's would. */
+    @Test fun aCallPreparedWhileTheTokenIsOnItsWayGoesAsItIsAfterTenSeconds() {
+        ownProofs(waitMs = 300)
+        userVerify = "enforce"
+        val g = started()
+        val r = TokenRefresher().apply { hold = true }
+        g.identityTokenRefresher = r
+        g.identify(asha); pump()
+        prepare(g)
+        clock.advance(299); pump()
+        assertTrue(mints.isEmpty())
+        clock.advance(1); pump()
+        assertEquals("prepared as it is", 1, mints.size)
+        assertNull(tokenOf(mints.single()))
+        assertNotNull(g.calls.preparedFor(g))
+        assertEquals("never two refreshes", 1, r.calls)
+    }
+
+    /** Held for the token, then the app goes to the background — or a call rings: nothing is prepared when the token comes. */
+    @Test fun aCallHeldForTheTokenIsLetGoInTheBackgroundOrByARing() {
+        ownProofs()
+        userVerify = "report"
+        val g = started()
+        val r = TokenRefresher().apply { hold = true }
+        g.identityTokenRefresher = r
+        g.identify(asha); pump()
+        prepare(g)
+        g.foregroundWatchers.forEach { it(false) }; pump()
+        g.foregroundWatchers.forEach { it(true) }; pump()
+        r.held!!.onToken("tok-fresh"); pump()
+        assertNull("nobody taps a call in the background", g.calls.preparedFor(g))
+        assertTrue(mints.isEmpty())
+
+        // The token cleared and its 30 seconds gone: held again, and a ring wins.
+        g.setIdentityToken(null)
+        now += 30_000
+        prepare(g)
+        assertEquals("asked again", 2, r.calls)
+        assertTrue(mints.isEmpty())
+        inFront(g)
+        assertTrue(g.calls.handlePush(mapOf("type" to "agent_call", "call_id" to "sc_ring_held", "hosted" to "1")))
+        pump()
+        r.held!!.onToken("tok-later"); pump()
+        assertNull("the ring won", g.calls.preparedFor(g))
+        assertEquals("only the ring's own", listOf("sc_ring_held"), mints.map { it.getString("callId") })
+        g.calls.decline(); pump()
+    }
+
+    /** Nothing to wait for — an agent that does not check its users, or a token held: prepared at once, as before. */
+    @Test fun withNothingToWaitForACallIsPreparedAtOnce() {
+        ownProofs()
+        userVerify = "off"
+        val g = started()
+        val r = TokenRefresher().apply { hold = true }
+        g.identityTokenRefresher = r
+        g.identify(asha); pump()
+        prepare(g)
+        assertNotNull(g.calls.preparedFor(g))
+        assertEquals(1, mints.size)
+        assertEquals(0, r.calls)
+    }
+
+    @Test fun withATokenHeldACallIsPreparedAtOnceWithIt() {
+        ownProofs()
+        userVerify = "enforce"
+        val g = started()
+        val r = TokenRefresher().apply { hold = true }
+        g.identityTokenRefresher = r
+        g.identify(asha, identityToken = "tok-held"); pump()
+        prepare(g)
+        assertNotNull(g.calls.preparedFor(g))
+        assertEquals("tok-held", tokenOf(mints.single()))
+        assertEquals(0, r.calls)
     }
 
     // ── the tap's wait: at once in the app in front, else with the service ──

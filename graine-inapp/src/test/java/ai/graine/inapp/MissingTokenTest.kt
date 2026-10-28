@@ -495,8 +495,15 @@ class MissingTokenTest {
         direct.warmCall(BASE, KEY, who("user-123"), "sc_ring_1")
         assertEquals("a ringing call's own grant asks nobody", 0, r.calls)
         assertFalse(asks.single().getJSONObject("identity").has("token"))
+        // The agent asks for the next call's grant only once the token came or will not (GraineInApp.warmNextCall, 0.14.7):
+        // the door holds it back for nothing.
+        assertTrue("a grant would go: the agent holds it back for the token", direct.wouldAsk(KEY, who("user-123")))
         direct.warm(BASE, KEY, who("user-123"))
-        assertEquals("the next call's grant waits for the token", 1, r.calls)
+        assertEquals(0, r.calls)
+        assertFalse(asks.last().getJSONObject("identity").has("token"))
+        // One renewed behind a call's mint waits there for the token, as before.
+        direct.mint(RtcCallRequest(BASE, KEY, emptyMap(), who("user-123"), "call_placed", null), "0123456789abcdef0123456789abcdef")
+        assertEquals("the next call's grant renewed behind a mint waits for the token", 1, r.calls)
         assertEquals("tok-fresh", asks.last().getJSONObject("identity").getString("token"))
     }
 

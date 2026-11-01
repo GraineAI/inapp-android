@@ -21,7 +21,7 @@ android {
         minSdk = 24
         targetSdk = 36
         versionCode = 1
-        versionName = "0.14.7"
+        versionName = "0.14.8"
         buildConfigField("String", "GRAINE_PUBLISHABLE_KEY", "\"$publishableKey\"")
     }
     compileOptions {

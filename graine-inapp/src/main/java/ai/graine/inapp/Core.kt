@@ -866,6 +866,96 @@ internal object Widgets {
         }
         return out
     }
+
+    /**
+     * How tall a component's large picture is drawn for its look's
+     * `imageSize`, in dp: the hero picture on top of a row, and a picture
+     * block. Anything else is the medium one.
+     */
+    fun pictureDp(imageSize: String?): Int = when (imageSize) {
+        "small" -> 100
+        "large" -> 180
+        else -> 140
+    }
+
+    // ── a component built from blocks ("Start blank") ─────────────────────
+
+    /** The kind "Start blank" makes in the dashboard. */
+    const val BLANK_KIND = "blank"
+
+    /** The kind is one built from blocks — read as the surface rule reads a kind: trimmed, in any case. */
+    fun isBlankKind(kind: String?): Boolean = (kind ?: "").trim().lowercase() == BLANK_KIND
+
+    /**
+     * A component's blocks when it is built from blocks; empty for any other
+     * kind. Its data's pictures are already on the agent's origin
+     * ([GraineWidget.adopt]), so no base is passed again.
+     */
+    fun blankBlocks(kind: String?, data: JSONObject?): List<GraineWidgetBlock> =
+        if (!isBlankKind(kind)) emptyList() else normaliseBlankBlocks(data)
+
+    /**
+     * protocol.ts `normaliseBlankBlocks`: the blocks to draw, from a
+     * component's data (`data.blocks`, the dashboard's
+     * `{ id, type, content?, imageUrl? }`). Kind-blind — the caller knows the
+     * component is a `blank`. Pure; never throws.
+     *
+     *  - a row that is not an object, or whose type (read trimmed, in any
+     *    case) is not one of [GraineWidgetBlockType], is dropped;
+     *  - so are a heading, text or button without words and an image without a
+     *    picture — read only from a string, trimmed as JavaScript trims;
+     *  - each block keeps only the field its type uses;
+     *  - its id is its own (a string that is not blank, kept as written),
+     *    unless it has none or an earlier block took it: then `block-<n>`, n
+     *    its place in the list as sent, with `-<n>` added until it is unique;
+     *  - a picture is resolved as every component picture is ([resolveImages],
+     *    on the value as sent: a root-relative path goes on [baseUrl]), then
+     *    trimmed. No base, no resolving.
+     */
+    fun normaliseBlankBlocks(data: Any?, baseUrl: String? = null): List<GraineWidgetBlock> {
+        val blocks = when (data) {
+            is JSONObject -> data.opt("blocks")
+            is Map<*, *> -> data["blocks"]
+            else -> return emptyList()
+        }
+        val rows: List<Any?> = when (blocks) {
+            is JSONArray -> (0 until blocks.length()).map { blocks.opt(it) }
+            is List<*> -> blocks
+            else -> return emptyList()
+        }
+        /** `typeof v === "string" ? v.trim() : ""`. */
+        fun words(v: Any?): String = (v as? String)?.let { ChatRules.jsTrim(it) } ?: ""
+        val out = ArrayList<GraineWidgetBlock>(rows.size)
+        val used = HashSet<String>()
+        rows.forEachIndexed { at, row ->
+            val r: (String) -> Any? = when (row) {
+                is JSONObject -> { k -> row.opt(k) }
+                is Map<*, *> -> { k -> row[k] }
+                else -> return@forEachIndexed
+            }
+            val word = words(r("type")).lowercase()
+            val type = GraineWidgetBlockType.entries.firstOrNull { it.wire == word } ?: return@forEachIndexed
+            val block = when (type) {
+                GraineWidgetBlockType.DIVIDER -> GraineWidgetBlock("", type)
+                GraineWidgetBlockType.IMAGE -> {
+                    val sent = r("imageUrl")
+                    val picture = words(if (baseUrl.isNullOrEmpty()) sent else resolveOne(sent, baseUrl))
+                    if (picture.isEmpty()) return@forEachIndexed
+                    GraineWidgetBlock("", type, imageUrl = picture)
+                }
+                GraineWidgetBlockType.HEADING, GraineWidgetBlockType.TEXT, GraineWidgetBlockType.BUTTON -> {
+                    val content = words(r("content"))
+                    if (content.isEmpty()) return@forEachIndexed
+                    GraineWidgetBlock("", type, content = content)
+                }
+            }
+            val own = r("id") as? String
+            var id = if (own != null && ChatRules.jsTrim(own).isNotEmpty() && own !in used) own else "block-$at"
+            while (!used.add(id)) id = "$id-$at"
+            out += block.copy(id = id)
+        }
+        return out
+    }
 }
 
 // ── the loader ─────────────────────────────────────────────────────────────

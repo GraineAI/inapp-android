@@ -267,7 +267,7 @@ class MainActivity : Activity() {
     private fun showDemoWidget() {
         val kind = intent?.getStringExtra("demoWidget") ?: return
         val style = DemoWidgets.style(intent.getStringExtra("demoPreset"), intent.getStringExtra("demoSelect"),
-            intent.getStringExtra("demoSurface"), intent.getStringExtra("demoColumns"))
+            intent.getStringExtra("demoSurface"), intent.getStringExtra("demoColumns"), intent.getStringExtra("demoButton"))
         val view = bar.widgetView
         when (kind) {
             "pending" -> view.presentPending(DemoWidgets.pending(intent.getStringExtra("demoPendingKind") ?: "product_list"))

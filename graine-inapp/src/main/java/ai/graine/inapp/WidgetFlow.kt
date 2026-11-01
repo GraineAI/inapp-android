@@ -9,8 +9,9 @@ import org.json.JSONObject
  * decided here, so every rule is a JVM test:
  *
  *   GraineWidget    a frame from the page, adopted exactly as the React Native
- *                   SDK's useGraineWidget adopts it
- *   WidgetContent   what widget.tsx reduces a kind to — rows, chips, days —
+ *                   SDK's useGraineWidget adopts it — with, for a component
+ *                   built from blocks ("Start blank"), its blocks
+ *   WidgetContent   what widget.tsx reduces a kind to — rows, chips, days, blocks —
  *                   and the answer each tap sends (the structured payload the
  *                   runtime's resultToText reads, and the sentence the agent
  *                   hears)
@@ -33,6 +34,22 @@ data class GraineWidget(
     /** What the app should do on a tap, beyond telling the agent. Already allowlisted. */
     val onSelect: WidgetSelectAction,
 ) {
+    /**
+     * ITS BLOCKS, for a component built from blocks — "Start blank" in the
+     * dashboard (kind `blank`): its headings, text, pictures, dividers and
+     * buttons, top to bottom ([GraineWidgetBlock]). Empty for any other kind.
+     *
+     * Only what can be drawn is kept: a block of a type this version does not
+     * know, a heading, text or button without words, an image without a
+     * picture, and anything that is not a block are left out, and each block
+     * keeps only the field its type uses. Each id is the block's own, or —
+     * when it has none, or an earlier block has it — `block-<n>`, its place in
+     * the list, so ids are unique keys. A picture given as a path on the
+     * agent's site is a full URL on it, as in [data]. [GraineWidgetView] draws
+     * them; read them to draw the component in your own design. New in 0.14.8.
+     */
+    val blocks: List<GraineWidgetBlock> = Widgets.blankBlocks(kind, data)
+
     companion object {
         /**
          * The page's `widget` object → a component, or null when it names no
@@ -57,6 +74,44 @@ data class GraineWidget(
     }
 }
 
+/** What one block of a component built from blocks is ([GraineWidgetBlock.type]). New in 0.14.8. */
+enum class GraineWidgetBlockType(
+    /** The dashboard's word for it. */
+    val wire: String,
+) {
+    /** A heading: [GraineWidgetBlock.content]. */
+    HEADING("heading"),
+    /** A paragraph: [GraineWidgetBlock.content]. */
+    TEXT("text"),
+    /** A picture as wide as the component, cropped to its height: [GraineWidgetBlock.imageUrl]. */
+    IMAGE("image"),
+    /** A line between blocks. */
+    DIVIDER("divider"),
+    /**
+     * A button labelled [GraineWidgetBlock.content]. A tap answers the
+     * component with `{"action": content}` and the words as the user's turn,
+     * as [GraineWidgetView] and the dashboard's preview do:
+     * `graine.answerWidget(widget.id, mapOf("action" to content), content)`.
+     */
+    BUTTON("button"),
+}
+
+/**
+ * ONE BLOCK OF A COMPONENT BUILT FROM BLOCKS — a component made with "Start
+ * blank" in the dashboard (kind `blank`): a heading, text, a picture, a
+ * divider or a button, in the order [GraineWidget.blocks] lists them. New in 0.14.8.
+ */
+data class GraineWidgetBlock(
+    /** Its id: the dashboard's own, else `block-<n>` (its place in the list). Unique within the component — a key for your list. */
+    val id: String,
+    /** What it is: a heading, text, a picture, a divider or a button. */
+    val type: GraineWidgetBlockType,
+    /** The words of a heading, a text or a button, trimmed; null for an image or a divider. */
+    val content: String? = null,
+    /** An image's picture — an absolute URL when the agent sent it (a path on its site is resolved against it); null for any other block. */
+    val imageUrl: String? = null,
+)
+
 /** What a tap sends: the structured payload, and the sentence that is the customer's turn. */
 /** A component the customer answered: what they chose, and the sentence the agent heard as their turn. */
 data class GraineAnswer(val widget: GraineWidget, val data: Map<String, Any?>, val summary: String)
@@ -67,7 +122,8 @@ data class WidgetAnswer(val data: Map<String, Any?>, val summary: String)
  * One kind, reduced to what the renderer draws — widget.tsx's normalisation,
  * line for line. Three dashboard kinds (product list, plan comparison, info
  * card) share one row shape; chips cover the agent's `choices` and the
- * dashboard's `quick_actions`; `calendar_slots` is days and their times.
+ * dashboard's `quick_actions`; `calendar_slots` is days and their times; a
+ * component built from blocks (`blank`) is its blocks.
  */
 internal class WidgetContent(val widget: GraineWidget) {
     /** One normalised row. */
@@ -142,12 +198,17 @@ internal class WidgetContent(val widget: GraineWidget) {
         )
     }
 
+    /** A component built from blocks ("Start blank"): what it shows, top to bottom. Empty for any other kind. */
+    val blocks: List<GraineWidgetBlock> = widget.blocks
+    /** Built from blocks, with one to draw: the blocks are the component, drawn before anything else its data holds. */
+    val isBlocks: Boolean = blocks.isNotEmpty()
+
     val isProducts: Boolean = rows.isNotEmpty() &&
         (kind == "product_list" || kind == "products" || kind == "plan_comparison" || kind == "info_card" || options.isEmpty())
     val isChips: Boolean = (kind == "choices" || isQuickActions) && options.isNotEmpty()
     val isCalendar: Boolean = kind == "calendar_slots" && (data.opt("days") as? JSONArray)?.length()?.let { it > 0 } == true
-    /** Something this build can draw. A kind it cannot draws the fallback sentence, on a card. */
-    val drawable: Boolean = isProducts || isChips || isCalendar
+    /** Something this build can draw. A kind it cannot draws the fallback sentence, on a card — as does one built from blocks with none it can draw. */
+    val drawable: Boolean = isBlocks || isProducts || isChips || isCalendar
 
     val chips: List<Chip> = options.map { o ->
         val obj = o as? JSONObject
@@ -170,8 +231,8 @@ internal class WidgetContent(val widget: GraineWidget) {
     /** The surface actually drawn: an undrawable kind takes over nothing. */
     fun surface(look: WidgetLook): String = if (drawable) look.surface else "card"
 
-    /** Choosing several applies only where there is something to tick. */
-    fun many(look: WidgetLook): Boolean = look.select == "many" && drawable
+    /** Choosing several applies only where there is something to tick — never to blocks, whose button answers at once. */
+    fun many(look: WidgetLook): Boolean = look.select == "many" && drawable && !isBlocks
 
     /** The payload for one row, per kind — what the runtime's resultToText reads. */
     private fun toSubmit(r: Row): Map<String, Any?> = when (shape) {
@@ -219,6 +280,12 @@ internal class WidgetContent(val widget: GraineWidget) {
     /** A time tapped: the day and the slot, which is what resultToText("calendar_slots") reads. */
     fun pickSlot(day: Day, slot: String): WidgetAnswer =
         WidgetAnswer(linkedMapOf("day" to day.label, "slot" to slot), "${day.label} at $slot, please.")
+
+    /** A block's button tapped: `{"action": its words}`, and its words as the customer's turn — what the dashboard's own preview sends. */
+    fun pickBlock(block: GraineWidgetBlock): WidgetAnswer {
+        val words = block.content.orEmpty()
+        return WidgetAnswer(linkedMapOf("action" to words), words)
+    }
 
     private companion object {
         fun list(v: Any?): List<Any?> = (v as? JSONArray)?.let { a -> (0 until a.length()).map { a.opt(it) } } ?: emptyList()

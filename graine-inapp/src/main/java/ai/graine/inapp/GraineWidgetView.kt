@@ -28,9 +28,10 @@ import org.json.JSONObject
  * A port of the React Native SDK's GraineWidget, drawing the same kinds the
  * same way: a product list with pictures in five looks (gallery, cards, list,
  * spotlight, compact), a plan comparison, an info card, chips for choices and
- * quick actions, calendar slots — and, for a kind this build cannot draw, the
- * agent's own fallback sentence rather than a guess. Where it goes follows the
- * one rule the web embed also follows ([Widgets.surface]):
+ * quick actions, calendar slots, a component built from blocks ("Start blank":
+ * headings, text, pictures, dividers and buttons) — and, for a kind this build
+ * cannot draw, the agent's own fallback sentence rather than a guess. Where it
+ * goes follows the one rule the web embed also follows ([Widgets.surface]):
  *
  *   screen  the component IS the screen — pictures, several things to compare
  *   sheet   slides over the app, dimmed behind it — a choice to finish
@@ -692,9 +693,10 @@ class GraineWidgetView @JvmOverloads constructor(
         if (Build.VERSION.SDK_INT >= 30) insets.getInsets(WindowInsets.Type.systemBars()).let { it.top to it.bottom }
         else insets.systemWindowInsetTop to insets.systemWindowInsetBottom
 
-    // ── the body: rows, chips, days, or the sentence ───────────────────────
+    // ── the body: blocks, rows, chips, days, or the sentence ───────────────
 
     private fun body(w: GraineWidget, c: WidgetContent, look: WidgetLook, s: Skin): View = when {
+        c.isBlocks -> blocks(c, look, s)
         c.isCalendar -> calendar(c, s)
         c.isProducts -> products(c, look, s)
         c.isChips -> FlowRow(context, dp(8), dp(8)).apply {
@@ -733,6 +735,109 @@ class GraineWidgetView @JvmOverloads constructor(
                 })
             }, Ui.matchWidth())
             addView(block, Ui.matchWidth())
+        }
+    }
+
+    /**
+     * A COMPONENT BUILT FROM BLOCKS — "Start blank" in the dashboard: its
+     * headings, text, pictures, dividers and buttons, top to bottom, in the
+     * component's look — its accent and corners, its density between the
+     * blocks, its picture size for a picture, its button style for a button,
+     * and the phone's grammar. A button answers the agent with its words
+     * ([WidgetContent.pickBlock]) through the same path as every other tap.
+     */
+    private fun blocks(c: WidgetContent, look: WidgetLook, s: Skin): View {
+        val tight = look.density == "compact"
+        val column = Ui.vertical(context, s.gap(tight))
+        for (b in c.blocks) when (b.type) {
+            GraineWidgetBlockType.HEADING -> column.addView(s.label(b.content.orEmpty(), 16f, s.text, 700, role = Themed.Role.TITLE).apply {
+                if (Build.VERSION.SDK_INT >= 28) isAccessibilityHeading = true
+            }, Ui.matchWidth())
+            GraineWidgetBlockType.TEXT -> column.addView(s.label(b.content.orEmpty(), 14f, s.muted, role = Themed.Role.BODY).apply {
+                if (s.tokens == null) Ui.lineHeight(this, 20f)
+            }, Ui.matchWidth())
+            // As wide as the component, cropped to the look's height; the neutral fill stands in while it loads, and if it never does.
+            GraineWidgetBlockType.IMAGE -> column.addView(picture(b.imageUrl.orEmpty(), Widgets.pictureDp(look.imageSize), s))
+            GraineWidgetBlockType.DIVIDER -> column.addView(View(context).apply {
+                setBackgroundColor(s.border)
+                importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, s.line))
+            GraineWidgetBlockType.BUTTON -> column.addView(blockButton(b, c, look, s), Ui.matchWidth())
+        }
+        return column
+    }
+
+    /**
+     * A block's button, in the component's button style: filled (the chat's
+     * main-button treatment where the design gives one), outlined in the
+     * accent, or the whole row — its words, and a chevron. Its words are the answer.
+     */
+    private fun blockButton(b: GraineWidgetBlock, c: WidgetContent, look: WidgetLook, s: Skin): View {
+        val words = b.content.orEmpty()
+        val tight = look.density == "compact"
+        val padV = dp((if (tight) 6 else 10) + s.grammar.padBoost)
+        val tap = View.OnClickListener { answer(c.pickBlock(b)) }
+        if (look.button == "row") {
+            val line = Ui.horizontal(context, s.gap(tight)).apply {
+                setPadding(dp(14), padV, dp(10), padV)
+                minimumHeight = dp(44)
+                background = Ui.rounded(Color.TRANSPARENT, s.inner, s.line, s.border)
+                contentDescription = words
+                isClickable = true
+                setOnClickListener(tap)
+            }
+            line.addView(s.label(words, 14.5f, s.text, s.titleWeight), Ui.fill())
+            line.addView(s.label("›", 22f, s.muted, 600).apply { importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO })
+            return line
+        }
+        val outline = look.button == "outline"
+        return s.label(words, 14f, if (outline) s.accent else s.onAccent, 700).apply {
+            gravity = Gravity.CENTER
+            minHeight = dp(44)
+            setPadding(dp(14), padV, dp(14), padV)
+            val radius = s.button(pill = false)
+            background = if (outline) outlined(radius, s.accent, s) else filled(this, radius, s)
+            contentDescription = words
+            isClickable = true
+            setOnClickListener(tap)
+        }
+    }
+
+    /**
+     * A picture as wide as what holds it — a row's large picture, a picture
+     * block: its own height, or the shape the chat's cards give it (as tall as
+     * wide, 3:4 or 9:16 — always 100–260). Cropped; the neutral fill shows
+     * while it loads, and stays if it never does.
+     */
+    private fun picture(url: String, ownDp: Int, s: Skin): View =
+        if (s.imageShape == "auto") roundedImage(context, url, s.picture, s.border).also {
+            it.layoutParams = LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(ownDp))
+        }
+        else ShapedImage(context, s.imageShape, ownDp.toDouble()).apply {
+            scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+            background = android.graphics.drawable.GradientDrawable().apply { setColor(s.border); cornerRadius = s.picture }
+            clipToOutline = true
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            ImageLoader.load(this, url)
+            layoutParams = LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        }
+
+    /** An outlined button: transparent, in [color], at the design's outline width (1.5 dp before designs). */
+    private fun outlined(radius: Float, color: Int, s: Skin): android.graphics.drawable.Drawable =
+        Ui.rounded(Color.TRANSPARENT, radius, if (s.tokens != null) maxOf(s.line, dp(1)) else dp(1.5f), color)
+
+    /**
+     * A filled button on [tv]: the chat's main-button treatment where the design's cards give one — filled,
+     * outline, tonal or the words alone, its words' colour with it — else the accent.
+     */
+    private fun filled(tv: TextView, radius: Float, s: Skin): android.graphics.drawable.Drawable? {
+        val main = s.mainButton ?: return Ui.rounded(s.accent, radius)
+        tv.setTextColor(Themed.color(main.text))
+        if (main.strong) s.tokens?.let { Themed.face(tv, it.font.body, it.font.weights.strong, graine) }
+        return when {
+            main.border != null -> Ui.rounded(Color.TRANSPARENT, radius, maxOf(s.line, dp(1)), Themed.color(main.border))
+            main.fill != null -> Ui.rounded(Themed.color(main.fill), radius)
+            else -> null
         }
     }
 
@@ -908,19 +1013,8 @@ class GraineWidgetView @JvmOverloads constructor(
             minHeight = dp(44)
             setPadding(dp(if (wide) 12 else 14), 0, dp(if (wide) 12 else 14), 0)
             val radius = s.button(pill = !wide)
-            val main = s.mainButton
-            background = if (r.unavailable || outline) Ui.rounded(Color.TRANSPARENT, radius, if (s.tokens != null) maxOf(s.line, dp(1)) else dp(1.5f), if (r.unavailable) s.border else s.accent)
-            else if (main != null) {
-                // The chat's main-button treatment: filled, outline, tonal or the words alone.
-                setTextColor(Themed.color(main.text))
-                if (main.strong) s.tokens?.let { Themed.face(this, it.font.body, it.font.weights.strong, graine) }
-                when {
-                    main.border != null -> Ui.rounded(Color.TRANSPARENT, radius, maxOf(s.line, dp(1)), Themed.color(main.border))
-                    main.fill != null -> Ui.rounded(Themed.color(main.fill), radius)
-                    else -> null
-                }
-            }
-            else Ui.rounded(s.accent, radius)
+            background = if (r.unavailable || outline) outlined(radius, if (r.unavailable) s.border else s.accent, s)
+            else filled(this, radius, s)
             contentDescription = a11y
             isEnabled = !r.unavailable
             isClickable = !r.unavailable
@@ -931,16 +1025,7 @@ class GraineWidgetView @JvmOverloads constructor(
         else roundedImage(context, r.image, s.picture, s.border).also { it.layoutParams = LayoutParams(w, h) }
 
         /** The large picture on top: its own height, or the chat's card image shape — as tall as wide, 3:4 or 9:16 — always 100–260. */
-        fun largeImage(ownDp: Int): View? = if (r.image.isEmpty()) null
-        else if (s.imageShape == "auto") image(ViewGroup.LayoutParams.MATCH_PARENT, dp(ownDp))
-        else ShapedImage(context, s.imageShape, ownDp.toDouble()).apply {
-            scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
-            background = android.graphics.drawable.GradientDrawable().apply { setColor(s.border); cornerRadius = s.picture }
-            clipToOutline = true
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            ImageLoader.load(this, r.image)
-            layoutParams = LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        }
+        fun largeImage(ownDp: Int): View? = if (r.image.isEmpty()) null else picture(r.image, ownDp, s)
 
         fun frame(v: LinearLayout, bordered: Boolean): View {
             if (bordered) v.background = Ui.rounded(Color.TRANSPARENT, corner, if (s.tokens == null) dp(if (picked == true) 2 else 1) else if (picked == true) s.line * 2 else s.line, if (picked == true) s.accent else s.border)
@@ -957,7 +1042,7 @@ class GraineWidgetView @JvmOverloads constructor(
         when (variant) {
             "hero" -> {
                 val col = Ui.vertical(context, gap).apply { setPadding(pad, pad, pad, pad) }
-                largeImage(mapOf("small" to 100, "medium" to 140, "large" to 180).getValue(look.imageSize))?.let { col.addView(it) }
+                largeImage(Widgets.pictureDp(look.imageSize))?.let { col.addView(it) }
                 val words = Ui.vertical(context, dp(3))
                 badge()?.let { words.addView(it) }
                 words.addView(titleLine(true), Ui.matchWidth())

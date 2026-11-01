@@ -1287,6 +1287,805 @@
    }
   }
  ],
+ "blankBlocks": [
+  {
+   "data": {
+    "blocks": [
+     {
+      "id": "b1",
+      "type": "heading",
+      "content": "Your heading"
+     },
+     {
+      "id": "b2",
+      "type": "text",
+      "content": "Add the text your customer needs to read here."
+     }
+    ]
+   },
+   "baseUrl": "https://www.graine.ai",
+   "output": [
+    {
+     "id": "b1",
+     "type": "heading",
+     "content": "Your heading"
+    },
+    {
+     "id": "b2",
+     "type": "text",
+     "content": "Add the text your customer needs to read here."
+    }
+   ]
+  },
+  {
+   "data": {
+    "blocks": [
+     {
+      "id": "h",
+      "type": "heading",
+      "content": "Your plan is ready"
+     },
+     {
+      "id": "t",
+      "type": "text",
+      "content": "Cover starts the day you pay.\nCancel any time in the first 30 days."
+     },
+     {
+      "id": "i",
+      "type": "image",
+      "imageUrl": "/samples/car-blue.png"
+     },
+     {
+      "id": "d",
+      "type": "divider"
+     },
+     {
+      "id": "b",
+      "type": "button",
+      "content": "Pay now"
+     },
+     {
+      "id": "i2",
+      "type": "image",
+      "imageUrl": "https://cdn.example.com/plan.jpg"
+     }
+    ]
+   },
+   "baseUrl": "https://www.graine.ai",
+   "output": [
+    {
+     "id": "h",
+     "type": "heading",
+     "content": "Your plan is ready"
+    },
+    {
+     "id": "t",
+     "type": "text",
+     "content": "Cover starts the day you pay.\nCancel any time in the first 30 days."
+    },
+    {
+     "id": "i",
+     "type": "image",
+     "imageUrl": "https://www.graine.ai/samples/car-blue.png"
+    },
+    {
+     "id": "d",
+     "type": "divider"
+    },
+    {
+     "id": "b",
+     "type": "button",
+     "content": "Pay now"
+    },
+    {
+     "id": "i2",
+     "type": "image",
+     "imageUrl": "https://cdn.example.com/plan.jpg"
+    }
+   ]
+  },
+  {
+   "data": {
+    "blocks": [
+     {
+      "id": "i",
+      "type": "image",
+      "imageUrl": "/samples/car-blue.png"
+     },
+     {
+      "id": "b",
+      "type": "button",
+      "content": "Go"
+     }
+    ]
+   },
+   "baseUrl": "",
+   "output": [
+    {
+     "id": "i",
+     "type": "image",
+     "imageUrl": "/samples/car-blue.png"
+    },
+    {
+     "id": "b",
+     "type": "button",
+     "content": "Go"
+    }
+   ]
+  },
+  {
+   "data": {
+    "blocks": [
+     {
+      "id": "a",
+      "type": "image",
+      "imageUrl": "/a.png"
+     },
+     {
+      "id": "b",
+      "type": "image",
+      "imageUrl": "//cdn.example.com/b.png"
+     },
+     {
+      "id": "c",
+      "type": "image",
+      "imageUrl": "data:image/png;base64,AA=="
+     },
+     {
+      "id": "d",
+      "type": "image",
+      "imageUrl": "img/d.png"
+     },
+     {
+      "id": "e",
+      "type": "image",
+      "imageUrl": "  https://cdn.example.com/e.jpg  "
+     },
+     {
+      "id": "f",
+      "type": "image",
+      "imageUrl": " /f.png"
+     },
+     {
+      "id": "g",
+      "type": "image",
+      "imageUrl": "   "
+     },
+     {
+      "id": "h",
+      "type": "image",
+      "imageUrl": 5
+     },
+     {
+      "id": "i",
+      "type": "image",
+      "imageUrl": [
+       "/i.png"
+      ]
+     },
+     {
+      "id": "j",
+      "type": "image",
+      "image": "/j.png"
+     },
+     {
+      "id": "k",
+      "type": "image",
+      "ImageUrl": "/k.png"
+     },
+     {
+      "id": "l",
+      "type": "image"
+     }
+    ]
+   },
+   "baseUrl": "https://www.graine.ai/",
+   "output": [
+    {
+     "id": "a",
+     "type": "image",
+     "imageUrl": "https://www.graine.ai/a.png"
+    },
+    {
+     "id": "b",
+     "type": "image",
+     "imageUrl": "//cdn.example.com/b.png"
+    },
+    {
+     "id": "c",
+     "type": "image",
+     "imageUrl": "data:image/png;base64,AA=="
+    },
+    {
+     "id": "d",
+     "type": "image",
+     "imageUrl": "img/d.png"
+    },
+    {
+     "id": "e",
+     "type": "image",
+     "imageUrl": "https://cdn.example.com/e.jpg"
+    },
+    {
+     "id": "f",
+     "type": "image",
+     "imageUrl": "/f.png"
+    }
+   ]
+  },
+  {
+   "data": {
+    "blocks": [
+     {
+      "id": "a",
+      "type": " HEADING ",
+      "content": "A"
+     },
+     {
+      "id": "b",
+      "type": "Text",
+      "content": "B"
+     },
+     {
+      "id": "c",
+      "type": "BUTTON",
+      "content": "C"
+     },
+     {
+      "id": "d",
+      "type": "video",
+      "content": "D"
+     },
+     {
+      "id": "e",
+      "type": "heading2",
+      "content": "E"
+     },
+     {
+      "id": "f",
+      "type": "",
+      "content": "F"
+     },
+     {
+      "id": "g",
+      "type": 5,
+      "content": "G"
+     },
+     {
+      "id": "h",
+      "type": null,
+      "content": "H"
+     },
+     {
+      "id": "i",
+      "content": "I"
+     },
+     {
+      "id": "j",
+      "type": [
+       "text"
+      ],
+      "content": "J"
+     },
+     {
+      "id": "k",
+      "type": "divider "
+     }
+    ]
+   },
+   "baseUrl": "https://www.graine.ai",
+   "output": [
+    {
+     "id": "a",
+     "type": "heading",
+     "content": "A"
+    },
+    {
+     "id": "b",
+     "type": "text",
+     "content": "B"
+    },
+    {
+     "id": "c",
+     "type": "button",
+     "content": "C"
+    },
+    {
+     "id": "k",
+     "type": "divider"
+    }
+   ]
+  },
+  {
+   "data": {
+    "blocks": [
+     {
+      "id": "a",
+      "type": "heading",
+      "content": "  Hello  "
+     },
+     {
+      "id": "b",
+      "type": "text",
+      "content": " \n\tLine one\nLine two\t\n"
+     },
+     {
+      "id": "c",
+      "type": "heading",
+      "content": ""
+     },
+     {
+      "id": "d",
+      "type": "text",
+      "content": "   "
+     },
+     {
+      "id": "e",
+      "type": "button",
+      "content": "\n"
+     },
+     {
+      "id": "f",
+      "type": "button"
+     },
+     {
+      "id": "g",
+      "type": "text",
+      "content": 42
+     },
+     {
+      "id": "h",
+      "type": "heading",
+      "content": {
+       "text": "x"
+      }
+     },
+     {
+      "id": "i",
+      "type": "button",
+      "content": [
+       "Go"
+      ]
+     },
+     {
+      "id": "j",
+      "type": "text",
+      "content": null
+     },
+     {
+      "id": "k",
+      "type": "text",
+      "Content": "K"
+     },
+     {
+      "id": "l",
+      "type": "button",
+      "content": "नमस्ते 👋"
+     }
+    ]
+   },
+   "baseUrl": "https://www.graine.ai",
+   "output": [
+    {
+     "id": "a",
+     "type": "heading",
+     "content": "Hello"
+    },
+    {
+     "id": "b",
+     "type": "text",
+     "content": "Line one\nLine two"
+    },
+    {
+     "id": "l",
+     "type": "button",
+     "content": "नमस्ते 👋"
+    }
+   ]
+  },
+  {
+   "data": {
+    "blocks": [
+     {
+      "id": "a",
+      "type": "image",
+      "content": "old words",
+      "imageUrl": "/a.png"
+     },
+     {
+      "id": "b",
+      "type": "button",
+      "content": "Buy",
+      "imageUrl": "/b.png"
+     },
+     {
+      "id": "c",
+      "type": "divider",
+      "content": "x",
+      "imageUrl": "/c.png"
+     },
+     {
+      "id": "d",
+      "type": "heading",
+      "content": "H",
+      "imageUrl": "/d.png",
+      "onclick": "alert(1)",
+      "style": {
+       "color": "red"
+      }
+     },
+     {
+      "id": "e",
+      "type": "image",
+      "content": "words only"
+     }
+    ]
+   },
+   "baseUrl": "https://www.graine.ai",
+   "output": [
+    {
+     "id": "a",
+     "type": "image",
+     "imageUrl": "https://www.graine.ai/a.png"
+    },
+    {
+     "id": "b",
+     "type": "button",
+     "content": "Buy"
+    },
+    {
+     "id": "c",
+     "type": "divider"
+    },
+    {
+     "id": "d",
+     "type": "heading",
+     "content": "H"
+    }
+   ]
+  },
+  {
+   "data": {
+    "blocks": [
+     null,
+     "heading",
+     42,
+     true,
+     [
+      "text",
+      "x"
+     ],
+     {
+      "type": "divider"
+     },
+     [],
+     {},
+     {
+      "type": "text",
+      "content": "after the junk"
+     }
+    ]
+   },
+   "baseUrl": "https://www.graine.ai",
+   "output": [
+    {
+     "id": "block-5",
+     "type": "divider"
+    },
+    {
+     "id": "block-8",
+     "type": "text",
+     "content": "after the junk"
+    }
+   ]
+  },
+  {
+   "data": {
+    "blocks": [
+     {
+      "id": "x",
+      "type": "text",
+      "content": "1"
+     },
+     {
+      "id": "x",
+      "type": "text",
+      "content": "2"
+     },
+     {
+      "type": "text",
+      "content": "3"
+     },
+     {
+      "id": "  ",
+      "type": "text",
+      "content": "4"
+     },
+     {
+      "id": 7,
+      "type": "text",
+      "content": "5"
+     },
+     {
+      "id": {
+       "a": 1
+      },
+      "type": "text",
+      "content": "6"
+     },
+     {
+      "id": " spaced ",
+      "type": "text",
+      "content": "7"
+     },
+     {
+      "id": "",
+      "type": "divider"
+     }
+    ]
+   },
+   "baseUrl": "https://www.graine.ai",
+   "output": [
+    {
+     "id": "x",
+     "type": "text",
+     "content": "1"
+    },
+    {
+     "id": "block-1",
+     "type": "text",
+     "content": "2"
+    },
+    {
+     "id": "block-2",
+     "type": "text",
+     "content": "3"
+    },
+    {
+     "id": "block-3",
+     "type": "text",
+     "content": "4"
+    },
+    {
+     "id": "block-4",
+     "type": "text",
+     "content": "5"
+    },
+    {
+     "id": "block-5",
+     "type": "text",
+     "content": "6"
+    },
+    {
+     "id": " spaced ",
+     "type": "text",
+     "content": "7"
+    },
+    {
+     "id": "block-7",
+     "type": "divider"
+    }
+   ]
+  },
+  {
+   "data": {
+    "blocks": [
+     {
+      "id": "block-1",
+      "type": "text",
+      "content": "own"
+     },
+     {
+      "type": "text",
+      "content": "made, taken"
+     }
+    ]
+   },
+   "baseUrl": "https://www.graine.ai",
+   "output": [
+    {
+     "id": "block-1",
+     "type": "text",
+     "content": "own"
+    },
+    {
+     "id": "block-1-1",
+     "type": "text",
+     "content": "made, taken"
+    }
+   ]
+  },
+  {
+   "data": {
+    "blocks": [
+     {
+      "type": "text",
+      "content": "made"
+     },
+     {
+      "id": "block-0",
+      "type": "text",
+      "content": "own, taken"
+     }
+    ]
+   },
+   "baseUrl": "https://www.graine.ai",
+   "output": [
+    {
+     "id": "block-0",
+     "type": "text",
+     "content": "made"
+    },
+    {
+     "id": "block-1",
+     "type": "text",
+     "content": "own, taken"
+    }
+   ]
+  },
+  {
+   "data": {
+    "blocks": [
+     {
+      "id": "block-2",
+      "type": "divider"
+     },
+     {
+      "id": "block-2-2",
+      "type": "divider"
+     },
+     {
+      "type": "divider"
+     },
+     {
+      "id": "block-2-2-2",
+      "type": "divider"
+     }
+    ]
+   },
+   "baseUrl": "https://www.graine.ai",
+   "output": [
+    {
+     "id": "block-2",
+     "type": "divider"
+    },
+    {
+     "id": "block-2-2",
+     "type": "divider"
+    },
+    {
+     "id": "block-2-2-2",
+     "type": "divider"
+    },
+    {
+     "id": "block-3",
+     "type": "divider"
+    }
+   ]
+  },
+  {
+   "data": {
+    "blocks": [
+     {
+      "id": "a",
+      "type": "text",
+      "content": ""
+     },
+     {
+      "id": "a",
+      "type": "text",
+      "content": "kept"
+     }
+    ]
+   },
+   "baseUrl": "https://www.graine.ai",
+   "output": [
+    {
+     "id": "a",
+     "type": "text",
+     "content": "kept"
+    }
+   ]
+  },
+  {
+   "data": {},
+   "baseUrl": "https://www.graine.ai",
+   "output": []
+  },
+  {
+   "data": {
+    "blocks": []
+   },
+   "baseUrl": "https://www.graine.ai",
+   "output": []
+  },
+  {
+   "data": {
+    "blocks": null
+   },
+   "baseUrl": "https://www.graine.ai",
+   "output": []
+  },
+  {
+   "data": {
+    "blocks": "heading"
+   },
+   "baseUrl": "https://www.graine.ai",
+   "output": []
+  },
+  {
+   "data": {
+    "blocks": {
+     "0": {
+      "id": "a",
+      "type": "text",
+      "content": "x"
+     }
+    }
+   },
+   "baseUrl": "https://www.graine.ai",
+   "output": []
+  },
+  {
+   "data": {
+    "blocks": [
+     [
+      {
+       "id": "a",
+       "type": "text",
+       "content": "nested"
+      }
+     ]
+    ]
+   },
+   "baseUrl": "https://www.graine.ai",
+   "output": []
+  },
+  {
+   "data": {
+    "blocks": [
+     {
+      "type": "text",
+      "content": "outer",
+      "blocks": [
+       {
+        "type": "heading",
+        "content": "inner"
+       }
+      ]
+     }
+    ]
+   },
+   "baseUrl": "https://www.graine.ai",
+   "output": [
+    {
+     "id": "block-0",
+     "type": "text",
+     "content": "outer"
+    }
+   ]
+  },
+  {
+   "data": null,
+   "baseUrl": "https://www.graine.ai",
+   "output": []
+  },
+  {
+   "data": [],
+   "baseUrl": "https://www.graine.ai",
+   "output": []
+  },
+  {
+   "data": "blocks",
+   "baseUrl": "https://www.graine.ai",
+   "output": []
+  },
+  {
+   "data": 42,
+   "baseUrl": "https://www.graine.ai",
+   "output": []
+  }
+ ],
  "loaderStyle": [
   {
    "input": {

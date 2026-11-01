@@ -8,25 +8,37 @@ import org.json.JSONObject
  *
  *   adb shell am start -n ai.graine.sample/.MainActivity --es demoWidget product_list --es demoPreset gallery
  *
- * demoWidget   product_list | plan_comparison | choices | quick_actions | calendar_slots | info_card | unknown
+ * demoWidget   product_list | plan_comparison | choices | quick_actions | calendar_slots | info_card | blank | unknown
  *              | pending (the loader for a product list) | pending_then_list (the loader, then the list)
  * demoPreset   gallery | cards | list | spotlight | compact
  * demoSelect   one | many
  * demoSurface  auto | screen | sheet | card
  * demoColumns  1 | 2 (Gallery and Cards only)
+ * demoButton   filled | outline | row (a row's button, and a blank component's)
  *
  * The car showcase is the dashboard's own sample component for this agent,
  * root-relative pictures and all — the SDK resolves them against the agent's origin.
  */
 object DemoWidgets {
-    fun style(preset: String?, select: String?, surface: String?, columns: String? = null): JSONObject = JSONObject().apply {
+    fun style(preset: String?, select: String?, surface: String?, columns: String? = null, button: String? = null): JSONObject = JSONObject().apply {
         preset?.let { put("preset", it) }
         select?.let { put("select", it) }
         surface?.let { put("surface", it) }
         columns?.toIntOrNull()?.let { put("columns", it) }
+        button?.let { put("button", it) }
     }
 
     fun frame(kind: String, style: JSONObject): JSONObject = when (kind) {
+        // Built from blocks ("Start blank" in the dashboard): one of each, a root-relative picture among them.
+        "blank" -> JSONObject("""
+            {"widget_id":"canvas:demo:1","kind":"blank","fallback_text":"Your cover starts the day you pay.",
+             "data":{"blocks":[
+               {"id":"b1","type":"heading","content":"Your plan is ready"},
+               {"id":"b2","type":"text","content":"Cover starts the day you pay. Cancel any time in the first 30 days."},
+               {"id":"b3","type":"image","imageUrl":"/samples/car-blue.png"},
+               {"id":"b4","type":"divider"},
+               {"id":"b5","type":"button","content":"Talk to sales"}]}}
+        """.trimIndent())
         "plan_comparison" -> JSONObject("""
             {"widget_id":"plan_picker:demo:1","kind":"plan_comparison","fallback_text":"Two plans: Basic and Family Shield.",
              "data":{"title":"Pick a plan","prompt":"Both renew monthly; cancel any time.","plans":[

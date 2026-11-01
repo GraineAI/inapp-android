@@ -139,6 +139,24 @@ class RnParityTest {
         }
     }
 
+    /** One block in normaliseBlankBlocks's words: its id and type, and only the field its type uses. */
+    private fun blockMap(b: GraineWidgetBlock) = mapOfNonNull("id" to b.id, "type" to b.type.wire, "content" to b.content, "imageUrl" to b.imageUrl)
+
+    @Test fun readsAComponentsBlocksTheSameWay() {
+        val all = cases("blankBlocks")
+        assertTrue("rn-parity has no blankBlocks", all.isNotEmpty())
+        for (c in all) {
+            val base = c.optString("baseUrl", "")
+            val want = canon(c.get("output"))
+            assertEquals("normaliseBlankBlocks(${c.opt("data")}, \"$base\")", want, canon(Widgets.normaliseBlankBlocks(c.opt("data"), base).map { blockMap(it) }))
+            // As an app receives it: the component as the agent sent it, its pictures put on the agent's origin by adopt.
+            val widget = GraineWidget.adopt(JSONObject().put("widget_id", "w1").put("kind", "blank").put("data", c.opt("data")), base)!!
+            assertEquals("GraineWidget.blocks of ${c.opt("data")}", want, canon(widget.blocks.map { blockMap(it) }))
+            // A "Start blank" component's alone: the same data under any other kind has none.
+            assertTrue("blocks on an info_card", widget.copy(kind = "info_card").blocks.isEmpty())
+        }
+    }
+
     @Test fun resolvesTheSameLoader() {
         for (c in cases("loaderStyle")) {
             val n = Loaders.normalise(c.opt("input"))

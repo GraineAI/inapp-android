@@ -200,7 +200,7 @@ internal object CallSetup {
         if (f.hostedRinging == false) {
             out += GraineCallSetupProblem(
                 "hosted_ringing_off",
-                "Graine can't ring this phone: no push credentials for Android are uploaded for this agent. " +
+                "Graine can't ring this phone: no agent's workspace has Android push credentials for this app's package name. " +
                     "Upload them in the dashboard (Workspace settings → In-app calling), unless your own server sends the call pushes.",
             )
         }

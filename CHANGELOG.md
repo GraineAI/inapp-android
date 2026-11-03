@@ -1,3 +1,12 @@
+## 0.14.9
+
+- **The calls setup check names the app, not the agent.** `GraineCalls.callSetupProblems` reported `hosted_ringing_off`
+  with "no push credentials for Android are uploaded for this agent". Push credentials belong to the workspace, one set
+  per app, and Graine rings a phone only with the set saved for its own package name, so the sentence now reads "no
+  agent's workspace has Android push credentials for this app's package name". The code and the fix it names
+  (Workspace settings → In-app calling) are unchanged; nothing else changes. `inapp-android-rtc` moves to 0.14.9 beside
+  it, with no change of its own.
+
 ## 0.14.8
 
 - **Components built from blocks are drawn.** A component made with *Start blank* in the dashboard (kind `blank`) — headings, text, pictures, dividers and buttons — is now drawn by `GraineWidgetView`, on the voice bar and in the chat, instead of its fallback sentence. It is drawn in the component's look, like every other kind: its accent and corners, its density, its button style (filled, outline, or the whole row) and its picture size, in the phone's own shapes (Material, or One UI on a Samsung). A picture is as wide as the component and cropped to its height, with a neutral fill while it loads. A button's tap answers the agent as the dashboard's preview does — `{"action": <its words>}`, and its words as the user's turn — and runs the component's *When they tap* first, like any other tap. A component with no block to draw still shows its fallback sentence. Nothing to change in your app.

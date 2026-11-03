@@ -17,7 +17,7 @@ Integration guide: https://www.graine.ai/docs/in-app/android
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    implementation("ai.graine:inapp-android:0.14.8")
+    implementation("ai.graine:inapp-android:0.14.9")
 }
 ```
 
@@ -286,7 +286,7 @@ GraineInApp.get().calls.callSetupProblems.forEach { Log.w("Calls", "${it.code}: 
 | `notifications_not_allowed` | A call can't ring while the app is closed or in the background |
 | `full_screen_not_allowed` | A locked phone rings with a heads-up notification instead of the call screen |
 | `microphone_blocked` | Only Settings can let calls hear the customer |
-| `hosted_ringing_off` | Graine can't ring this phone: no push credentials uploaded for Android |
+| `hosted_ringing_off` | Graine can't ring this phone: no push credentials uploaded for this app's package name |
 
 A problem is never an exception: calls still work where they can. Play asks
 for a declaration of the `microphone` foreground service; an app that never
@@ -311,8 +311,8 @@ ring, the call screen or the outcomes.
 
 ```kotlin
 dependencies {
-    implementation("ai.graine:inapp-android:0.14.8")
-    implementation("ai.graine:inapp-android-rtc:0.14.8")   // same version as the SDK
+    implementation("ai.graine:inapp-android:0.14.9")
+    implementation("ai.graine:inapp-android-rtc:0.14.9")   // same version as the SDK
 }
 ```
 
@@ -442,7 +442,7 @@ turns away any other app. To **require a verified app**, add Play Integrity
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    implementation("ai.graine:inapp-android:0.14.8")
+    implementation("ai.graine:inapp-android:0.14.9")
     implementation("com.google.android.play:integrity:1.4.0")
 }
 ```

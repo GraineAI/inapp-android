@@ -1424,7 +1424,8 @@ class GraineInApp private constructor(
      * settings have not loaded yet — this launch's session, which names the
      * trait that identifies the user, has not arrived, or could not be
      * loaded), `rings_not_set_up` (Graine does not ring this phone: the
-     * workspace's In-app calling, for Android), `scheduling_off` (the agent
+     * workspace has no push credentials for this app's package name on
+     * Android), `scheduling_off` (the agent
      * does not let users book), `not_identified` (nobody is identified with
      * the trait the agent's Identity setting names). Null when it can be
      * booked. For a button of your own that says why: `not_loaded` is "not

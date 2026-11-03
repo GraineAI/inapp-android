@@ -224,7 +224,9 @@ colour in it is already checked against what it sits on.
   600 points, or a web page under 640 px wide; anything bigger is a tablet or
   a computer (`chatPresentation`).
   - `compact` — the window above the bar, exactly as it has always been (and
-    `GraineChatView` wherever the app puts it).
+    `GraineChatView` wherever the app puts it). On a phone's web page (a
+    website has no bar, and a window floating over the page leaves no room once
+    the keyboard is up), the **sheet** below, as `large` is there.
   - `large` — on a phone, a **sheet**: up from the bottom edge, the full
     width, its top edge 8% of the screen's height below the top safe area
     (≈92% of the screen). Corners `radius.xl` at the top only, no outline,

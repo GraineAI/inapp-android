@@ -17,7 +17,7 @@ Integration guide: https://www.graine.ai/docs/in-app/android
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    implementation("ai.graine:inapp-android:0.14.9")
+    implementation("ai.graine:inapp-android:0.14.10")
 }
 ```
 
@@ -311,8 +311,8 @@ ring, the call screen or the outcomes.
 
 ```kotlin
 dependencies {
-    implementation("ai.graine:inapp-android:0.14.9")
-    implementation("ai.graine:inapp-android-rtc:0.14.9")   // same version as the SDK
+    implementation("ai.graine:inapp-android:0.14.10")
+    implementation("ai.graine:inapp-android-rtc:0.14.10")   // same version as the SDK
 }
 ```
 
@@ -442,7 +442,7 @@ turns away any other app. To **require a verified app**, add Play Integrity
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    implementation("ai.graine:inapp-android:0.14.9")
+    implementation("ai.graine:inapp-android:0.14.10")
     implementation("com.google.android.play:integrity:1.4.0")
 }
 ```

@@ -1,3 +1,8 @@
+## 0.14.10
+
+- No change of its own: the version moves with the iOS SDK (one version line for the native SDKs). `inapp-android-rtc` moves
+  beside it.
+
 ## 0.14.9
 
 - **The calls setup check names the app, not the agent.** `GraineCalls.callSetupProblems` reported `hosted_ringing_off`

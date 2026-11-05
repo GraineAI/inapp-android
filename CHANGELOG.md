@@ -1,3 +1,12 @@
+## 0.14.12
+
+- **A call the customer places reaches the agent's voice sooner.** A tap no longer waits for the SIP registration before it
+  dials: it runs beside the dial. `inapp-android-rtc` moves beside it.
+- **A call the person answers keeps its order, however long it rang.** Nothing is dialled and nothing plays until they pick
+  up, and it registers first.
+- **If a dial ahead of its registration is refused**, it is made once more, registered first, and the app registers first
+  until it restarts. Nothing to do.
+
 ## 0.14.11
 
 - No change of its own: the version moves with the iOS SDK (one version line for the native SDKs). `inapp-android-rtc` moves

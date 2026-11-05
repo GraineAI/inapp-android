@@ -60,6 +60,8 @@ internal class RtcEnv(
     val direct: RtcDirectMint? = null,
     /** The network the call is on (RtcNetwork.kt): its recovery never restarts or redials into none. NONE: always online. */
     val network: RtcNetwork = RtcNetwork.NONE,
+    /** What this app learned about dialling ahead of the registration. */
+    val dialMemory: RtcDialMemory = RtcDialMemory.SHARED,
     /** The call's agent's server tokens: the web route's mint carries one when they are in play (CLIENT-TOKENS.md); null sends none. */
     val tokens: ClientTokens? = null,
 )
@@ -232,6 +234,15 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
     private var registered = false
     private var registerMs: Long? = null
     private var registerFailure: SipFailure? = null
+    /** The SIP socket is open: a call the customer tapped can dial, with its registration beside it. */
+    private var sipOpen = false
+    /** When the SIP socket was asked for, and how long the first took to open: the link's only measure before a registration. */
+    private var signallingAt = 0L
+    private var socketOpenMs: Long? = null
+    /** The dial in flight went ahead of its registration: failing, it is made once more, registered first. */
+    private var dialledAhead = false
+    /** A dial ahead of the registration failed in this call: it registers first from now on. */
+    private var registerFirst = false
     private var registerTimer: (() -> Unit)? = null
     private var probing = false
     private var probed = false
@@ -319,7 +330,15 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
     private fun credsUsable(c: RtcCredentials): Boolean = c.expiresAtMs == null || c.expiresAtMs - env.wallClock() >= RtcMint.MIN_REMAINING_MS
 
     /** The link's pace (RtcPace): 1 on a good link, from what this call measured. */
-    private fun pace(): Double = RtcPace.of(registerMs, probeMs, mediaRttMs)
+    private fun pace(): Double {
+        // A tapped call dialling ahead of its registration has measured only its socket, about half of what a registration
+        // takes: a slow link must not read as a good one, or one delayed packet redials a healthy call.
+        val register = registerMs ?: socketOpenMs?.takeIf { !request.rang }?.let { it * 2 }
+        return RtcPace.of(register, probeMs, mediaRttMs)
+    }
+
+    /** A re-INVITE can go: a tapped call needs only its socket, as its registration may never have answered; a booked call as ever. */
+    private fun canSignal(): Boolean = ua?.registered == true || (!request.rang && ua?.isConnected == true)
 
     private fun online(): Boolean = runCatching { env.network.online() }.getOrDefault(true)
 
@@ -613,6 +632,8 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
     private fun startSignalling(c: RtcCredentials) {
         val gen = ++uaGen
         registered = false
+        sipOpen = false
+        signallingAt = now()
         registerFailure = null
         val u = SipUserAgent(SipAccount(c.server, c.username, c.password, c.realm), scheduler, env.openSip, UaEvents(gen), random = env.sipRandom)
         ua = u
@@ -624,6 +645,12 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
     }
 
     private inner class UaEvents(private val gen: Int) : SipUserAgent.Listener {
+        override fun onConnected() {
+            if (gen != uaGen) return
+            sipOpen = true
+            if (socketOpenMs == null) socketOpenMs = now() - signallingAt
+            maybeProceed()
+        }
         override fun onRegistered(elapsedMs: Long) {
             if (gen != uaGen) return
             // The signalling socket lost under the answered call is back and registered again: healed.
@@ -662,6 +689,11 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
 
     private fun registrationFailed(failure: SipFailure) {
         registerTimer?.invoke(); registerTimer = null
+        // A dial already out decides for itself: the SBC challenges the INVITE on its own, and stopping here would cut it.
+        if (call != null) {
+            step("register", "failed with the dial already out: $failure")
+            return
+        }
         registerFailure = failure
         step("register", "failed: $failure")
         ua?.stop()
@@ -683,7 +715,10 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
     /**
      * The phone may record — the tap was made in the app in front, or the
      * call's foreground service is up: dial — at once when prepared, else as
-     * soon as the mint, the candidates and the registration are in. The
+     * soon as the mint and the candidates are in and the socket is open; the
+     * registration goes on beside a tapped call's dial, and a call the person
+     * answered waits for it, as it always has. Nothing comes here before a
+     * rung call is picked up, however long it rang. The
      * 12-second budget starts now, or once the mint has answered when it is
      * still on its way ([startBudget]); the analytics rows count from the tap.
      */
@@ -754,12 +789,17 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
         val c = creds ?: return
         mediaFailure?.let { fallback(RtcFallback.ERROR, it); return }
         registerFailure?.let { fallback(RtcFallback.REGISTER_FAILED, it.toString()); return }
-        if (!registered) return
+        // A tapped call does not wait for its registration: it goes on beside the dial, and the SBC challenges the INVITE
+        // itself. A call the person answered, a redial and an app refused ahead of its registration register first.
+        val ahead = !registered && sipOpen && !request.rang && !registerFirst && !env.dialMemory.registrationFirst
+        if (!registered && !ahead) return
         val u = ua ?: return
         // A registration made a while ago — a call prepared before the tap, a ring answered after twenty seconds —
         // is asked first, beside the offer the dial is making: the INVITE waits for the slower of the two, not both.
-        if (!probed && now() - u.heardAt > RtcDial.PROBE_SKIP_MS) { probe(u, c); return }
+        if (registered && !probed && now() - u.heardAt > RtcDial.PROBE_SKIP_MS) { probe(u, c); return }
         if (!offerReady) return
+        if (ahead) step("dial", "not waiting for the registration")
+        dialledAhead = ahead
         invite(c)
     }
 
@@ -919,6 +959,17 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
         if (phase != Phase.DIALING && phase != Phase.ANSWERED) return
         val verdict = RtcDial.verdict(code, reason, dials)
         step("dial", "${RtcDial.describe(code, reason)}: ${verdict.name.lowercase()}")
+        if (dialledAhead && verdict != RtcDial.Verdict.IGNORE) {
+            // Sent ahead of its registration: once more the way it always went, and that dial is not counted. Refused by the
+            // SBC itself, this app registers first from now on, so the wait is never paid twice.
+            dialledAhead = false
+            registerFirst = true
+            if (code != null) env.dialMemory.registrationFirst = true
+            step("dial", "ahead of the registration: once more, registered first")
+            dials--
+            redial()
+            return
+        }
         when (verdict) {
             RtcDial.Verdict.IGNORE -> Unit
             RtcDial.Verdict.REDIAL -> {
@@ -949,6 +1000,8 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
         recovery?.dispose(); recovery = null
         phase = Phase.DIALING
         probed = true
+        // Every redial registers first, as it always has: only a call's first dial goes ahead of its registration.
+        registerFirst = true
         if (redialFrom == null) redialFrom = inviteAt
         stopSignalling()
         closePeer()
@@ -1238,11 +1291,11 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
      * gathered by the same rule, in a re-INVITE inside the answered call — no
      * new call, no second conversation, nothing said again on the control
      * channel (the audio-ready frame stays said once). False when it cannot
-     * be sent now: no call, no peer, or the socket not registered.
+     * be sent now: no call, no peer, or the socket not ready for it ([canSignal]).
      */
     private fun sendRestart(seq: Int, n: Int, on: RtcRecovery.Handlers): Boolean {
         val c = call ?: return false
-        if (peer == null || ua?.registered != true) return false
+        if (peer == null || !canSignal()) return false
         val gen = peerGen
         step("media", "restarting ICE ($n)")
         gather(gen, RtcIce.hasTurn(peerServers), iceRestart = true, onError = { on.refused("its offer failed") }) {
@@ -1268,7 +1321,7 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
         private val current: Boolean get() = seq == dialSeq && (phase == Phase.ANSWERED || phase == Phase.LIVE)
         override fun pace(): Double = this@RtcCallSession.pace()
         override fun online(): Boolean = this@RtcCallSession.online()
-        override fun canReoffer(): Boolean = current && call != null && peer != null && ua?.registered == true
+        override fun canReoffer(): Boolean = current && call != null && peer != null && canSignal()
         override fun restart(n: Int, relayOnly: Boolean, on: RtcRecovery.Handlers): Boolean = current && sendRestart(seq, n, on)
         /** Before media the media layer's statistics carry no checks: nothing can tell, so a setup is never extended on a guess. */
         override fun progressing(): Boolean? = null

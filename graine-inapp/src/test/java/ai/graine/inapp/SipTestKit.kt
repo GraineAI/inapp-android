@@ -146,6 +146,8 @@ internal class FakeSbc(
     /** The SDP its 200 carries: production's answer, or one the test writes (with no candidate, say). */
     var answerSdp: String = Trace.ANSWER
     var registerAnswer = 200
+    /** Say nothing to a REGISTER, and answer everything else: a registrar far slower than the dial. */
+    var registerSilent = false
     var challenge = true
     /** Challenge the request with credentials again: the credential is refused. */
     var refuseCredentials = false
@@ -161,6 +163,7 @@ internal class FakeSbc(
         val method = m.method ?: return emptyList()
         if (deaf) return emptyList()
         if (method == "ACK") return emptyList()
+        if (method == "REGISTER" && registerSilent) return emptyList()
         if (method == "CANCEL") return listOf(response(m, 200))
         val auth = m.header("authorization") ?: m.header("proxy-authorization")
         if (method == "INVITE" && m.toTag == null && inviteAnswer == Answer.SILENT) return emptyList()

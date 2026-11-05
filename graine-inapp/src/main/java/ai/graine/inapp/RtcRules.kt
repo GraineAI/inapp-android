@@ -236,6 +236,20 @@ internal object RtcResilience {
  * link's own pace — how long its registration took — so a slow network that
  * works is waited for, and a dead one is not.
  */
+/**
+ * What this app learned about dialling ahead of the registration, while it runs:
+ * the SBC itself refused a dial that went before its registration had answered.
+ * Calls then register first, as they always did, so the failed dial and its
+ * redial are paid once at most.
+ */
+internal class RtcDialMemory {
+    @Volatile var registrationFirst = false
+
+    companion object {
+        val SHARED = RtcDialMemory()
+    }
+}
+
 internal object RtcDial {
     /** The server answered this recently: trust the socket without asking again. */
     const val PROBE_SKIP_MS = 10_000L

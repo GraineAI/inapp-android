@@ -44,6 +44,7 @@ class RtcCallSessionTest {
     private var mint: () -> HttpReply = { HttpReply(200, mintReply().toString()) }
 
     private val net = FakeNetwork()
+    private val dialMemory = RtcDialMemory()
     /** The ICE servers each peer was made with, in order. */
     private val peerServers = mutableListOf<List<GraineRtcIceServer>>()
 
@@ -68,6 +69,8 @@ class RtcCallSessionTest {
         wallClock = { 1_800_000_000_000L },
         steps = { step, detail -> steps += "$step: $detail" },
         network = net,
+        // Its own, never the app's: what one test teaches it stays in that test.
+        dialMemory = dialMemory,
     )
 
     private val request = RtcCallRequest(
@@ -109,6 +112,199 @@ class RtcCallSessionTest {
     private val sip: FakeSipSocket get() = sipSockets.last()
     private val peer: FakePeer get() = peers.last()
     private val control: FakeSipSocket get() = controlSockets.single()
+
+    // ── from the tap to the voice: a tapped call waits only for what it needs; a booked call keeps its order ──
+
+    private fun booked() = RtcCallRequest(
+        baseUrl = request.baseUrl,
+        publishableKey = request.publishableKey,
+        variables = request.variables,
+        identity = request.identity,
+        callId = request.callId,
+        wsHost = request.wsHost,
+        rang = true,
+    )
+
+    /** A tap: the mint, the socket and the offer. The registration goes on beside the dial, and the SBC challenges the INVITE itself. */
+    @Test fun aTappedCallDoesNotWaitForItsRegistration() {
+        sbc.registerSilent = true
+        val s = RtcCallSession(request, env)
+        s.dial(deps, listener); pump()
+        peer.candidate("srflx"); pump()
+        assertEquals("challenged, then with credentials", 2, sip.requests("INVITE").size)
+        assertTrue("the registration went beside it", sip.requests("REGISTER").isNotEmpty())
+        peer.ice("connected"); pump()
+        assertEquals(listOf("media"), log)
+        // The registration's deadline passes with the call up: nothing happens to the call.
+        sched.advance(RtcDial.REGISTER_DEADLINE_MS + 1_000); pump()
+        assertEquals(listOf("media"), log)
+    }
+
+    @Test fun aRefusedRegistrationLeavesADialAlreadyOutToDecide() {
+        openSip = false
+        sbc.registerAnswer = 403
+        val s = RtcCallSession(request, env)
+        s.dial(deps, listener); sched.drain()
+        peer.candidate("srflx"); sched.drain()
+        sip.open(); sched.drain()
+        // The offer is in and the socket open: the INVITE goes before the SBC's word on the registration is read.
+        assertEquals(1, sip.requests("INVITE").size)
+        pump()
+        assertFalse("no fallback for it", log.any { it.startsWith("fallback") })
+        peer.ice("connected"); pump()
+        assertEquals(listOf("media"), log)
+    }
+
+    /** Refused before any dial is out, a registration still ends the attempt: there is nothing else to decide. */
+    @Test fun aRefusedRegistrationBeforeTheOfferStillFallsBack() {
+        sbc.registerAnswer = 403
+        val s = RtcCallSession(request, env)
+        s.dial(deps, listener); pump()
+        assertEquals(listOf("fallback register_failed"), log)
+    }
+
+    @Test fun aDialRefusedAheadOfItsRegistrationIsMadeOnceMoreRegisteredFirstAndTheAppRemembers() {
+        openSip = false
+        sbc.registerSilent = true
+        sbc.inviteAnswer = FakeSbc.Answer.BUSY
+        val s = RtcCallSession(request, env)
+        s.dial(deps, listener); sched.drain()
+        peer.candidate("srflx"); sched.drain()
+        sip.open(); pump()
+        assertTrue("the SBC said no itself: this app registers first from now on", dialMemory.registrationFirst)
+        assertEquals("a fresh connection", 2, sipSockets.size)
+        assertFalse("no fallback for it", log.any { it.startsWith("fallback") })
+
+        sbc.registerSilent = false
+        sbc.inviteAnswer = FakeSbc.Answer.OK
+        peer.candidate("srflx"); sched.drain()
+        sip.open(); pump()
+        val sent = sip.sent.map { it.substringBefore(' ') }
+        assertTrue("dialled", sent.contains("INVITE"))
+        assertTrue("registered first: $sent", sent.indexOf("REGISTER") < sent.indexOf("INVITE"))
+        peer.ice("connected"); pump()
+        assertEquals(listOf("media"), log)
+    }
+
+    @Test fun aDialLostAheadOfItsRegistrationIsNotHeldAgainstTheApp() {
+        sbc.registerSilent = true
+        sbc.inviteAnswer = FakeSbc.Answer.SILENT
+        val s = RtcCallSession(request, env)
+        s.dial(deps, listener); pump()
+        peer.candidate("srflx"); pump()
+        assertEquals(1, sip.requests("INVITE").size)
+        sched.advance(RtcDial.heardDeadlineMs(null) + 100); pump()
+        assertEquals("silence: a fresh connection", 2, sipSockets.size)
+        assertFalse("the network's silence says nothing about the SBC", dialMemory.registrationFirst)
+    }
+
+    /** Only a call's first dial goes ahead of its registration: a redial registers first, as it always has. */
+    @Test fun aRedialRegistersFirstEvenAfterADialThatWasRegistered() {
+        sbc.inviteAnswer = FakeSbc.Answer.TRYING_ONLY
+        val s = prepared()
+        s.dial(deps, listener); pump()
+        assertFalse(sip.requests("INVITE").isEmpty())
+        sbc.registerSilent = true
+        sched.advance(RtcDial.ANSWER_AFTER_HEARD_MS); pump()
+        assertEquals("a fresh connection", 2, sipSockets.size)
+        peer.candidate("srflx"); pump()
+        assertTrue("registered first: nothing dialled on it yet", sip.requests("INVITE").isEmpty())
+    }
+
+    /** The allowance stands: heard and never answered is two dials, however the first one went out. */
+    @Test fun aDialAheadOfItsRegistrationDoesNotAddToTheDialsAStuckCallGets() {
+        sbc.inviteAnswer = FakeSbc.Answer.TRYING_ONLY
+        val s = RtcCallSession(request, env)
+        s.dial(deps, listener); pump()
+        peer.candidate("srflx"); pump()
+        repeat(4) {
+            sched.advance(RtcDial.ANSWER_AFTER_HEARD_MS * 3); pump()
+            peer.candidate("srflx"); pump()
+        }
+        val dialled = sipSockets.count { it.requests("INVITE").isNotEmpty() }
+        assertTrue("three at most: the first ahead of its registration, not counted, and the two a stuck dial gets: $dialled", dialled <= 3)
+        assertEquals(listOf("fallback no_answer"), log.filter { it.startsWith("fallback") })
+    }
+
+    private fun tappedAndLiveWithoutARegistration(): RtcCallSession {
+        openSip = false
+        sbc.registerAnswer = 403
+        val s = RtcCallSession(request, env)
+        s.dial(deps, listener); sched.drain()
+        peer.candidate("srflx"); sched.drain()
+        sip.open(); pump()
+        peer.ice("connected"); pump()
+        assertEquals(listOf("media"), log)
+        return s
+    }
+
+    @Test fun aCallThatNeverRegisteredStillGetsItsSocketBack() {
+        tappedAndLiveWithoutARegistration()
+        val first = sip
+        first.listener!!.onClosed(1006, "gone"); sched.drain()
+        sched.advance(30_000); sched.drain()
+        assertEquals("the socket is its only way to say or hear its end", 2, sipSockets.size)
+        assertEquals(listOf("media"), log)
+    }
+
+    @Test fun anIceRestartGoesOnACallWhoseRegistrationWasRefused() {
+        tappedAndLiveWithoutARegistration()
+        peer.ice("disconnected"); pump()
+        sched.advance(3_000); pump()
+        assertTrue("restarted inside the call", peer.calls.contains("createOffer(restart)"))
+    }
+
+    @Test fun aDialAheadOnASlowSocketIsNotTimedAsAGoodLink() {
+        openSip = false
+        sbc.registerSilent = true
+        sbc.inviteAnswer = FakeSbc.Answer.TRYING_ONLY
+        val s = RtcCallSession(request, env)
+        s.dial(deps, listener); sched.drain()
+        peer.candidate("srflx"); sched.drain()
+        sched.advance(2_500)
+        sip.open(); pump()                                  // the socket took 2.5 s: the slowest pace
+        assertFalse(sip.requests("INVITE").isEmpty())
+        sched.advance(1_000); pump()
+        assertEquals("one delayed packet does not redial a healthy call", 1, sipSockets.size)
+        sched.advance(300); pump()
+        assertEquals("1.25 s on the slowest link, as a measured one", 2, sipSockets.size)
+    }
+
+    @Test fun anAppThatRegistersFirstHoldsTheDialForTheRegistration() {
+        dialMemory.registrationFirst = true
+        sbc.registerSilent = true
+        val s = RtcCallSession(request, env)
+        s.dial(deps, listener); pump()
+        peer.candidate("srflx"); pump()
+        assertTrue(sip.requests("INVITE").isEmpty())
+    }
+
+    /** However long it rings: prepared, nothing dialled, no channel. Then the pick-up, and only then the INVITE. */
+    @Test fun aBookedCallDialsOnlyOnceThePersonPicksUpHoweverLongItRang() {
+        for (ringing in listOf(500L, 7_000L, 31_000L, 44_000L)) {
+            sipSockets.clear(); peers.clear(); controlSockets.clear(); log.clear(); mints.clear(); links.clear()
+            val s = RtcCallSession(booked(), env)
+            s.prepare(); pump()
+            peer.candidate("srflx"); pump()
+            sched.advance(ringing); pump()
+            assertTrue("$ringing ms of ringing: nothing dialled", sip.requests("INVITE").isEmpty())
+            assertTrue("and no conversation opened", controlSockets.isEmpty())
+            assertFalse("no microphone and no speaker while it rings", peer.recording || peer.playout)
+            s.dial(deps, listener); pump()                  // the person picks up
+            peer.candidate("srflx"); pump()
+            assertFalse("picked up: the INVITE", sip.requests("INVITE").isEmpty())
+            assertTrue("and only now the audio", peer.recording && peer.playout)
+            s.hangUp(); pump()
+        }
+    }
+
+    @Test fun aBookedCallPickedUpBeforeItsRegistrationWaitsForIt() {
+        sbc.registerSilent = true
+        val s = RtcCallSession(booked(), env)
+        s.dial(deps, listener); pump()
+        peer.candidate("srflx"); pump()
+        assertTrue("a booked call registers first", sip.requests("INVITE").isEmpty())
+    }
 
     /** The twelve seconds are the call's after its credential, never spent on a mint still on its way. */
     @Test fun theTwelveSecondsStartWhenTheMintAnswersNotBeforeIt() {

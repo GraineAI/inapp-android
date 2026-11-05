@@ -581,6 +581,22 @@ class SipUserAgentTest {
         assertTrue("registered again on the new socket", socket.requests("REGISTER").size > registers)
     }
 
+    /** A call that dialled ahead of its registration and was answered: its socket is reopened, registered or not. */
+    @Test fun aSocketLostUnderAKeptCallIsReopenedThoughItNeverRegistered() {
+        sbc.registerAnswer = 403
+        val ua = agent()
+        ua.keepConnected = true
+        ua.start(); sched.drain()
+        socket.open(); link.pump()
+        val registers = socket.requests("REGISTER").size
+        socket.drop(); sched.drain()
+        assertTrue("told", events.contains("lost"))
+        socket.closed = null
+        sched.advance(30_000)
+        socket.open(); link.pump()
+        assertTrue("asked again on the new socket", socket.requests("REGISTER").size > registers)
+    }
+
     @Test fun probeSaysAliveOnAnyAnswerAndDeadOnSilence() {
         val ua = registered()
         val results = mutableListOf<Boolean>()

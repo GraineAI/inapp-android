@@ -177,6 +177,8 @@ internal class SipUserAgent(
     private val registerExpires: Int = REGISTER_EXPIRES,
 ) {
     interface Listener {
+        /** The socket is open; the registration goes out beside whatever this does. */
+        fun onConnected() {}
         /** Registered: the first time with how long it took from [start] (socket, challenge and all); 0 afterwards. */
         fun onRegistered(elapsedMs: Long) {}
         /** The registration failed: refused, unanswered, or the socket never opened or died first. */
@@ -214,6 +216,8 @@ internal class SipUserAgent(
     private var socket: CallSocket? = null
     private var generation = 0
     private var connected = false
+    /** The socket is open: a request can go, whether or not a registration has answered on it. */
+    val isConnected: Boolean get() = connected
     private var everRegistered = false
     private var stopped = false
     private var startedAt = 0L
@@ -255,6 +259,7 @@ internal class SipUserAgent(
             if (gen != generation || stopped) return@post
             connected = true
             heardAt = scheduler.now()
+            listener.onConnected()
             register()
         }
         override fun onText(text: String) = scheduler.post { if (gen == generation) receive(text) }
@@ -275,7 +280,9 @@ internal class SipUserAgent(
         registering = false
         answerProbe(false)
         if (stopped) return
-        if (!everRegistered) {
+        // Never registered and nothing to keep: the registration's failure, as ever. With a call kept on it (a call that dialled
+        // ahead of its registration, answered before it did), the socket is the call's only way to say or hear its end.
+        if (!everRegistered && !keepConnected) {
             if (!registerInFlight) listener.onRegistrationFailed(SipFailure(null, SipFailure.CONNECTION_ERROR))
             return
         }

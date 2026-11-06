@@ -317,6 +317,8 @@ internal sealed class Inbound {
     data class Text(val data: Any?) : Inbound()
     data class Transcript(val text: String, val final: Boolean) : Inbound()
     data class Action(val actionId: String, val name: String, val arguments: JSONObject) : Inbound()
+    /** `avatar`: the agent's face is ready, or there is none (Avatar.kt reads it). */
+    data class Avatar(val frame: JSONObject) : Inbound()
     object SpeechStart : Inbound()
     object SpeechEnd : Inbound()
     object Clear : Inbound()
@@ -341,6 +343,7 @@ internal sealed class Inbound {
                     val a = o.optJSONObject("action") ?: return Ignored(type)
                     Action(a.optString("action_id"), a.optString("name"), a.optJSONObject("arguments") ?: JSONObject())
                 }
+                "avatar" -> Avatar(o)
                 "beginning_of_stream" -> SpeechStart
                 "end_of_stream" -> SpeechEnd
                 "clear", "interruption" -> Clear

@@ -505,6 +505,7 @@ internal class CallTransportSession(
             override fun onAudioStats(stats: GraineRtcStats) = events.onAgentAudio(stats.audioLevel, stats.totalAudioEnergy, stats.totalSamplesDuration)
             override fun onReconnecting(reconnecting: Boolean) = events.onReconnecting(reconnecting)
             override fun onRow(name: String, data: Map<String, Any?>) = events.onAnalytics(name, data)
+            override fun onAvatarFrame(frame: JSONObject) = events.onAvatarFrame(frame)
         })
     }
 
@@ -541,4 +542,10 @@ internal class CallTransportSession(
         socket?.sendContext(frame)
         rtc?.sendContext(frame)
     }
+
+    // ── The agent's face: only a call WebRTC carries has one (the voice socket never does). Scheduler thread. ──
+
+    fun createAvatarViewer(listener: GraineAvatarViewer.Listener): GraineAvatarViewer? = rtc?.createAvatarViewer(listener)
+    fun setAgentAudible(audible: Boolean) { rtc?.setAgentAudible(audible) }
+    fun agentLevelBeforeMute(): Double? = rtc?.agentLevelBeforeMute()
 }

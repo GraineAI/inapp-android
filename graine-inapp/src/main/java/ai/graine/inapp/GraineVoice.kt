@@ -326,6 +326,77 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
         activityRef = WeakReference(activity)
         (activity.window.decorView as ViewGroup).addView(frame)
         if (graine.config.debug) Log.d(GraineInApp.TAG, "engine moved to ${activity.javaClass.simpleName}")
+        layoutFace()
+    }
+
+    // ── The agent's face, drawn by the page ──
+    //
+    // On an assistant-bar call the page draws the agent's face itself. It says
+    // when there is one (`graine:avatar` available · live · off); while an
+    // avatar view (GraineAvatarView) is on screen in the engine's window, the
+    // engine's own view is laid exactly over it and the page is told so
+    // (`graine:avatar-surface` shown) — it then draws the face alone, edge to
+    // edge, and hands the voice to it. Anything else puts the engine back to
+    // its invisible point and tells the page: a face nobody can see is never
+    // watched and never takes the voice. The engine never leaves its window.
+
+    private var faceState = GraineAvatarState.OFF
+    private var faceShownToPage = false
+    private val faceSurface = object : AvatarSurfaceListener {
+        override fun avatarSurfaceChanged() = layoutFace()
+    }
+
+    private fun faceFromPage(face: Pair<String, String?>) {
+        faceState = GraineAvatarState.of(face)
+        GraineAvatar.listen(faceSurface)
+        GraineAvatar.engineState(this, faceState)
+        layoutFace()
+    }
+
+    private fun faceGone() {
+        faceState = GraineAvatarState.OFF
+        faceShownToPage = false
+        GraineAvatar.engineGone(this)
+        GraineAvatar.stopListening(faceSurface)
+    }
+
+    private fun layoutFace() {
+        val frame = host ?: return
+        val wv = webView ?: return
+        val decor = frame.parent as? ViewGroup
+        val slot = GraineAvatar.activeSlot
+        if (faceState.showsFace && slot != null && decor != null && slot.rootView === decor.rootView) {
+            val at = IntArray(2).also { slot.getLocationInWindow(it) }
+            val origin = IntArray(2).also { decor.getLocationInWindow(it) }
+            val lp = FrameLayout.LayoutParams(slot.width, slot.height).apply {
+                leftMargin = at[0] - origin[0]
+                topMargin = at[1] - origin[1]
+            }
+            val old = frame.layoutParams as? FrameLayout.LayoutParams
+            if (old == null || old.width != lp.width || old.height != lp.height || old.leftMargin != lp.leftMargin || old.topMargin != lp.topMargin) {
+                frame.layoutParams = lp
+                wv.layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+            }
+            // The slot's own shape (rounded corners) clips the face.
+            frame.outlineProvider = slot.outlineProvider
+            frame.clipToOutline = slot.clipToOutline
+            frame.alpha = 1f
+            if (!faceShownToPage) {
+                faceShownToPage = true
+                post(AvatarWire.surfaceMessage(true))
+            }
+        } else {
+            val point = frame.layoutParams as? FrameLayout.LayoutParams
+            if (point == null || point.width != 1 || point.height != 1) {
+                frame.layoutParams = FrameLayout.LayoutParams(1, 1)
+                wv.layoutParams = FrameLayout.LayoutParams(1, 1)
+            }
+            frame.alpha = 0f
+            if (faceShownToPage) {
+                faceShownToPage = false
+                post(AvatarWire.surfaceMessage(false))
+            }
+        }
     }
 
     /** An activity came to the front. The engine goes with the customer — once the app has attached it at all. */
@@ -361,6 +432,7 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
             wv.destroy()
         }
         webView = null; host = null; engineContext = null
+        faceGone()
         activityRef = WeakReference(null)
         progress.clear()
         ready = false; startedCall = false; pendingStart = false; starting = null
@@ -796,6 +868,13 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
     private inner class Bridge {
         @JavascriptInterface
         fun postMessage(json: String?) {
+            // The agent's face: the page says when there is one, and the engine's view is laid over the avatar view.
+            val face = json?.let { runCatching { AvatarWire.readHostMessage(JSONObject(it)) }.getOrNull() }
+            if (face != null) {
+                if (graine.config.debug) Log.d(GraineInApp.TAG, "← page ${json.take(200)}")
+                graine.main.post { faceFromPage(face) }
+                return
+            }
             val msg = Protocol.parse(json)
             // The levels come five times a second while live: kept out of the debug log, which they would drown.
             if (graine.config.debug && msg !is PageMessage.Levels) Log.d(GraineInApp.TAG, "← page ${json?.take(600)}")

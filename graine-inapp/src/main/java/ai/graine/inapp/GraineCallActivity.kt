@@ -84,7 +84,7 @@ class GraineCallActivity : Activity(), GraineCallListener {
             override fun onClose() { finishAndRemoveTask() }
             override fun onCallBack() { callBack() }
         }
-        setContentView(view)
+        if (g.calls.showsAvatar) setContentView(withFace(view)) else setContentView(view)
         paintBars()
         g.calls.addListener(this)
         readMissed(intent)
@@ -126,6 +126,7 @@ class GraineCallActivity : Activity(), GraineCallListener {
     }
 
     override fun onDestroy() {
+        stopFace?.invoke(); stopFace = null
         calls?.removeListener(this)
         handler.removeCallbacksAndMessages(null)
         super.onDestroy()
@@ -256,7 +257,40 @@ class GraineCallActivity : Activity(), GraineCallListener {
             outgoing = c?.direction == GraineCall.Direction.OUTGOING, reconnecting = calls.reconnecting)
     }
 
+    // ── The agent's face (GraineCalls.showsAvatar) ──
+
+    private var face: GraineAvatarView? = null
+    private var stopFace: (() -> Unit)? = null
+
+    /** The call screen with the agent's face over the avatar's place, shown while the call is connected and has one. */
+    private fun withFace(screen: View): View {
+        val density = resources.displayMetrics.density
+        val slot = GraineAvatarView(this).apply {
+            visibility = View.GONE
+            clipToOutline = true
+            outlineProvider = object : android.view.ViewOutlineProvider() {
+                override fun getOutline(v: View, outline: android.graphics.Outline) =
+                    outline.setRoundRect(0, 0, v.width, v.height, FACE_CORNER_DP * density)
+            }
+        }
+        face = slot
+        stopFace = GraineAvatar.addListener { render() }
+        return android.widget.FrameLayout(this).apply {
+            addView(screen, android.widget.FrameLayout.LayoutParams(-1, -1))
+            addView(slot, android.widget.FrameLayout.LayoutParams((FACE_WIDTH_DP * density).toInt(), (FACE_WIDTH_DP * 1.25f * density).toInt(),
+                android.view.Gravity.TOP or android.view.Gravity.CENTER_HORIZONTAL).apply { topMargin = (FACE_TOP_DP * density).toInt() })
+        }
+    }
+
+    private fun renderFace() {
+        val slot = face ?: return
+        val shows = calls?.state == GraineCallState.ACTIVE && GraineAvatar.state.showsFace
+        val want = if (shows) View.VISIBLE else View.GONE
+        if (slot.visibility != want) slot.visibility = want
+    }
+
     private fun render() {
+        renderFace()
         if (!this::view.isInitialized) return
         val calls = calls ?: return
         val c = calls.call
@@ -302,5 +336,12 @@ class GraineCallActivity : Activity(), GraineCallListener {
         val r = Runnable { if (moment() == m) finishAndRemoveTask() }
         closing = r
         handler.postDelayed(r, wait)
+    }
+
+    private companion object {
+        /** The face: this wide (dp), 5:4 tall, this far from the top, these corners. */
+        const val FACE_WIDTH_DP = 220f
+        const val FACE_TOP_DP = 96f
+        const val FACE_CORNER_DP = 24f
     }
 }

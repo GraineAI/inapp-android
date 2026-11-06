@@ -42,6 +42,19 @@ internal object WebRtcStats {
         )
     }
 
+    /**
+     * The same reading with the agent's level measured before the track's volume
+     * — while the agent's face carries the voice, the track is silenced and its
+     * own level and energy read that silence. The energy is left out, so the
+     * level is what is read.
+     */
+    fun withLevel(s: GraineRtcStats, level: Double): GraineRtcStats = GraineRtcStats(
+        bytesReceived = s.bytesReceived, packetsReceived = s.packetsReceived, packetsLost = s.packetsLost,
+        audioLevel = level, totalAudioEnergy = null, totalSamplesDuration = null, jitterSeconds = s.jitterSeconds,
+        bytesSent = s.bytesSent, roundTripSeconds = s.roundTripSeconds, codec = s.codec,
+        localCandidateType = s.localCandidateType, clockRate = s.clockRate,
+    )
+
     private fun long(v: Any?): Long = (v as? Number)?.toLong() ?: 0L
     private fun double(v: Any?): Double? = (v as? Number)?.toDouble()?.takeIf { !it.isNaN() }
 }

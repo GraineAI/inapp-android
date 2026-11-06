@@ -598,6 +598,13 @@ internal object CallsHostEvent {
      * then goes once more (CLIENT-TOKENS.md §2.4).
      */
     const val NEED_CLIENT_TOKEN = "needClientToken"
+    /**
+     * `{phase, reason}`: the agent's face (GraineAvatar) changed — `phase`
+     * `off`, `available` (show your avatar view) or `live` (it carries the
+     * voice); `reason` (or null) says why it is off. Not queued: `avatarState`
+     * reads it now.
+     */
+    const val AVATAR = "avatar"
 
     /**
      * `{callId, outcome, reason?, error?, durationSeconds?, hosted?, agent?, connection?, cause?}`: `reason`
@@ -1131,6 +1138,9 @@ internal class CallsHostCore(private val platform: CallsHostPlatform, private va
     // ── sinks ──
 
     fun addSink(sink: CallsHostSink): Int = sinks.add(sink)
+
+    /** The agent's face changed: to every sink (never queued — a new sink asks `avatarState`). */
+    fun emitAvatar(payload: Map<String, Any?>) = sinks.emit(CallsHostEvent.AVATAR, payload)
 
     fun removeSink(token: Int) {
         sinks.remove(token)

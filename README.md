@@ -17,7 +17,7 @@ Integration guide: https://www.graine.ai/docs/in-app/android
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    implementation("ai.graine:inapp-android:0.14.12")
+    implementation("ai.graine:inapp-android:0.15.0")
 }
 ```
 
@@ -311,8 +311,8 @@ ring, the call screen or the outcomes.
 
 ```kotlin
 dependencies {
-    implementation("ai.graine:inapp-android:0.14.12")
-    implementation("ai.graine:inapp-android-rtc:0.14.12")   // same version as the SDK
+    implementation("ai.graine:inapp-android:0.15.0")
+    implementation("ai.graine:inapp-android-rtc:0.15.0")   // same version as the SDK
 }
 ```
 
@@ -442,7 +442,7 @@ turns away any other app. To **require a verified app**, add Play Integrity
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    implementation("ai.graine:inapp-android:0.14.12")
+    implementation("ai.graine:inapp-android:0.15.0")
     implementation("com.google.android.play:integrity:1.4.0")
 }
 ```
@@ -703,6 +703,41 @@ then the dashboard's. A voice bar on screen moves to the chat when you open it
 this way, and switching between the call and the chat keeps the size.
 `GraineChatActivity.open(context)` and `GraineChatView` stay as they are, for a
 chat you place yourself.
+
+## The agent's face (Avatar)
+
+When the agent has **Avatar** turned on in the dashboard (Embed & Widgets → Appearance), a call can show the
+agent's live talking face. It speaks with the agent's own voice, its lips in sync with every word: while it is on screen the call's
+own copy of the voice is silenced, and the voice moves to the face only at a pause. If the face's connection
+drops for 2 seconds, it cannot be shown, or your view leaves the screen, the call's voice comes back at once —
+the customer never hears the agent twice, and never hears nothing. With no avatar view on screen, nothing is
+connected and the call is voice-only, exactly as before. Avatar minutes are charged on top of the call, only
+while the face is on screen (see Avatar in the docs).
+
+Place a `GraineAvatarView` where the face goes — transparent when there is none, so put the agent's usual
+picture behind it:
+
+```xml
+<ai.graine.inapp.GraineAvatarView
+    android:id="@+id/agentFace"
+    android:layout_width="220dp"
+    android:layout_height="275dp"
+    android:visibility="gone" />
+```
+
+```kotlin
+val stop = GraineAvatar.addListener { state -> agentFace.isVisible = state.showsFace }
+// later: stop()
+```
+
+`GraineAvatar.state.phase` is `OFF`, `AVAILABLE` (a face is ready: show your view) or `LIVE` (the face carries
+the voice); `reason` says why it is off — `busy`, `off`, `failed`, `stalled`, `unsupported`, …
+
+- **Assistant-bar calls** (`GraineVoice`) draw the face with the core SDK alone: the call's engine is laid over
+  your avatar view, in the same window.
+- **Native calls** (`GraineCalls`) draw it with the WebRTC module: add `ai.graine:inapp-android-rtc`; a call on
+  the voice socket says `unsupported` and stays voice-only. The SDK's own call screen draws the face when you
+  opt in: `GraineInApp.get().calls.showsAvatar = true`.
 
 ## Scheduled calls
 

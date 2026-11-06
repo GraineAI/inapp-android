@@ -95,6 +95,69 @@ interface GraineRtcPeer {
 
     /** Hang up the media and release the microphone and the speaker. Safe to call twice. */
     fun close()
+
+    /**
+     * THE AGENT'S FACE (Avatar.kt, AvatarFace.kt): the call's own copy of the
+     * agent's voice heard (true) or silenced while the face carries it — the
+     * received track's volume only; the receiver, its statistics and every
+     * watch keep running. A module from before the face never silences it.
+     */
+    fun setAgentAudible(audible: Boolean) {}
+
+    /** The agent's voice on the meter scale (0–1), measured before that volume; null when not measured. Any thread. */
+    fun agentLevelBeforeMute(): Double? = null
+
+    /**
+     * A viewer for the agent's face on this call's media (its audio device),
+     * so the face's sound plays through the call's own audio; null when this
+     * module cannot show one.
+     */
+    fun createAvatarViewer(listener: GraineAvatarViewer.Listener): GraineAvatarViewer? = null
+}
+
+/**
+ * THE FACE'S VIEWER ON A NATIVE CALL — a second peer connection, receive-only
+ * (the face's audio and video, one data channel), made by the module on the
+ * call's own factory. The SDK runs the protocol (AvatarFace.kt): the requests,
+ * the clock, the hand-over of the voice; the viewer only moves media.
+ * Callbacks arrive on the library's threads; any method on any thread unless
+ * it says otherwise.
+ */
+@GraineRtcInternal
+interface GraineAvatarViewer {
+    interface Listener {
+        /** The data channel opened. */
+        fun onChannelOpen()
+        /** A text message from the service on the data channel. */
+        fun onMessage(text: String)
+        /** The connection's state, in the standard words: new, connecting, connected, disconnected, failed, closed. */
+        fun onConnection(state: String)
+    }
+
+    /**
+     * Make the peer with these ICE servers — audio and video receive-only, the
+     * data channel — and gather: [done] hears the complete offer (or what was
+     * gathered after [gatherMs]), or why there is none.
+     */
+    fun offer(iceServers: List<GraineRtcIceServer>, gatherMs: Long, done: (sdp: String?, error: String?) -> Unit)
+
+    /** Apply the service's answer; [done] hears an error, or null. */
+    fun applyAnswer(sdp: String, done: (error: String?) -> Unit)
+
+    /** A text message on the data channel (dropped when it is not open). */
+    fun send(text: String)
+
+    /** The face's sound heard (true) or silent (false) — its own track's volume, never the call's. */
+    fun setAudible(audible: Boolean)
+
+    /** Video frames so far, the face's level 0–1 before any silencing, the audio jitter buffer (seconds, emitted count) — each null when unknown. */
+    fun sample(done: (frames: Double?, face: Double?, jitterBufferDelay: Double?, emitted: Double?) -> Unit)
+
+    /** The view that draws the face, made on first use with [context]. Main thread. */
+    fun videoView(context: Context): android.view.View?
+
+    /** Close everything. Nothing is reported after it. Safe to call twice. */
+    fun close()
 }
 
 /** What the peer connection measured about the call's audio. */

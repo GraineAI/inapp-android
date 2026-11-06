@@ -127,6 +127,8 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
     interface Listener {
         /** Media flows: ICE connected after the answer. */
         fun onMedia() {}
+        /** An `avatar` frame on the control channel: the agent's face is ready, or there is none. */
+        fun onAvatarFrame(frame: JSONObject) {}
         /** WebRTC cannot carry this call, and nothing was heard yet: carry it on the WebSocket. Everything here is released. */
         fun onFallback(reason: String, detail: String) {}
         /**
@@ -1430,6 +1432,7 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
             ControlFrame.EndOfLine -> endCaptionTurn()
             is ControlFrame.Action -> runAction(f)
             is ControlFrame.Widget -> CallLog.debug("a component arrived during a call; a call screen does not draw components")
+            is ControlFrame.Avatar -> listener.onAvatarFrame(f.frame)
             else -> Unit
         }
     }
@@ -1461,6 +1464,18 @@ internal class RtcCallSession(private val request: RtcCallRequest, private val e
     // ── what the call screen does ───────────────────────────────────────────
 
     /** Muted: the microphone's track sends silence; nothing is torn down, so unmuting is instant. */
+    // ── The agent's face (AvatarFace.kt) — on the scheduler's thread, as the call's own work ──
+
+    /** A viewer for the agent's face on this call's media; null before media flows or when the module has none. */
+    fun createAvatarViewer(listener: GraineAvatarViewer.Listener): GraineAvatarViewer? =
+        if (phase != Phase.DONE) peer?.let { p -> runCatching { p.createAvatarViewer(listener) }.getOrNull() } else null
+
+    /** The call's own copy of the agent's voice heard, or silenced while the face carries it. */
+    fun setAgentAudible(audible: Boolean) { peer?.setAgentAudible(audible) }
+
+    /** The agent's voice on the meter scale, before any silencing. */
+    fun agentLevelBeforeMute(): Double? = peer?.agentLevelBeforeMute()
+
     fun setMuted(value: Boolean) = scheduler.post {
         muted = value
         peer?.setMicrophoneEnabled(!value)

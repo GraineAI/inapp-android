@@ -154,6 +154,8 @@ internal interface CallSessionEvents {
      * a reading of the audio so far while a WebRTC call is live.
      */
     fun onAnalytics(name: String, data: Map<String, Any?>) {}
+    /** An `avatar` frame: the agent's face is ready, or there is none (GraineCalls hands it to the call's AvatarFace). */
+    fun onAvatarFrame(frame: JSONObject) {}
 }
 
 /** Everything outside the session, injected. */
@@ -627,6 +629,7 @@ internal class VoiceCallSession(
             is Inbound.Text -> onAgentText(f.data)
             is Inbound.Transcript -> if (f.text.isNotEmpty()) events.onCaption(Role.CUSTOMER, f.text, !f.final)
             is Inbound.Action -> runAction(f)
+            is Inbound.Avatar -> events.onAvatarFrame(f.frame)
             // Never sent on this path today; if they come, they bound a caption turn. Speech follows the audio.
             Inbound.SpeechStart, Inbound.SpeechEnd -> endCaptionTurn()
             Inbound.Clear -> {

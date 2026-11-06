@@ -288,11 +288,42 @@ object GraineCallsHost {
     @JvmStatic
     fun resolveAction(requestId: String, result: Map<*, *>?) = onMain { core.resolveAction(requestId, result) }
 
+    // ── the agent's face ────────────────────────────────────────────────────
+
+    /** The agent's face now: `{phase: "off"|"available"|"live", reason: String|null}` ([GraineAvatar.state]). */
+    @JvmStatic
+    fun avatarState(): Map<String, Any?> = avatarPayload(GraineAvatar.state)
+
+    /** The SDK's call screen draws the agent's face ([GraineCalls.showsAvatar]). Off by default; before `configure`, held until it runs. */
+    @JvmStatic
+    fun setShowsAvatar(on: Boolean) = onMain {
+        AvatarRequests.showsAvatar = on
+        AppShared.callsIfMade()?.showsAvatar = on
+    }
+
+    private fun avatarPayload(s: GraineAvatarState): Map<String, Any?> = mapOf("phase" to s.phase.word, "reason" to s.reason)
+
+    /** The `avatar` event: every change of the face, to every sink. Watched from the first sink on. */
+    @Volatile private var avatarWatched = false
+
+    private fun watchAvatar() {
+        if (avatarWatched) return
+        avatarWatched = true
+        var last: GraineAvatarState? = null
+        GraineAvatar.addListener { s ->
+            if (s == last) return@addListener
+            val first = last == null
+            last = s
+            if (!first) core.emitAvatar(avatarPayload(s))
+        }
+    }
+
     // ── events ──────────────────────────────────────────────────────────────
 
     /** Start receiving events. Outcomes and rings that came while nothing listened are delivered to the first sink, at once. */
     @JvmStatic
     fun addSink(sink: Sink): Int = onMainSync {
+        watchAvatar()
         core.addSink { event, payload ->
             // One wrapper's broken bridge must not keep the others from hearing the call.
             try {

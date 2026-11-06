@@ -1,3 +1,18 @@
+## 0.15.0
+
+- **The agent's face (Avatar).** When the agent has Avatar turned on in the dashboard, a call can show its live talking
+  face. Place a `GraineAvatarView` where the face should go, and follow `GraineAvatar.state` /
+  `GraineAvatar.addListener` (`OFF`, `AVAILABLE`, `LIVE`, with a `reason` when off). Assistant-bar calls draw it with the
+  core SDK alone. The SDK's call screen draws it when you set `GraineCalls.showsAvatar = true` (off by default); native
+  calls need `ai.graine:inapp-android-rtc` and a call on WebRTC — otherwise the reason is `unsupported` and the call is
+  voice-only.
+- **The voice moves to the face at a pause, never mid-sentence,** and comes back to the call at once if the face's
+  connection drops for 2 seconds, it cannot be shown, or the avatar view leaves the screen. The customer never hears the
+  agent twice, and never hears nothing.
+- **Nothing changes for an app that does not place an avatar view:** a face nobody can see is never connected, and the call
+  stays voice-only, exactly as before.
+- `inapp-android-rtc` moves to 0.15.0 beside it: a native call shows the face only with it. Update both together.
+
 ## 0.14.12
 
 - **A call the customer places reaches the agent's voice sooner.** A tap no longer waits for the SIP registration before it

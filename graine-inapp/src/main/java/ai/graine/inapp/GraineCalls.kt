@@ -131,6 +131,27 @@ class GraineCalls internal constructor(
      */
     @Volatile var speakerByDefault: Boolean = true
 
+    /**
+     * THE AGENT'S FACE ON THE SDK'S CALL SCREEN ([GraineCallActivity]): off by
+     * default. On, and with the agent's face switched on in the dashboard, the
+     * call screen draws the face where the agent's picture goes, and the face
+     * carries the voice ([GraineAvatar]). Needs the WebRTC module
+     * (`ai.graine:inapp-android-rtc`) and a call on WebRTC; otherwise the call is
+     * voice-only, as it is with this off. Your own call screen: place a
+     * [GraineAvatarView].
+     */
+    @Volatile var showsAvatar: Boolean = AvatarRequests.showsAvatar
+
+    /** The call's face (AvatarFace.kt), run on the call's scheduler. */
+    @Volatile private var avatarFace: AvatarFace? = null
+    private val avatarSurface = object : AvatarSurfaceListener {
+        override fun avatarSurfaceChanged() {
+            val face = avatarFace ?: return
+            val shown = GraineAvatar.isShown
+            scheduler.post { face.surface(shown) }
+        }
+    }
+
     /** What the customer chose with [setSpeaker] for this call; null: [speakerByDefault] decides. Main thread. */
     private var speakerChoice: Boolean? = null
 
@@ -949,6 +970,8 @@ class GraineCalls internal constructor(
                 if (machine.call?.callId != c.callId) return@onMain
                 setReconnecting(reconnecting)
             }
+            // On the scheduler's thread, where the call's face runs.
+            override fun onAvatarFrame(frame: org.json.JSONObject) { avatarFace?.frame(frame) }
             override fun onAnalytics(name: String, data: Map<String, Any?>) = onMain {
                 if (machine.call?.callId != c.callId) return@onMain
                 // The session ending the call itself says why first.
@@ -999,6 +1022,7 @@ class GraineCalls internal constructor(
             events,
         )
         session = sess
+        startAvatar(sess)
         sess.setMuted(muted)
         unwatchContext = graine.onContext { frame -> session?.sendContext(frame) }
         sess.start()
@@ -1027,6 +1051,23 @@ class GraineCalls internal constructor(
         report { it.onCallState(s, c) }
     }
 
+    /** The call's face: frames from its channel, the avatar views on screen, the viewer from its WebRTC leg. Main thread. */
+    @OptIn(GraineRtcInternal::class)
+    private fun startAvatar(sess: CallTransportSession) {
+        val face = AvatarFace(scheduler, AvatarFace.Hooks(
+            makeViewer = { listener -> sess.createAvatarViewer(listener) },
+            agentLevel = { sess.agentLevelBeforeMute() },
+            setAgentAudible = { audible -> sess.setAgentAudible(audible) },
+            onState = { state -> GraineAvatar.nativeState(state) },
+            onViewer = { viewer -> GraineAvatar.nativeViewer(viewer) },
+            log = { line -> CallLog.debug(line) },
+        ))
+        avatarFace = face
+        GraineAvatar.listen(avatarSurface)
+        val shown = GraineAvatar.isShown
+        scheduler.post { face.surface(shown) }
+    }
+
     /** Everything the call held, released; the hang-up frames go out if the line was up, with why it ended. */
     private fun teardown() {
         cancelRing()
@@ -1037,6 +1078,9 @@ class GraineCalls internal constructor(
         webCallWaited = false
         voiceHeard = null
         micPending = false
+        // The face first: its viewer rides the call's media, which the hang-up releases.
+        avatarFace?.let { face -> scheduler.post { face.callEnded() } }
+        avatarFace = null
         session?.hangUp(endCause?.takeIf { it.first == call?.callId }?.second ?: CallEnd.LOCAL_END)
         session = null
         unwatchContext?.invoke(); unwatchContext = null

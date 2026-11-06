@@ -1,5 +1,6 @@
 package ai.graine.inapp.rtc
 
+import ai.graine.inapp.GraineAvatarViewer
 import ai.graine.inapp.GraineRtcIceServer
 import ai.graine.inapp.GraineRtcInternal
 import ai.graine.inapp.GraineRtcPeer
@@ -10,6 +11,7 @@ import android.media.MediaRecorder
 import livekit.org.webrtc.AudioSource
 import livekit.org.webrtc.AudioTrack
 import livekit.org.webrtc.CandidatePairChangeEvent
+import livekit.org.webrtc.DefaultVideoDecoderFactory
 import livekit.org.webrtc.DataChannel
 import livekit.org.webrtc.IceCandidate
 import livekit.org.webrtc.MediaConstraints
@@ -56,6 +58,10 @@ internal class WebRtcPeer private constructor(
     private var source: AudioSource? = null
     private var track: AudioTrack? = null
     private var micEnabled = true
+    /** The agent's voice as received: its volume silences it while the agent's face carries the voice; its level is read before that. */
+    @Volatile private var received: AudioTrack? = null
+    private val agentMeter = LevelMeter()
+    @Volatile private var agentAudible = true
 
     override fun createOffer(iceRestart: Boolean, done: (error: String?) -> Unit) {
         if (closed) { done("closed"); return }
@@ -119,7 +125,28 @@ internal class WebRtcPeer private constructor(
         t.setEnabled(micEnabled)
         source = s
         track = t
-        pc.addTransceiver(t, RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_RECV, listOf("graine")))
+        val transceiver = pc.addTransceiver(t, RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_RECV, listOf("graine")))
+        (transceiver?.receiver?.track() as? AudioTrack)?.let { heard ->
+            heard.addSink(agentMeter)
+            runCatching { heard.setVolume(if (agentAudible) 1.0 else 0.0) }
+            received = heard
+        }
+    }
+
+    // ── The agent's face (the SDK's AvatarFace.kt) ──
+
+    override fun setAgentAudible(audible: Boolean) {
+        agentAudible = audible
+        if (!closed) received?.let { runCatching { it.setVolume(if (audible) 1.0 else 0.0) } }
+    }
+
+    override fun agentLevelBeforeMute(): Double? = if (received != null && !closed) agentMeter.meterLevel() else null
+
+    /** The face viewers made on this call's factory: closed before it is disposed. */
+    private val viewers = mutableListOf<WebRtcAvatarViewer>()
+
+    override fun createAvatarViewer(listener: GraineAvatarViewer.Listener): GraineAvatarViewer? = synchronized(viewers) {
+        if (closed) null else WebRtcAvatarViewer(factory, listener).also { viewers += it }
     }
 
     override fun setMicrophoneEnabled(enabled: Boolean) {
@@ -136,7 +163,10 @@ internal class WebRtcPeer private constructor(
     override fun stats(done: (GraineRtcStats?) -> Unit) {
         if (closed) { done(null); return }
         pc.getStats { report ->
-            done(runCatching { WebRtcStats.read(report.statsMap.values.map { WebRtcStats.Entry(it.id, it.type, it.members) }) }.getOrNull())
+            val read = runCatching { WebRtcStats.read(report.statsMap.values.map { WebRtcStats.Entry(it.id, it.type, it.members) }) }.getOrNull()
+            // While the agent's face carries the voice this track is silenced and its own level reads that silence:
+            // the level before it is the agent's, for speaking and the visualiser.
+            done(if (read != null && !agentAudible) WebRtcStats.withLevel(read, agentMeter.peak()) else read)
         }
     }
 
@@ -144,6 +174,10 @@ internal class WebRtcPeer private constructor(
         if (closed) return
         closed = true
         // In the library's order: the connection, then what fed it, then the factory and the audio device.
+        // The agent's face shares this call's factory: its connections go before the factory does.
+        synchronized(viewers) { viewers.toList().also { viewers.clear() } }.forEach { runCatching { it.close() } }
+        runCatching { received?.removeSink(agentMeter) }
+        received = null
         runCatching { pc.dispose() }
         runCatching { track?.dispose() }
         runCatching { source?.dispose() }
@@ -231,7 +265,11 @@ internal class WebRtcPeer private constructor(
                 .setAudioTrackStateCallback(PlayoutState(listener))
                 .createAudioDeviceModule()
             val factory = try {
-                PeerConnectionFactory.builder().setAudioDeviceModule(adm).createPeerConnectionFactory()
+                // Video decoders for the agent's face (WebRtcAvatarViewer), which shares this factory and its audio
+                // device; the call itself is audio only and never offers video.
+                PeerConnectionFactory.builder().setAudioDeviceModule(adm)
+                    .setVideoDecoderFactory(DefaultVideoDecoderFactory(null))
+                    .createPeerConnectionFactory()
             } catch (e: Throwable) {
                 adm.release()
                 throw e

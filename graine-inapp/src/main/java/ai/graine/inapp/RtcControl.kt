@@ -15,6 +15,8 @@ internal sealed class ControlFrame {
     object EndOfLine : ControlFrame()
     data class Action(val actionId: String, val name: String, val arguments: JSONObject) : ControlFrame()
     data class Widget(val pending: Boolean, val widget: JSONObject) : ControlFrame()
+    /** `avatar`: the agent's face is ready, or there is none (Avatar.kt reads it). */
+    data class Avatar(val frame: JSONObject) : ControlFrame()
     data class Other(val type: String) : ControlFrame()
 
     companion object {
@@ -39,6 +41,7 @@ internal sealed class ControlFrame {
                     Action(a.optString("action_id"), a.optString("name"), a.optJSONObject("arguments") ?: JSONObject())
                 }
                 "widget", "widget_pending" -> Widget(type == "widget_pending", o.optJSONObject("widget") ?: JSONObject())
+                "avatar" -> Avatar(o)
                 else -> Other(type)
             }
         }

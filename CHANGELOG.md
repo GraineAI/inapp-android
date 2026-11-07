@@ -1,3 +1,8 @@
+## 0.15.2
+
+- No change to the Android SDK: it moves to 0.15.2 with iOS so the native SDKs keep one version (iOS 0.15.2 fixes the
+  agent's face in Kotlin Multiplatform apps). Kotlin Multiplatform 0.15.2 builds on it.
+
 ## 0.15.1
 
 - **Talk works on an agent that admits only your apps.** The voice bar's call page now asks the SDK for what its own

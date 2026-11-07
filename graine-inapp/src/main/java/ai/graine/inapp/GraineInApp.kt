@@ -294,6 +294,15 @@ class GraineInApp private constructor(
     )
     @Volatile var session: SessionConfig? = null
         private set
+
+    /**
+     * The session's answer as served — handed to the engine page inside this app
+     * when it asks (`graine:need-session`, HostAsk.kt): the page's own request
+     * carries Graine's Origin, which an agent that admits only its apps refuses.
+     * Null until a session loads.
+     */
+    @Volatile internal var sessionServed: JSONObject? = null
+        private set
     private val sessionWaiters = mutableListOf<(SessionConfig?) -> Unit>()
     private var sessionLoading = false
 
@@ -1592,6 +1601,7 @@ class GraineInApp private constructor(
                     // Who the user is, as this agent decides: identify() may have come first, and resolves now —
                     // before the session is seen, so nothing reads a session whose trait is not known yet.
                     identity.onSession(s.identity)
+                    sessionServed = result.getOrNull()?.first
                     session = s
                     sessionFailure = null
                     // What the agent asks of this app and its users: the app proven in the background when it asks (§2.1).
@@ -1625,6 +1635,31 @@ class GraineInApp private constructor(
                 val waiting = synchronized(sessionWaiters) { sessionLoading = false; sessionWaiters.toList().also { sessionWaiters.clear() } }
                 waiting.forEach { it(s) }
             }
+        }
+    }
+
+    // ── what the engine page asks of this app (HostAsk.kt) ───────────────────
+
+    /** The session as served, for the engine page inside this app; null when there is none. Main thread. */
+    internal fun pageSession(done: (JSONObject?) -> Unit) = loadSession { s -> done(if (s != null) sessionServed else null) }
+
+    /**
+     * A ticket the engine page inside this app asked for (a vouch, or the call's
+     * voice ticket), minted as THIS APP — no Origin, the app's declaration and
+     * proofs, the user, the server token as a new connection waits for it —
+     * through the one door, exactly as the chat's ticket ([Chat] fetchTicket).
+     * `done` hears the `graine:ticket` answer on the main thread.
+     */
+    internal fun pageTicket(ask: HostAsk.Ask.Ticket, done: (JSONObject) -> Unit) {
+        val body = HostAsk.ticketBody(config.publishableKey, ask, currentVariables(), identity.envelope())
+        val url = "${config.baseUrl.trimEnd('/')}${EmbedRequest.TICKET_PATH}"
+        val run: (() -> Unit) -> Unit = env.ticketIo ?: { work -> io.execute(work) }
+        run {
+            val reply = runCatching {
+                EmbedRequest.send(url, body, tokens = clientTokens, newConnection = true) { json -> env.http.post(url, json) }
+            }.getOrNull()
+            val answer = HostAsk.ticketAnswer(ask, reply)
+            main.post { done(answer) }
         }
     }
 

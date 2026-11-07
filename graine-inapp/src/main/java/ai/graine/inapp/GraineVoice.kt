@@ -595,7 +595,23 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
         Protocol.Out.APP_CONTEXT -> "screen=${m.optJSONObject("context")?.optString("screen")}"
         Protocol.Out.IDENTITY -> "identity=${if (m.isNull("value")) "none" else "set"} memory=${m.optBoolean("memory")}"
         Protocol.Out.CLIENT_TOKEN -> "token=${if (m.isNull("token")) "none" else "set"}"
-        else -> m.toString().take(300)
+        // The session and the tickets handed to the page (HostAsk.kt): whether they carried anything only.
+        else -> HostAsk.redactForLog(m) ?: m.toString().take(300)
+    }
+
+    /**
+     * TALK AUTHENTICATES AS THIS APP (HostAsk.kt). The engine page's own requests
+     * carry Graine's Origin and no declaration, so an agent that admits only its
+     * apps refused them all and the page fell back to a socket that proves
+     * nothing. Every answer is made here natively, through the same door as the
+     * SDK's own requests; what this app could not get, the page does not get.
+     * Main thread.
+     */
+    private fun answerPage(ask: HostAsk.Ask) {
+        when (ask) {
+            HostAsk.Ask.Session -> graine.pageSession { served -> post(HostAsk.sessionAnswer(served)) }
+            is HostAsk.Ask.Ticket -> graine.pageTicket(ask) { answer -> post(answer) }
+        }
     }
 
     /**
@@ -866,6 +882,13 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
 
     /** The page calls `window.ReactNativeWebView.postMessage(json)`. Runs on a binder thread. */
     private inner class Bridge {
+        /**
+         * What this SDK answers when the page asks its host (HostAsk.kt): the session and
+         * tickets minted as this app. A page whose bridge has no `answers` asks nothing.
+         */
+        @JavascriptInterface
+        fun answers(): String = HostAsk.ANSWERS
+
         @JavascriptInterface
         fun postMessage(json: String?) {
             // The agent's face: the page says when there is one, and the engine's view is laid over the avatar view.
@@ -873,6 +896,13 @@ class GraineVoice internal constructor(private val graine: GraineInApp) {
             if (face != null) {
                 if (graine.config.debug) Log.d(GraineInApp.TAG, "← page ${json.take(200)}")
                 graine.main.post { faceFromPage(face) }
+                return
+            }
+            // What the page cannot get itself — its Origin is Graine's: the session, and tickets minted as this app.
+            val ask = HostAsk.read(json)
+            if (ask != null) {
+                if (graine.config.debug) Log.d(GraineInApp.TAG, "← page ${json?.take(200)}")
+                graine.main.post { answerPage(ask) }
                 return
             }
             val msg = Protocol.parse(json)

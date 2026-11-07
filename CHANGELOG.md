@@ -1,3 +1,11 @@
+## 0.15.1
+
+- **Talk works on an agent that admits only your apps.** The voice bar's call page now asks the SDK for what its own
+  web address cannot get — the agent's settings and the call's tickets — and the SDK fetches them as your app, with its
+  declaration and proofs, exactly as its own requests. An agent with Allowed domains `app://` only, "Only my apps" and
+  "Require a verified app" now places Talk calls over WebRTC (and its standard-audio fallback), judged as your app;
+  nothing in the agent's settings is relaxed. Nothing to change in your app.
+
 ## 0.15.0
 
 - **The agent's face (Avatar).** When the agent has Avatar turned on in the dashboard, a call can show its live talking

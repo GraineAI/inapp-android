@@ -1,3 +1,17 @@
+## 0.15.3
+
+- **The brand's ring tone stops when the ring ends.** With a brand ring (`graine` or `soft`), a missed call could keep
+  ringing after its notification was gone, when Android had paused the app. The default system ringtone was not affected.
+- **A booked call can be answered even when Android ended the app while it rang.** Answering from the notification opened
+  an empty screen and the notification kept ringing. The call screen now rings the call again for what is left of its
+  ring, and the Answer answers it: never for a call this launch already had, beside a live call, or past the ring's end.
+- **A call screen opened in a fresh launch stays open for apps that host the SDK from React Native or Flutter:** it
+  restores the SDK from the options the app last gave it, as a push already does. Reaches those apps with their next
+  release.
+- **A booked call carries your app's variables.** `scheduleCall(at, reason)` sends the variables your app has set
+  (`setVariables` and the config's, the first 12 by name) with the booking, so the agent greets the person by name even
+  when the call is what starts your app.
+
 ## 0.15.2
 
 - No change to the Android SDK: it moves to 0.15.2 with iOS so the native SDKs keep one version (iOS 0.15.2 fixes the

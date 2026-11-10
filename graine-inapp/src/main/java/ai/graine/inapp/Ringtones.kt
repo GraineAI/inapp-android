@@ -59,18 +59,32 @@ internal object Ringtones {
 
     /** The pattern for a `call.ringtone` word; null for `system` and anything this build does not know. */
     fun pattern(name: String?): Pattern? = PATTERNS[name]
+
+    /**
+     * How many times a cycle of [cycleSamples] loops after its first play so
+     * the ring sounds for [ringMs] and then stops by itself (AudioTrack's
+     * loop count; never -1, forever). A ring the app cannot stop — its
+     * process frozen or busy as the ring times out — still goes quiet with
+     * its notification.
+     */
+    fun loopsFor(cycleSamples: Int, ringMs: Long, rate: Int = SAMPLE_RATE): Int {
+        if (cycleSamples <= 0 || ringMs <= 0) return 0
+        val cycleMs = cycleSamples * 1000.0 / rate
+        return Math.max(0, Math.ceil(ringMs / cycleMs).toInt() - 1)
+    }
 }
 
 /**
- * Plays a ring pattern on the RINGTONE stream, looping until stopped — so the
- * ringer switch, silent mode and Do Not Disturb silence it exactly as they
- * silence the phone's own ringtone. Main thread.
+ * Plays a ring pattern on the RINGTONE stream, looping until stopped or for
+ * as long as the ring lasts, whichever comes first — so the ringer switch,
+ * silent mode and Do Not Disturb silence it exactly as they silence the
+ * phone's own ringtone, and it never outlives its ring. Main thread.
  */
 internal class TonePlayer {
     private var track: AudioTrack? = null
 
-    /** True when the pattern is playing; false (nothing played) for `system` or a device that refused it. */
-    fun start(name: String?): Boolean {
+    /** True when the pattern is playing, for [ringMs]; false (nothing played) for `system` or a device that refused it. */
+    fun start(name: String?, ringMs: Long): Boolean {
         stop()
         val p = Ringtones.pattern(name) ?: return false
         return try {
@@ -89,7 +103,8 @@ internal class TonePlayer {
                 .setBufferSizeInBytes(pcm.size * 2)
                 .build()
             t.write(pcm, 0, pcm.size)
-            t.setLoopPoints(0, pcm.size, -1)
+            // A static track loops in the audio server: bounded, it stops with the ring even if nothing here can stop it.
+            t.setLoopPoints(0, pcm.size, Ringtones.loopsFor(pcm.size, ringMs))
             t.play()
             track = t
             true

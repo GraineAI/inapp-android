@@ -127,6 +127,27 @@ class GarageDesignsTest {
         assertEquals(null, Ringtones.pattern("opera"))
     }
 
+    /**
+     * The brand's ring sounds for as long as the call rings and then stops by
+     * itself — never loops forever: a ring the app cannot stop (its process
+     * frozen as the ring times out) must still go quiet with its notification.
+     */
+    @Test fun theBrandsRingStopsByItselfWhenTheRingEnds() {
+        val rate = Ringtones.SAMPLE_RATE
+        for ((name, p) in Ringtones.PATTERNS) {
+            val cycle = Ringtones.samples(p).size
+            val cycleMs = cycle * 1000.0 / rate
+            for (ringMs in listOf(20_000L, 45_000L, 60_000L)) {
+                val loops = Ringtones.loopsFor(cycle, ringMs)
+                assertTrue("$name: never forever", loops >= 0)
+                assertTrue("$name: it rings the whole $ringMs ms", (loops + 1) * cycleMs >= ringMs)
+                assertTrue("$name: and stops within a cycle of its end", loops * cycleMs < ringMs)
+            }
+        }
+        assertEquals("a cycle longer than the ring plays once", 0, Ringtones.loopsFor(rate * 10, 2_000))
+        assertEquals("nothing to ring for: once", 0, Ringtones.loopsFor(rate, 0))
+    }
+
     // ── the Upcoming calls card ────────────────────────────────────────────
 
     private fun call(id: String, atMs: Long?, status: String = "scheduled") = GraineScheduledCall(id, atMs?.let { Date(it) }, GraineCallStatus.from(status))

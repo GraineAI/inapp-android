@@ -97,6 +97,10 @@ class GraineCalls internal constructor(
     }
     /** A native call is ringing, connecting or live — what the chat steps aside for. */
     private var nativeLive = false
+    /** The ring rung again only to be answered at once ([ringAgain]): its notification is the one already there. Main thread. */
+    private var quietRing: String? = null
+    /** When the ringing call stops ringing, by its id, on the wall clock: what its notification carries ([ringOutlived]). Main thread. */
+    private var ringEnds: Pair<String, Long>? = null
     /** The brand's ring (`call.ringtone` graine or soft) while one is ringing. */
     private val tone = TonePlayer()
 
@@ -415,11 +419,11 @@ class GraineCalls internal constructor(
         }
     }
 
-    private fun incoming(push: AgentCallPush.Call) {
+    /** A ring: [agent] the one it is for, [quiet] for a ring rung again only to be answered at once ([ringAgain]). */
+    private fun incoming(push: AgentCallPush.Call, agent: GraineInApp = route(push), quiet: Boolean = false) {
         // The ring wins: a call prepared ahead of a tap goes.
         transports.releasePrepared()
         // The agent it is for: its rules ring it, its key reports it, its design draws it.
-        val agent = route(push)
         callAgents[push.callId] = agent
         // Before the person answers: the app proof refreshed and a fresh identity token asked for, in the background (APP-IDENTITY.md §6).
         runCatching { agent.ringArrived() }
@@ -430,14 +434,46 @@ class GraineCalls internal constructor(
         val hosted = if (push.hosted) agent.schedulingRules else null
         val masked = push.copy(
             variables = push.variables.mapValues { Masking.mask(it.value) },
-            ringTimeoutMs = hosted?.ringTimeoutSeconds?.let { it * 1000L },
+            // A ring rung again ([ringAgain]) rings for what is left of it; a push carries no time of its own.
+            ringTimeoutMs = push.ringTimeoutMs ?: hosted?.ringTimeoutSeconds?.let { it * 1000L },
             // Graine's ring names the agent's call name when the push itself names nobody.
             callerName = push.callerName ?: hosted?.callName,
         )
         if (push.hosted) hostedIds.add(push.callId)
+        quietRing = if (quiet) push.callId else null
         // Busy: reported missed (or ignored, when it is the live call pushed again), the live call untouched.
         val c = machine.incoming(masked) ?: return
         report { it.onIncomingCall(c) }
+    }
+
+    /**
+     * THE RING OUTLIVED ITS PROCESS. The system ended the app while it rang (a
+     * phone that clears apps in the background, low memory): its notification
+     * stays, and its Answer — or its screen — opens the app afresh, with no
+     * call at all. The call rings again here, as its notification carried it
+     * ([push], [agent]), for what is left of its ring; [quiet] for its Answer,
+     * which answers it at once — the notification already there rings on
+     * until then, with no second alert. Nothing for a call this launch has
+     * already had, or beside a live one. Main thread.
+     */
+    internal fun ringAgain(push: AgentCallPush.Call, agent: GraineInApp?, quiet: Boolean) {
+        if (machine.live || push.callId in callAgents) return
+        incoming(push, agent ?: AppShared.primary() ?: home, quiet)
+    }
+
+    /** The call screen opened from a ring's notification in a launch with no call: the ring read back from it, while it would still ring. */
+    private fun ringOutlived(intent: Intent?) {
+        val i = intent ?: return
+        val action = i.action
+        if (action != ACTION_ANSWER && action != ACTION_SHOW) return
+        val id = i.getStringExtra(EXTRA_CALL_ID) ?: return
+        val left = RingRevival.left(i.getLongExtra(EXTRA_RING_UNTIL, 0L), System.currentTimeMillis()) ?: return
+        val push = AgentCallPush.Call(
+            id, i.getStringExtra(EXTRA_REASON), i.getStringExtra(EXTRA_CALLER_NAME), RingRevival.variables(i.getStringExtra(EXTRA_VARIABLES)),
+            hosted = i.getBooleanExtra(EXTRA_HOSTED, false), ringTimeoutMs = left,
+        )
+        CallLog.debug("a ring outlived its process: rung again for ${left / 1000} s more")
+        ringAgain(push, i.getStringExtra(EXTRA_AGENT)?.let { AppShared.find(it) }, quiet = action == ACTION_ANSWER)
     }
 
     /**
@@ -1040,6 +1076,7 @@ class GraineCalls internal constructor(
         when (s) {
             GraineCallState.RINGING -> c?.let {
                 if (it.callId in hostedIds) reportHosted(HostedOutcomes.Report(it.callId, HostedOutcomes.RINGING))
+                ringEnds = it.callId to (System.currentTimeMillis() + machine.ringingMs)
                 ring(it)
             }
             GraineCallState.CONNECTING -> cancelRing()
@@ -1071,6 +1108,8 @@ class GraineCalls internal constructor(
     /** Everything the call held, released; the hang-up frames go out if the line was up, with why it ended. */
     private fun teardown() {
         cancelRing()
+        quietRing = null
+        ringEnds = null
         main.removeCallbacks(micGiveUp)
         main.removeCallbacks(audioCheck)
         main.removeCallbacks(webCallGiveUp)
@@ -1119,11 +1158,16 @@ class GraineCalls internal constructor(
             if (!machine.live) callBack(a, intent.getStringExtra(EXTRA_CALL_ID), intent.getStringExtra(EXTRA_REASON), intent.getStringExtra(EXTRA_AGENT), fromNotification = true)
             return
         }
+        // A ring whose process the system ended while it rang: rung again from what its notification carried, while it would still ring.
+        if (!machine.live) ringOutlived(intent)
         val c = machine.call
         // Answer from the notification: the call screen opened with ACTION_ANSWER for this call.
         if (intent?.action == ACTION_ANSWER && c != null && intent.getStringExtra(EXTRA_CALL_ID) == c.callId) {
-            a.intent = Intent(intent).setAction(ACTION_SHOW)
+            a.intent = Intent(intent).setAction(ACTION_SHOW).apply { removeExtra(EXTRA_RING_UNTIL) }
             if (machine.state == GraineCallState.RINGING) answer(fromNotification = true)
+        } else if (c != null && intent?.hasExtra(EXTRA_RING_UNTIL) == true) {
+            // The ring it carried is this launch's now: a later launch restoring this screen never rings it again.
+            a.intent = Intent(intent).apply { removeExtra(EXTRA_RING_UNTIL) }
         }
         if (micPending) askForMic(a)
     }
@@ -1205,6 +1249,12 @@ class GraineCalls internal constructor(
     private fun screenIntent(c: GraineCall, action: String, requestCode: Int): PendingIntent {
         val i = Intent(app, callScreenClass()).setAction(action).putExtra(EXTRA_CALL_ID, c.callId)
             .putExtra(EXTRA_AGENT, agentFor(c.callId).name).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        // While it rings, the ring itself — so a launch that finds no call (its process ended as it rang) rings it again (ringOutlived).
+        ringEnds?.takeIf { it.first == c.callId && machine.state == GraineCallState.RINGING }?.let { (_, until) ->
+            i.putExtra(EXTRA_RING_UNTIL, until).putExtra(EXTRA_HOSTED, c.hosted)
+                .putExtra(EXTRA_CALLER_NAME, c.callerName).putExtra(EXTRA_REASON, c.reason)
+                .putExtra(EXTRA_VARIABLES, org.json.JSONObject(c.variables as Map<*, *>).toString())
+        }
         return PendingIntent.getActivity(app, requestCode, i, flags())
     }
 
@@ -1218,6 +1268,8 @@ class GraineCalls internal constructor(
 
     /** The ring: a call notification that rings until answered, declined or missed, over the lock screen. */
     private fun ring(c: GraineCall) {
+        // Rung again only to be answered now ([ringAgain]): its notification, from the launch that ended, is still there.
+        if (quietRing == c.callId) return
         val nm = notifications() ?: return
         runCatching { ensureChannels() }
         val name = callerName(c)
@@ -1225,7 +1277,7 @@ class GraineCalls internal constructor(
         val decline = receiverIntent(c, ACTION_DECLINE, REQUEST_DECLINE)
         // The brand's ring is played by the SDK on the ringtone stream; the notification then only vibrates.
         val pattern = brandTone()
-        val playing = pattern != null && tone.start(pattern)
+        val playing = pattern != null && tone.start(pattern, ringingTimeoutMs())
         val b = builder(if (playing) toneChannelId() else ringChannelId())
             .setSmallIcon(smallIcon())
             .setContentTitle(name)
@@ -1370,6 +1422,15 @@ class GraineCalls internal constructor(
             return true
         }
 
+        /**
+         * The SDK as this launch has it, for a call screen a notification opened:
+         * made from the kept options of an app whose calls React Native or
+         * Flutter drive, when nothing made it yet — as a push makes it. A ring
+         * whose process ended is then rung again by its notification
+         * (ringOutlived), and a missed call's screen opens, in those apps too.
+         */
+        internal fun launched(context: Context): GraineInApp? = GraineInApp.peek() ?: restored(context)
+
         /** An app whose calls are driven from React Native or Flutter: its kept options make the instance. */
         private fun restored(context: Context): GraineInApp? {
             runCatching { GraineCallsHost.restore(context) }
@@ -1394,6 +1455,10 @@ class GraineCalls internal constructor(
         const val EXTRA_CALLER_NAME = "ai.graine.inapp.extra.CALLER_NAME"
         /** Why a missed call was placed, carried into the call back. */
         const val EXTRA_REASON = "ai.graine.inapp.extra.REASON"
+        /** A ring's own, on its notification's screen: whether Graine rang it, its variables, and when it stops ringing (ringOutlived). */
+        internal const val EXTRA_HOSTED = "ai.graine.inapp.extra.HOSTED"
+        internal const val EXTRA_VARIABLES = "ai.graine.inapp.extra.VARIABLES"
+        internal const val EXTRA_RING_UNTIL = "ai.graine.inapp.extra.RING_UNTIL"
         /** What a call back to a missed call tells the agent when the missed call had no reason of its own. */
         const val MISSED_REASON = "missed_call"
         /** The request code the SDK uses for the call's microphone prompt. */
@@ -1438,6 +1503,25 @@ class GraineCalls internal constructor(
  */
 internal object CallStart {
     fun atOnce(appInFront: Boolean, locked: Boolean, fromNotification: Boolean): Boolean = appInFront && !locked && !fromNotification
+}
+
+/**
+ * A RING THAT OUTLIVED ITS PROCESS — the rule, pure (GraineCalls.ringAgain):
+ * what is left of it, from the end its notification carried on the wall
+ * clock — nothing, and it is not rung again — and its own variables, as the
+ * notification carried them.
+ */
+internal object RingRevival {
+    /** What is left of a ring that stops at [untilMs], or null: it has stopped, or its notification never said. */
+    fun left(untilMs: Long, nowMs: Long): Long? = if (untilMs > 0 && untilMs > nowMs) untilMs - nowMs else null
+
+    /** The variables a notification carried (a JSON object of strings); none when they cannot be read. */
+    fun variables(json: String?): Map<String, String> {
+        val o = runCatching { org.json.JSONObject(json ?: return emptyMap()) }.getOrNull() ?: return emptyMap()
+        val out = LinkedHashMap<String, String>()
+        o.keys().forEach { k -> (o.opt(k) as? String)?.let { out[k] = it } }
+        return out
+    }
 }
 
 /** The id of a call this app places, as every outcome carries it: `call_` and a random UUID. */

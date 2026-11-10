@@ -986,6 +986,134 @@ class PrepareCallTest {
         g.calls.end(); pump()
     }
 
+    // ── a ring that is what started the app ─────────────────────────────────
+
+    /** The microphone and the speaker each peer was ever told to turn on, and the offers made: what records or plays. */
+    private fun peerAudioOn() = peers.any { p -> p.audioActive.any { it.first || it.second } }
+    private fun offers() = peers.sumOf { p -> p.calls.count { it == "createOffer" } }
+
+    /**
+     * THE RING STARTED THE APP: the agent made in Application.onCreate, its
+     * push before the agent's session (iOS, 10 Nov 2026: a leg prepared like
+     * this, before the call's audio mode was set, kept the app's own mode, and
+     * every such call ended silent at 5 s). Here the ring prepares its call as
+     * it rings, and that is all: no offer (which is what starts the microphone),
+     * the peer's microphone and speaker off, and nothing of the phone's audio
+     * taken, however long it rings. The answer over the lock screen waits for
+     * its service; then the mode, the focus and the device come first, before
+     * the offer and before any playout; then the dial turns them on.
+     */
+    @Test fun aRingThatStartedTheAppTakesTheCallsAudioOnlyAtTheAnswerAndBeforeItsMedia() {
+        val g = agent()
+        phone.locked = true
+        assertTrue(g.calls.handlePush(mapOf("type" to "agent_call", "call_id" to "sc_cold", "hosted" to "1")))
+        pump()
+        peers.last().candidate("srflx")
+        idle(20_000)
+        assertNotNull("the session arrived while it rang", g.session)
+        assertEquals(GraineCallState.RINGING, g.calls.state)
+        assertEquals("the ring's call, prepared as it rings", "sc_cold", mints.single().getString("callId"))
+        assertEquals("no offer while it rings", 0, offers())
+        assertFalse("the microphone and the speaker off while it rings", peerAudioOn())
+        assertTrue("nothing of the phone's audio taken while it rings", phone.acquired.isEmpty())
+        assertEquals(0, invites())
+        var offersAtAcquire = -1
+        var audioAtAcquire: Boolean? = null
+        phone.onAcquire = { offersAtAcquire = offers(); audioAtAcquire = peerAudioOn() }
+        // The call screen, over the lock screen.
+        inFront(g)
+        g.calls.answer(); pump()
+        assertTrue("locked: the call's audio waits for its service", phone.acquired.isEmpty())
+        assertEquals(0, offers())
+        g.calls.serviceStarted(GraineCallService()); pump()
+        assertEquals("the call's audio, once, at the answer", 1, phone.acquired.size)
+        assertEquals("before the offer that starts the microphone", 0, offersAtAcquire)
+        assertEquals("and before any playout", false, audioAtAcquire)
+        assertEquals("the ring's own call dialled, not minted again", 1, mints.size)
+        assertTrue("then the dial", invites() > 0)
+        assertEquals("which turns the microphone and the speaker on", true to true, peers.last().audioActive.last())
+        g.calls.end(); pump()
+    }
+
+    /**
+     * The answered ring is up and nothing of the agent is heard: the route is
+     * applied again once, and nothing hangs up — no watch ends an Android call
+     * for its silence (iOS's playout watch ended its own at 5 s).
+     */
+    @Test fun anAnsweredRingThatHearsNothingIsNeverHungUpForIt() {
+        val g = agent()
+        val outcomes = outcomesOf(g)
+        phone.locked = true
+        assertTrue(g.calls.handlePush(mapOf("type" to "agent_call", "call_id" to "sc_quiet", "hosted" to "1")))
+        pump()
+        peers.last().candidate("srflx"); pump()
+        inFront(g)
+        g.calls.answer(); pump()
+        g.calls.serviceStarted(GraineCallService()); pump()
+        peers.last().ice("connected"); pump()
+        assertEquals(GraineCallState.ACTIVE, g.calls.state)
+        idle(30_000)
+        assertEquals("the route and the focus once more, at three seconds", 1, phone.reapplies)
+        assertEquals("and the call goes on", GraineCallState.ACTIVE, g.calls.state)
+        assertEquals("answered, nothing more", listOf(GraineCallOutcome.Kind.ANSWERED), outcomes.map { it.kind })
+        g.calls.end(); pump()
+    }
+
+    /**
+     * THE RING OUTLIVED ITS PROCESS: the system ended the app as it rang, and
+     * its notification's Answer opens a launch with no call. The call rings
+     * again from what the notification carried, for what is left of its ring,
+     * and the Answer answers it (GraineCalls.onResumed, as here): its own call
+     * id dialled, as Graine's, once the service is up.
+     */
+    @Test fun aRingWhoseProcessEndedIsAnsweredFromItsNotificationAfterAll() {
+        val g = agent()
+        val outcomes = outcomesOf(g)
+        val heard = mutableListOf<GraineCall>()
+        g.calls.addListener(object : GraineCallListener { override fun onIncomingCall(call: GraineCall) { heard += call } })
+        val carried = AgentCallPush.Call("sc_outlived", null, "Acme Care", mapOf("who_called" to "scheduled"), hosted = true, ringTimeoutMs = 20_000)
+        g.calls.ringAgain(carried, g, quiet = true)
+        assertEquals(GraineCallState.RINGING, g.calls.state)
+        assertEquals("Acme Care", heard.single().callerName)
+        assertTrue(heard.single().hosted)
+        g.calls.answer(fromNotification = true); pump()
+        peers.last().candidate("srflx"); pump()
+        assertEquals("the notification's Answer waits for the service", 0, invites())
+        g.calls.serviceStarted(GraineCallService()); pump()
+        assertTrue("dialled", invites() > 0)
+        val mint = mints.last()
+        assertEquals("under its own id, Graine's", "sc_outlived", mint.getString("callId"))
+        assertEquals("scheduled", mint.getJSONObject("variables").getString("who_called"))
+        assertEquals(listOf(GraineCallOutcome.Kind.ANSWERED), outcomes.map { it.kind })
+        g.calls.end(); pump()
+        g.calls.ringAgain(carried, g, quiet = true)
+        assertEquals("a call this launch has had is never rung again", GraineCallState.IDLE, g.calls.state)
+    }
+
+    /** Rung again for what is left of it: missed when the ring would have ended — and never beside a live call. */
+    @Test fun aRingRungAgainRingsOnlyForWhatIsLeftOfIt() {
+        val g = agent()
+        val outcomes = outcomesOf(g)
+        g.calls.ringAgain(AgentCallPush.Call("sc_left", null, null, emptyMap(), hosted = true, ringTimeoutMs = 5_000), g, quiet = false)
+        assertEquals(5_000L, g.calls.ringingTimeoutMs())
+        clock.advance(5_000); pump()
+        assertEquals(GraineCallOutcome.Kind.MISSED, outcomes.single().kind)
+        assertTrue(g.calls.handlePush(mapOf("type" to "agent_call", "call_id" to "sc_live", "hosted" to "1"))); pump()
+        g.calls.ringAgain(AgentCallPush.Call("sc_other", null, null, emptyMap(), hosted = true, ringTimeoutMs = 5_000), g, quiet = false)
+        assertEquals("beside a live call: nothing", "sc_live", g.calls.call?.callId)
+        g.calls.decline(); pump()
+    }
+
+    @Test fun whatIsLeftOfARingIsReadFromItsNotification() {
+        assertEquals(1_500L, RingRevival.left(untilMs = 11_500, nowMs = 10_000))
+        assertNull("it has stopped ringing", RingRevival.left(untilMs = 10_000, nowMs = 10_000))
+        assertNull("a notification that never said", RingRevival.left(untilMs = 0, nowMs = 10_000))
+        val vars = mapOf("who_called" to "scheduled", "order" to "A-1")
+        assertEquals("its variables, as carried", vars, RingRevival.variables(JSONObject(vars as Map<*, *>).toString()))
+        assertEquals(emptyMap<String, String>(), RingRevival.variables("not json"))
+        assertEquals(emptyMap<String, String>(), RingRevival.variables(null))
+    }
+
     // ── the ring lasts as long as the call rings ────────────────────────────
 
     /**

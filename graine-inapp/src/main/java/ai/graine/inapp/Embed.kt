@@ -599,15 +599,28 @@ internal object Scheduling {
         return null
     }
 
-    /** The body of `/api/embed/calls/schedule`: `installId, identity?, at, reason?, timezone`. */
-    fun scheduleBody(atMs: Long, reason: String?, identity: IdentityEnvelope, zone: TimeZone = TimeZone.getDefault()): JSONObject {
+    /** The body of `/api/embed/calls/schedule`: `installId, identity?, at, reason?, timezone, variables?`. */
+    fun scheduleBody(
+        atMs: Long,
+        reason: String?,
+        identity: IdentityEnvelope,
+        zone: TimeZone = TimeZone.getDefault(),
+        variables: Map<String, String> = emptyMap(),
+    ): JSONObject {
         val o = identity.who(JSONObject())
         o.put("at", iso(atMs, zone))
         // The user's own zone: the calling window is checked in it.
         o.put("timezone", identity.timezone ?: zone.id)
         reason?.trim()?.takeIf { it.isNotEmpty() }?.let { o.put("reason", it.take(REASON_MAX)) }
+        // What the app has set (setVariables, the config's variables) goes with the booking: the ring may wake the app
+        // before it has set anything again, and the agent still greets the person with them. The first 12 by name.
+        val kept = variables.entries.sortedBy { it.key }.take(BOOKING_VARIABLES_MAX)
+        if (kept.isNotEmpty()) o.put("variables", JSONObject().apply { kept.forEach { (k, v) -> put(k, v) } })
         return o
     }
+
+    /** The scheduler keeps at most 12 variables with a booking. */
+    const val BOOKING_VARIABLES_MAX = 12
 
     /** One call as the server describes it; null without an id. */
     fun call(raw: Any?): GraineScheduledCall? {

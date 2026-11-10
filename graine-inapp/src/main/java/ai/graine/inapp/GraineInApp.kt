@@ -1809,7 +1809,7 @@ class GraineInApp private constructor(
         afterSession({ e -> done?.onResult(null, e) }, forWhoAsked = true) { who ->
             // The agent's own rules first, before any booking request: scheduling_off, too_soon, too_far.
             Scheduling.check(atMs, System.currentTimeMillis(), schedulingRules)?.let { e -> done?.onResult(null, e); return@afterSession }
-            request(EmbedApi.SCHEDULE, Scheduling.scheduleBody(atMs, reason, who)) { r ->
+            request(EmbedApi.SCHEDULE, Scheduling.scheduleBody(atMs, reason, who, variables = currentVariables())) { r ->
                 when (r) {
                     is EmbedReply.Ok -> {
                         // The chat's Upcoming calls card shows it at once.

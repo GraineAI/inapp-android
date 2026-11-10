@@ -150,6 +150,19 @@ class EmbedTest {
         assertFalse("no reason, no key", Scheduling.scheduleBody(at, " ", env).has("reason"))
     }
 
+    /** A ring can start the app before it has set anything again: the booking carries what the app had set, the first 12 by name. */
+    @Test fun aBookingCarriesTheAppsVariables() {
+        val at = Scheduling.parseIso("2026-10-14T12:30:00Z")!!
+        val vars = (1..15).associate { "v%02d".format(it) to "x$it" } + mapOf("first_name" to "Asha")
+        val o = Scheduling.scheduleBody(at, null, env, TimeZone.getTimeZone("Asia/Kolkata"), variables = vars)
+        val sent = o.getJSONObject("variables")
+        assertEquals(12, sent.length())
+        assertEquals("Asha", sent.getString("first_name"))
+        assertEquals("x1", sent.getString("v01"))
+        assertFalse("past the first 12 by name", sent.has("v12"))
+        assertFalse("none set, no key", Scheduling.scheduleBody(at, null, env).has("variables"))
+    }
+
     @Test fun bookedCallsAreReadAsTheWireDescribesThem() {
         val one = Scheduling.scheduled(JSONObject("""{"call":{"id":"sc_1","at":"2026-10-14T12:30:00Z","status":"SCHEDULED","reason":"kyc","source":"sdk"}}"""))!!
         assertEquals("sc_1", one.id)

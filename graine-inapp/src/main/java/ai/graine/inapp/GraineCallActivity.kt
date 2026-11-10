@@ -107,7 +107,8 @@ class GraineCallActivity : Activity(), GraineCallListener {
      * progress's, else the app's default agent. Null before any init().
      */
     private fun agentOf(i: Intent?): GraineInApp? {
-        val primary = GraineInApp.peek() ?: return null
+        // A notification may open this screen in a launch nothing has set up yet: a React Native or Flutter app's kept options make it.
+        val primary = GraineCalls.launched(this) ?: return null
         i?.getStringExtra(GraineCalls.EXTRA_AGENT)?.let { GraineInApp.find(it) }?.let { return it }
         return AppShared.callsIfMade()?.callAgent ?: primary
     }

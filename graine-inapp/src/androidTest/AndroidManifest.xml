@@ -6,6 +6,11 @@
     <application android:usesCleartextTraffic="true">
         <activity android:name="ai.graine.inapp.RtcLiveActivity" android:exported="false" />
         <!-- The call screen in any design and moment, for screenshots (CallScreenGalleryActivity.kt). -->
+        <!-- The face stage on a device: where the engine's view goes as the stage comes and goes (FaceStageCheckActivity.kt). -->
+        <activity
+            android:name="ai.graine.inapp.FaceStageCheckActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
         <activity
             android:name="ai.graine.inapp.CallScreenGalleryActivity"
             android:exported="true"

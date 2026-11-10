@@ -1373,6 +1373,91 @@ the speaking level, moments, status words, and each moment's look on a design
 with every knob turned. Each SDK's tests parse every case's look and agree
 with every vector.
 
+## Face stage
+
+The agent's face edge to edge, with what the call needs drawn over it — the
+header, the line being said, the component the agent drew and the call's
+buttons. Every SDK draws it (`GraineAvatarStage`); what it shows comes from
+one rule, `avatarStage()` in sdk/inapp/protocol.ts, with the vectors in
+`avatar-stage.json`, and all of it is public (PUBLIC-STATE.md "The face
+stage"), so an app can draw its own over the face instead.
+
+**The safe area is where the stage meets the system bars.** A stage that
+fills the screen keeps its header below the status bar and its buttons above
+the navigation bar; one placed below an app bar pads nothing there. An SDK
+works it out from where the stage is in the window when its host hands it no
+insets (Jetpack Compose's AndroidView). While the stage lies under the status
+bar the status bar's icons are light — the stage is dark in every design — and
+the app's own come back when it leaves.
+
+**The face draws inside its view, on every call.** `GraineAvatarView` (and
+`GraineAvatarFace`, `GraineAvatarStage`) hosts the face itself: a native
+call's video, and for the voice bar's calls the engine's own view, moved into
+the avatar view while the face shows and back to its resting place when it
+stops (or the view leaves the screen). Anything the app draws above the
+avatar view — its own captions, buttons, the SDK's bar — draws over the face.
+The engine never leaves the window it was attached to for longer than the
+moment the view leaves it.
+
+It is one look on every design, because it sits on video: white ink on dark
+scrims, the brand's typeface, and the brand's colours only where they mean
+something (the component card, Call, End). Those FILLS — the LIVE mark, End,
+Decline, Call, Answer — come from the design's LIGHT look whatever the
+device's appearance: the dark look lightens its colours for text on dark
+surfaces, too pale for a filled pill or button carrying white.
+
+Bottom to top, filling the area it is given:
+
+1. **Backdrop** — `#111111`; the brand's picture of the agent centred on it
+   (the call screen's avatar: the logo on its plate, the glyph, or the
+   initial, 96 round), seen until the face's first frame and on a call
+   without a face.
+2. **The face** — the avatar view, edge to edge.
+3. **Top scrim** — from the top edge to 70 below the header: black at 60% at
+   the top to clear.
+4. **Header** — 22 in from each side, 8 below the safe area's top. When the
+   app passes `onClose`, a close control leads it: the `close` icon, 22,
+   white, in a 44 round touch target, 12 before the name ("Close"; it never
+   ends a call — the app decides what closing means). Leading:
+   the name, 21, the heading face at `weights.title`, white, one line; under
+   it 2 apart the role, 14, white at 86%, one line (none: no line). Trailing,
+   on the name's first line: while live, the LIVE mark — a pill (`#DC2626`
+   when the design has no `colors.danger`, padding 4 × 10, fully round) with a
+   6 white dot and "LIVE", 13, bold, letter-spacing 0.06 em, white — then 8
+   apart the clock (`stageClock`, from `startedAt`), 13, bold, monospaced
+   digits, white. Otherwise the stage's `status` words, 13, semibold, white
+   at 86%.
+5. **Bottom scrim** — from 120 above the caption's top to the bottom edge:
+   clear to black at 82% by a third of the way down, then 82%.
+6. **The bottom stack** — 18 in from each side, 28 above the safe area's
+   bottom, centred, at most 560 wide. Bottom up:
+   - **Buttons**, spread evenly across the row, in `controls` order:
+     `mute`, `chat`, `speaker` — 58 round, white at 18% (on: white at 92%
+     with the icon in `#111111`), icon 26 in white (`micOff` while muted,
+     `mic` otherwise; `chat`; `speaker`); `end` — 70 round, `call.endFill`
+     (else `colors.danger`, else `#DC2626`), icon `end` in white — and while a
+     call rings it is Decline in `call.declineFill`; `call` and `answer` — 70
+     round, `call.acceptFill` (else `colors.success`, else `#16A34A`), icon
+     `call` in white. A button not in `enabled` is drawn at 40% and does
+     nothing. VoiceOver / TalkBack: "Mute" / "Unmute", "Chat", "Speaker"
+     (with its on or off), the `endLabel` ("End call" for End), "Call",
+     "Answer".
+   - **The component** — 22 above the buttons: the SDK's own component card
+     (the renderer every surface uses, in the brand's look), when there is
+     one.
+   - **The caption** — 14 above the component (22 above the buttons with
+     none): the stage's `caption`, 18, medium, white, line height 1.38, at
+     most 3 lines (the start dropped first), in curly quotes. A customer's
+     line has "YOU" above it, 11, semibold, letter-spacing 0.06 em, white at
+     70%. A line still arriving (`final` false) is drawn at 75%.
+7. Every arrival rises 8 into place in the design's motion (none under
+   Reduce Motion), as the bar's caption does.
+
+Taps on the face itself do nothing; everything else in the app goes on as it
+was. The stage never ends a call on its own — it goes when the app takes it
+away, and a call outlives it (the voice bar's engine carries on in the
+window, voice-only).
+
 ## Icons
 
 The SDK's own icons — `mic`, `micOff`, `end`, `send`, `chat`, `call`, `chevron`,

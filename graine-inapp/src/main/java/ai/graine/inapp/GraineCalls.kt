@@ -262,6 +262,9 @@ class GraineCalls internal constructor(
     private var unwatchContext: (() -> Unit)? = null
     private var service = WeakReference<GraineCallService>(null)
     private var resumed = WeakReference<Activity>(null)
+
+    /** The app's screen in front now, for a native call the face stage places (GraineStage.call). */
+    internal val inFront: Activity? get() = resumed.get()
     /** The app's screen in front now, as the activities themselves say: the one resumed, if any. */
     private var front = WeakReference<Activity>(null)
     /** The call in progress was placed or answered from a notification's button: it waits for its service. */

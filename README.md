@@ -17,7 +17,7 @@ Integration guide: https://www.graine.ai/docs/in-app/android
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    implementation("ai.graine:inapp-android:0.15.3")
+    implementation("ai.graine:inapp-android:0.15.4")
 }
 ```
 
@@ -311,8 +311,8 @@ ring, the call screen or the outcomes.
 
 ```kotlin
 dependencies {
-    implementation("ai.graine:inapp-android:0.15.3")
-    implementation("ai.graine:inapp-android-rtc:0.15.3")   // same version as the SDK
+    implementation("ai.graine:inapp-android:0.15.4")
+    implementation("ai.graine:inapp-android-rtc:0.15.4")   // same version as the SDK
 }
 ```
 
@@ -442,7 +442,7 @@ turns away any other app. To **require a verified app**, add Play Integrity
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    implementation("ai.graine:inapp-android:0.15.3")
+    implementation("ai.graine:inapp-android:0.15.4")
     implementation("com.google.android.play:integrity:1.4.0")
 }
 ```
@@ -733,8 +733,8 @@ val stop = GraineAvatar.addListener { state -> agentFace.isVisible = state.shows
 `GraineAvatar.state.phase` is `OFF`, `AVAILABLE` (a face is ready: show your view) or `LIVE` (the face carries
 the voice); `reason` says why it is off — `busy`, `off`, `failed`, `stalled`, `unsupported`, …
 
-- **Assistant-bar calls** (`GraineVoice`) draw the face with the core SDK alone: the call's engine is laid over
-  your avatar view, in the same window.
+- **Assistant-bar calls** (`GraineVoice`) draw the face with the core SDK alone: the call's engine moves inside
+  your avatar view while the face shows, and back to its window when it stops or the view leaves the screen.
 - **Native calls** (`GraineCalls`) draw it with the WebRTC module: add `ai.graine:inapp-android-rtc`; a call on
   the voice socket says `unsupported` and stays voice-only. The SDK's own call screen draws the face when you
   opt in: `GraineInApp.get().calls.showsAvatar = true`.

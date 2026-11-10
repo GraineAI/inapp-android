@@ -213,6 +213,11 @@ interface GraineListener {
      * customer's line when they send it.
      */
     fun onChatMessage(role: Role, text: String, live: Boolean) {}
+    /**
+     * The voice bar's call muted or unmuted, or moved on or off the
+     * loudspeaker ([GraineVoice.muted], [GraineVoice.speaker]). New in 0.15.4.
+     */
+    fun onVoiceControls(muted: Boolean, speaker: Boolean) {}
 }
 
 /**
@@ -321,6 +326,17 @@ class GraineInApp private constructor(
      */
     val calls: GraineCalls get() = AppShared.calls(this)
 
+    /** The voice call exists (it is made when first read): the face stage reads it only then. */
+    internal val voiceMade: Boolean get() = voiceLazy.isInitialized()
+
+    /**
+     * THE FACE STAGE — everything [GraineAvatarStageView] draws over the
+     * agent's face, and what its buttons do, for a screen of your own over a
+     * [GraineAvatarView] (the face draws inside that view, beneath what you
+     * lay over it). See [GraineStage]. New in 0.15.4.
+     */
+    val stage: GraineStage by lazy { GraineStage(this) }
+
     private val chatLazy = lazy { GraineChat(this) }
 
     /**
@@ -417,8 +433,10 @@ class GraineInApp private constructor(
 
     /** Forget the retained component — answered, dismissed, or from a call that is over. */
     fun clearPendingWidget() {
+        val had = pendingWidget != null || loading != null
         pendingWidget = null
         loading = null
+        if (had) componentChanged()
     }
 
     /**
@@ -434,7 +452,20 @@ class GraineInApp private constructor(
     /** The hint of the component on its way, and when it came. */
     @Volatile private var loading: Pair<JSONObject, Long>? = null
 
-    internal fun widgetOnItsWay(hint: JSONObject) { loading = hint to widgetClock() }
+    internal fun widgetOnItsWay(hint: JSONObject) { loading = hint to widgetClock(); componentChanged() }
+
+    private val componentWatchers = CopyOnWriteArraySet<() -> Unit>()
+
+    /** The face stage, told when the component on show (or on its way) changes. Returns what stops it. */
+    internal fun onComponentChange(watch: () -> Unit): () -> Unit {
+        componentWatchers.add(watch)
+        return { componentWatchers.remove(watch) }
+    }
+
+    private fun componentChanged() = componentWatchers.forEach { runCatching { it() } }
+
+    /** Something the app should hear about, through [GraineListener.onError]. */
+    internal fun reportError(message: String) = listeners.forEach { runCatching { it.onError(message) } }
 
     /** The clock a loading component is timed on: the agent's scheduler's, else the uptime. */
     private fun widgetClock(): Long = env.scheduler?.now() ?: android.os.SystemClock.uptimeMillis()
@@ -458,6 +489,7 @@ class GraineInApp private constructor(
     internal fun retainWidget(widget: JSONObject) {
         pendingWidget = widget
         loading = null
+        componentChanged()
     }
 
     fun addListener(l: GraineListener) { listeners.add(l) }

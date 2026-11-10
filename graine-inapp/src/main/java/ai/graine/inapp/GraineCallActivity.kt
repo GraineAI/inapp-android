@@ -228,7 +228,11 @@ class GraineCallActivity : Activity(), GraineCallListener {
         lightBars = lightText
         if (Build.VERSION.SDK_INT >= 30) {
             val mask = android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
-            window.insetsController?.setSystemBarsAppearance(if (lightText) 0 else mask, mask)
+            // The decor's controller, never the window's: the face's listener answers at once, so with the face on the
+            // first render runs inside onCreate before setContentView, and the window's own getter dereferences a decor
+            // not made yet (a NullPointerException on Android 16). decorView makes the decor, and one not yet shown
+            // hands back a pending controller that applies this once the screen is up.
+            window.decorView.windowInsetsController?.setSystemBarsAppearance(if (lightText) 0 else mask, mask)
         }
     }
 

@@ -1,3 +1,22 @@
+## 0.15.4
+
+- **The face is drawn inside the avatar view.** On the voice bar's calls the agent's face now plays inside your
+  `GraineAvatarView`, under anything else in it, so whatever you lay over it (your transcript, your buttons, the SDK's
+  bar) is drawn over the face. Before, it was laid over the avatar view's place, above everything in the window. The
+  native call's face sits under the view's other children too. Nothing to change in your app.
+- **The face stage.** `GraineAvatarStageView`: the agent's face edge to edge with the call drawn over it — name and
+  role, LIVE and the call's duration, the line being said, the component the agent drew, and Call, Mute, Chat, End
+  (Cancel, Decline) and Speaker. `onChat` draws the Chat button, `onClose` a close control; neither ends a call.
+- **All of it is public state:** `GraineInApp.stage` (`GraineStage`, `GraineStageState`, `GraineStageListener`,
+  `GraineStageCall`, `GraineStagePhase`, `GraineStageControl`, `GraineStageCalls`, `GraineStageCaption`), and for
+  bridges `GraineStage.stateJson()`.
+- **The voice bar's loudspeaker:** `GraineVoice.speaker` and `setSpeaker(on)` (the loudspeaker, or a headset or the
+  earpiece, for the call; the next one starts on the loudspeaker again), `GraineVoice.startedAt`, when the call went
+  live, and `GraineListener.onVoiceControls(muted, speaker)`.
+- **The SDK's call screen opens on Android 16 with the agent's face on.** It set its status-bar colours before its
+  window was ready and closed at once; it now waits for the window. Nothing to change in your app.
+- `inapp-android-rtc` moves to 0.15.4 beside it: the two always share a version. Update both together.
+
 ## 0.15.3
 
 - **The brand's ring tone stops when the ring ends.** With a brand ring (`graine` or `soft`), a missed call could keep

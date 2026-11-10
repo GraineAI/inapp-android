@@ -542,19 +542,27 @@ internal object CallAvatar {
      * plate or fill in its shape, and its mark. A logo arrives later: the
      * bitmap without it now, and [ready] with it when it lands.
      */
-    fun bitmap(ctx: Context, t: ThemeTokens, call: CallTokens, logoUrl: String?, plate: LogoPlate, initial: String, ready: (Bitmap) -> Unit): Bitmap? {
+    fun bitmap(
+        ctx: Context, t: ThemeTokens, call: CallTokens, logoUrl: String?, plate: LogoPlate, initial: String,
+        ready: (Bitmap) -> Unit,
+    ): Bitmap? = bitmap(ctx, t, call, logoUrl, plate, initial, 96, ready)
+
+    /** At [side] pixels — the face stage draws it sharp at its own size. */
+    fun bitmap(
+        ctx: Context, t: ThemeTokens, call: CallTokens, logoUrl: String?, plate: LogoPlate, initial: String, side: Int,
+        ready: (Bitmap) -> Unit,
+    ): Bitmap? {
         val marks = markTokens(t, call, logoUrl)
         val logo = logo(call, logoUrl)
         val glyph = marks.icons.launcher
         if (glyph == null && logo != null) {
-            ImageLoader.fetch(logo) { img -> if (img != null) ready(draw(t, call, glyph, img, plate, initial)) }
+            ImageLoader.fetch(logo) { img -> if (img != null) ready(draw(t, call, glyph, img, plate, initial, side)) }
             return null
         }
-        return draw(t, call, glyph, null, plate, initial)
+        return draw(t, call, glyph, null, plate, initial, side)
     }
 
-    private fun draw(t: ThemeTokens, call: CallTokens, glyph: LauncherGlyph?, logo: Bitmap?, plate: LogoPlate, initial: String): Bitmap {
-        val side = 96
+    private fun draw(t: ThemeTokens, call: CallTokens, glyph: LauncherGlyph?, logo: Bitmap?, plate: LogoPlate, initial: String, side: Int = 96): Bitmap {
         val bmp = Bitmap.createBitmap(side, side, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
         val p = Paint(Paint.ANTI_ALIAS_FLAG)

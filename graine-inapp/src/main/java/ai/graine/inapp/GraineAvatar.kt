@@ -38,7 +38,7 @@ internal interface AvatarSurfaceListener {
  * as before.
  *
  *  - the assistant bar's calls: the face is drawn by the call's own engine,
- *    in the avatar view's place;
+ *    moved inside the avatar view while the face shows;
  *  - the SDK's native calls ([GraineCalls]): the face needs the WebRTC module
  *    (`ai.graine:inapp-android-rtc`) and a call on WebRTC; otherwise
  *    [state]'s reason is `unsupported` and the call stays voice-only.
@@ -172,6 +172,11 @@ object GraineAvatar {
  * has one. Transparent when there is none: put your own picture of the agent
  * behind it. Hiding it, or taking it off screen, gives the voice back to the
  * call at once. One on screen at a time is used: the last one shown.
+ *
+ * The face is drawn INSIDE this view, beneath everything else (0.15.4): views
+ * you add to it, or lay over it, draw over the face — your own captions,
+ * buttons, the SDK's bar. [GraineAvatarStageView] is the SDK's own screen
+ * drawn that way.
  */
 class GraineAvatarView @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null) : FrameLayout(context, attrs) {
     private var hosted: View? = null
@@ -190,6 +195,9 @@ class GraineAvatarView @JvmOverloads constructor(context: Context, attrs: Attrib
     }
 
     override fun onDetachedFromWindow() {
+        // Before anything else: the voice engine inside this view (the face) goes straight back to its window,
+        // so the call it carries is never left out of one. Its children are already detached here, which is
+        // what lets it be moved without detaching it twice.
         GraineAvatar.unregister(this)
         super.onDetachedFromWindow()
     }
@@ -210,14 +218,14 @@ class GraineAvatarView @JvmOverloads constructor(context: Context, attrs: Attrib
         if (was != alpha > 0.01f && isAttachedToWindow) GraineAvatar.slotsChanged()
     }
 
-    /** The native face's video view, or null. */
+    /** The native face's video view, or null — at the bottom, so whatever the app put in this view draws over the face. */
     internal fun host(view: View?) {
         if (hosted === view) return
         hosted?.let { if (it.parent === this) removeView(it) }
         hosted = view
         if (view == null) return
         (view.parent as? ViewGroup)?.removeView(view)
-        addView(view, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        addView(view, 0, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
 
     internal fun stateChanged(state: GraineAvatarState) {
